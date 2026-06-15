@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
+
+_SCHEMA_VERSION = 1
+
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -275,7 +279,20 @@ CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(job_id);
 CREATE INDEX IF NOT EXISTS idx_approval_records_workspace ON approval_records(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_source_lineage_trace ON source_lineage(trace_id);
 CREATE INDEX IF NOT EXISTS idx_context_items_trace ON context_items(trace_id);
+
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO schema_version (version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 """
+
+
+_MIGRATIONS: dict[int, str] = {}
+
+
+def register_migration(version: int, sql: str) -> None:
+    _MIGRATIONS[version] = sql
 
 
 class Database:
@@ -295,3 +312,54 @@ class Database:
 
     def close(self) -> None:
         self._conn.close()
+
+    def current_version(self) -> int:
+        cur = self._conn.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version"
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def migrate(self) -> list[int]:
+        applied: list[int] = []
+        current = self.current_version()
+        pending = sorted(v for v in _MIGRATIONS if v > current)
+        for version in pending:
+            sql = _MIGRATIONS[version]
+            self._conn.executescript(sql)
+            self._conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?)",
+                (version,),
+            )
+            self._conn.commit()
+            applied.append(version)
+        return applied
+
+    def export_workspace(self, workspace_id: str) -> dict[str, Any]:
+        data: dict[str, Any] = {"workspace_id": workspace_id}
+        tables = [
+            "sessions", "messages", "memories",
+            "file_artifacts", "memory_candidates", "traces", "spans",
+            "tool_calls", "model_calls", "audit_logs", "source_lineage",
+            "context_items", "approval_records", "workspace_settings",
+            "scheduled_jobs", "notifications",
+            "workspace_skills", "skill_run_logs",
+        ]
+        for table in tables:
+            try:
+                cur = self._conn.execute(
+                    f"SELECT * FROM {table} WHERE workspace_id = ?",  # noqa: S608
+                    (workspace_id,),
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+                if rows:
+                    data[table] = rows
+            except Exception:
+                pass
+        cur = self._conn.execute(
+            "SELECT * FROM workspaces WHERE id = ?", (workspace_id,)
+        )
+        ws_row = cur.fetchone()
+        if ws_row:
+            data["workspace"] = dict(ws_row)
+        return data

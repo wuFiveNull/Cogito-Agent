@@ -50,6 +50,76 @@ class WorkspaceRepository:
         )
         self._db.connection.commit()
 
+    def hard_delete(self, wid: str) -> bool:
+        cur = self._db.connection.execute(
+            "SELECT id FROM workspaces WHERE id = ?", (wid,)
+        )
+        if cur.fetchone() is None:
+            return False
+        tables = [
+            "notifications", "scheduled_jobs", "approval_records",
+            "workspace_settings", "context_items", "source_lineage",
+            "audit_logs", "model_calls", "tool_calls", "spans", "traces",
+            "workspace_skills", "skill_run_logs",
+            "memory_candidates", "file_artifacts",
+        ]
+        msgs = self._db.connection.execute(
+            "SELECT id FROM messages WHERE workspace_id = ?", (wid,)
+        )
+        for row in msgs.fetchall():
+            self._db.connection.execute(
+                "DELETE FROM source_lineage WHERE source_id = ?", (row["id"],)
+            )
+        self._db.connection.execute(
+            "DELETE FROM messages WHERE workspace_id = ?", (wid,)
+        )
+        sessions = self._db.connection.execute(
+            "SELECT id FROM sessions WHERE workspace_id = ?", (wid,)
+        )
+        for row in sessions.fetchall():
+            sid = row["id"]
+            self._db.connection.execute(
+                "DELETE FROM source_lineage WHERE trace_id IN"
+                " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
+            )
+            self._db.connection.execute(
+                "DELETE FROM traces WHERE session_id = ?", (sid,)
+            )
+        self._db.connection.execute(
+            "DELETE FROM sessions WHERE workspace_id = ?", (wid,)
+        )
+        memories = self._db.connection.execute(
+            "SELECT id FROM memories WHERE workspace_id = ?", (wid,)
+        )
+        for row in memories.fetchall():
+            mid = row["id"]
+            self._db.connection.execute(
+                "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
+            )
+            cur2 = self._db.connection.execute(
+                "SELECT rowid FROM memories WHERE id = ?", (mid,)
+            )
+            r = cur2.fetchone()
+            if r:
+                self._db.connection.execute(
+                    "DELETE FROM memories_fts WHERE rowid = ?", (r["rowid"],)
+                )
+        self._db.connection.execute(
+            "DELETE FROM memories WHERE workspace_id = ?", (wid,)
+        )
+        for table in tables:
+            try:
+                self._db.connection.execute(
+                    f"DELETE FROM {table} WHERE workspace_id = ?", (wid,)  # noqa: S608
+                )
+            except Exception:
+                pass
+        self._db.connection.execute(
+            "DELETE FROM workspaces WHERE id = ?", (wid,)
+        )
+        self._db.connection.commit()
+        return True
+
 
 class SessionRepository:
     def __init__(self, db: Database) -> None:
@@ -93,6 +163,31 @@ class SessionRepository:
             (sid, workspace_id),
         )
         self._db.connection.commit()
+
+    def hard_delete(self, sid: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "SELECT id FROM sessions WHERE id = ? AND workspace_id = ?",
+            (sid, workspace_id),
+        )
+        if cur.fetchone() is None:
+            return False
+        self._db.connection.execute(
+            "DELETE FROM messages WHERE session_id = ? AND workspace_id = ?",
+            (sid, workspace_id),
+        )
+        self._db.connection.execute(
+            "DELETE FROM traces WHERE session_id = ?", (sid,)
+        )
+        self._db.connection.execute(
+            "DELETE FROM source_lineage WHERE trace_id IN"
+            " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
+        )
+        self._db.connection.execute(
+            "DELETE FROM sessions WHERE id = ? AND workspace_id = ?",
+            (sid, workspace_id),
+        )
+        self._db.connection.commit()
+        return True
 
 
 class MessageRepository:
@@ -150,6 +245,16 @@ class MessageRepository:
         )
         self._db.connection.execute(sql, (session_id, workspace_id))
         self._db.connection.commit()
+
+    def hard_delete_by_session(
+        self, session_id: str, workspace_id: str
+    ) -> int:
+        cur = self._db.connection.execute(
+            "DELETE FROM messages WHERE session_id = ? AND workspace_id = ?",
+            (session_id, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount
 
 
 class MemoryRepository:
@@ -379,6 +484,14 @@ class FileArtifactRepository:
         )
         self._db.connection.execute(sql, (fid, workspace_id))
         self._db.connection.commit()
+
+    def hard_delete(self, fid: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "DELETE FROM file_artifacts WHERE id = ? AND workspace_id = ?",
+            (fid, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
 
 
 class MemoryEditRepository:
