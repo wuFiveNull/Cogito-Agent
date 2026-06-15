@@ -99,3 +99,158 @@ class DriftRuntime:
                 drift_event.callback(result)
             except Exception:
                 pass
+
+
+class DriftMaintenance:
+    """Background maintenance tasks: dedup, archival, FTS refresh, trace cleanup, usage reports."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def consolidate_memories(self, workspace_id: str | None = None) -> int:
+        """Deduplicate memories with identical text in the same workspace."""
+        if workspace_id:
+            rows = self._db.connection.execute(
+                "SELECT id, text, workspace_id, rowid FROM memories"
+                " WHERE deleted_at IS NULL AND workspace_id = ?"
+                " ORDER BY text, created_at ASC", (workspace_id,)
+            ).fetchall()
+        else:
+            rows = self._db.connection.execute(
+                "SELECT id, text, workspace_id, rowid FROM memories"
+                " WHERE deleted_at IS NULL"
+                " ORDER BY text, created_at ASC"
+            ).fetchall()
+        removed = 0
+        seen: dict[str, list[dict[str, object]]] = {}
+        for r in rows:
+            text = str(r["text"])
+            if text not in seen:
+                seen[text] = [dict(r)]
+            else:
+                seen[text].append(dict(r))
+        for text, group in seen.items():
+            if len(group) <= 1:
+                continue
+            for dup in group[1:]:
+                mid = dup["id"]
+                wid = str(dup["workspace_id"])
+                rowid = dup["rowid"]
+                self._db.connection.execute(
+                    "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
+                )
+                self._db.connection.execute(
+                    "DELETE FROM memories WHERE id = ? AND workspace_id = ?",
+                    (mid, wid),
+                )
+                removed += 1
+        if removed:
+            self._db.connection.commit()
+        return removed
+
+    def archive_stale_memories(self, days: int = 30) -> int:
+        """Mark memories older than *days* with status='stale'."""
+        import uuid
+        stale = self._db.connection.execute(
+            "SELECT id, workspace_id, type, text, summary, confidence,"
+            " sensitivity, source_id FROM memories"
+            " WHERE deleted_at IS NULL AND status != 'stale'"
+            " AND created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        ).fetchall()
+        archived = 0
+        for row in stale:
+            mid = str(uuid.uuid4())
+            self._db.connection.execute(
+                "INSERT INTO memories"
+                " (id, workspace_id, type, status, text, summary, confidence,"
+                " sensitivity, source_id, created_at, updated_at)"
+                " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?,"
+                " datetime('now'), datetime('now'))",
+                (
+                    mid, row["workspace_id"], row["type"],
+                    row["text"], row["summary"],
+                    row["confidence"], row["sensitivity"],
+                    row["source_id"],
+                ),
+            )
+            archived += 1
+        if archived:
+            self._db.connection.commit()
+        return archived
+
+    def refresh_fts(self) -> int:
+        """Rebuild memory FTS index."""
+        self._db.connection.execute(
+            "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')"
+        )
+        self._db.connection.commit()
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) as cnt FROM memories_fts"
+        )
+        return int(cur.fetchone()["cnt"])
+
+    def cleanup_traces(self, days: int = 90) -> dict[str, int]:
+        """Delete traces older than *days* and their child records."""
+        old_traces = self._db.connection.execute(
+            "SELECT id FROM traces"
+            " WHERE started_at < datetime('now', ?)",
+            (f"-{days} days",),
+        ).fetchall()
+        trace_ids = [r["id"] for r in old_traces]
+        if not trace_ids:
+            return {"traces": 0, "spans": 0, "tool_calls": 0, "model_calls": 0}
+        placeholders = ",".join("?" for _ in trace_ids)
+        tables = ["spans", "tool_calls", "model_calls",
+                  "source_lineage", "context_items"]
+        counts: dict[str, int] = {"traces": len(trace_ids)}
+        for table in tables:
+            cur = self._db.connection.execute(
+                f"DELETE FROM {table} WHERE trace_id IN ({placeholders})",  # noqa: S608
+                trace_ids,
+            )
+            counts[table] = cur.rowcount
+        cur = self._db.connection.execute(
+            f"DELETE FROM traces WHERE id IN ({placeholders})",  # noqa: S608
+            trace_ids,
+        )
+        self._db.connection.commit()
+        return counts
+
+    def usage_report(self, workspace_id: str | None = None) -> dict[str, object]:
+        """Return aggregate usage statistics."""
+        ws_filter = "WHERE workspace_id = ?" if workspace_id else ""
+        params = (workspace_id,) if workspace_id else ()
+
+        msg_count = self._db.connection.execute(
+            f"SELECT COUNT(*) FROM messages {ws_filter}", params
+        ).fetchone()[0]
+        mem_count = self._db.connection.execute(
+            f"SELECT COUNT(*) FROM memories"
+            f" {ws_filter} AND deleted_at IS NULL AND status != 'stale'", params
+        ).fetchone()[0]
+        trace_count = self._db.connection.execute(
+            f"SELECT COUNT(*) FROM traces {ws_filter}", params
+        ).fetchone()[0]
+        if workspace_id:
+            tool_count = self._db.connection.execute(
+                "SELECT COUNT(*) FROM tool_calls tc"
+                " JOIN traces t ON tc.trace_id = t.id"
+                " WHERE t.workspace_id = ?", (workspace_id,)
+            ).fetchone()[0]
+        else:
+            tool_count = self._db.connection.execute(
+                "SELECT COUNT(*) FROM tool_calls"
+            ).fetchone()[0]
+        audit_count = self._db.connection.execute(
+            f"SELECT COUNT(*) FROM audit_logs {ws_filter}", params
+        ).fetchone()[0]
+
+        return {
+            "workspace_id": workspace_id or "*",
+            "messages": int(msg_count),
+            "memories": int(mem_count),
+            "traces": int(trace_count),
+            "tool_calls": int(tool_count),
+            "audit_logs": int(audit_count),
+        }

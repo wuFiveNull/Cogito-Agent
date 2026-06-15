@@ -13,8 +13,8 @@ All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–
 - ✅ Phase 5 (Epic K): Capability safety — path sandboxing, JSON Schema validation, full ToolResult
 - ✅ Phase 5 (Epic L): Storage completeness — hard delete, full export, migration system
 - ✅ Phase 5 (Epics K–L): Capability safety (path sandboxing, JSON Schema), storage completeness (hard delete, export, migration)
-- ❌ Phase 6 (Epics M–P): CLI polish, config files, context ranking/trimming
-- ❌ Phase 7 (Epics Q–S): Error handling, documentation, E2E tests
+- ✅ Phase 6 (Epics M–P): Skill runtime depth, background security, failure/retry, interrupt/resume
+- ❌ Phase 7 (Epics Q–S): Drift maintenance, CLI/API polish, replay
 
 ## V2 Status
 
