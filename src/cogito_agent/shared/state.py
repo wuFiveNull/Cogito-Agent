@@ -23,27 +23,35 @@ class TurnState(StrEnum):
 
 
 _TRANSITIONS: dict[TurnState, set[TurnState]] = {
-    TurnState.received: {TurnState.loading_session, TurnState.failed},
-    TurnState.loading_session: {TurnState.building_context, TurnState.failed},
-    TurnState.building_context: {TurnState.awaiting_model, TurnState.failed},
+    TurnState.received: {TurnState.loading_session, TurnState.failed, TurnState.interrupted},
+    TurnState.loading_session: {
+        TurnState.building_context, TurnState.failed, TurnState.interrupted,
+    },
+    TurnState.building_context: {TurnState.awaiting_model, TurnState.failed, TurnState.interrupted},
     TurnState.awaiting_model: {
-        TurnState.evaluating_result, TurnState.calling_tool, TurnState.failed,
+        TurnState.evaluating_result, TurnState.calling_tool,
+        TurnState.failed, TurnState.interrupted,
     },
     TurnState.calling_tool: {
         TurnState.awaiting_approval, TurnState.evaluating_result,
-        TurnState.retrying, TurnState.failed,
+        TurnState.retrying, TurnState.failed, TurnState.interrupted,
     },
     TurnState.awaiting_approval: {TurnState.calling_tool, TurnState.denied, TurnState.interrupted},
     TurnState.evaluating_result: {
         TurnState.composing_result, TurnState.awaiting_model,
-        TurnState.calling_tool, TurnState.failed,
+        TurnState.calling_tool, TurnState.failed, TurnState.interrupted,
     },
-    TurnState.composing_result: {TurnState.persisting, TurnState.failed},
-    TurnState.persisting: {TurnState.completed, TurnState.failed},
-    TurnState.retrying: {TurnState.awaiting_model, TurnState.calling_tool, TurnState.failed},
-    TurnState.interrupted: {TurnState.resuming, TurnState.cancelled},
+    TurnState.composing_result: {TurnState.persisting, TurnState.failed, TurnState.interrupted},
+    TurnState.persisting: {TurnState.completed, TurnState.failed, TurnState.interrupted},
+    TurnState.retrying: {
+        TurnState.awaiting_model, TurnState.calling_tool,
+        TurnState.failed, TurnState.interrupted,
+    },
+    TurnState.interrupted: {TurnState.resuming, TurnState.cancelled, TurnState.failed},
     TurnState.resuming: {
-        TurnState.building_context, TurnState.calling_tool, TurnState.awaiting_model,
+        TurnState.loading_session, TurnState.building_context,
+        TurnState.calling_tool, TurnState.awaiting_model,
+        TurnState.failed,
     },
     TurnState.completed: set(),
     TurnState.failed: set(),

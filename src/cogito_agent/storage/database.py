@@ -280,6 +280,14 @@ CREATE INDEX IF NOT EXISTS idx_approval_records_workspace ON approval_records(wo
 CREATE INDEX IF NOT EXISTS idx_source_lineage_trace ON source_lineage(trace_id);
 CREATE INDEX IF NOT EXISTS idx_context_items_trace ON context_items(trace_id);
 
+CREATE TABLE IF NOT EXISTS interrupted_turns (
+    event_json TEXT NOT NULL,
+    turn_state TEXT NOT NULL,
+    model_call_count INTEGER NOT NULL DEFAULT 0,
+    tool_call_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))

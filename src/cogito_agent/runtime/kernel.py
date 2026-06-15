@@ -214,6 +214,26 @@ class RuntimeKernel:
         span.output_summary = f"state={result.state.value}, error={result.error}"
         return result
 
+    def interrupt(self, event: RuntimeEvent) -> None:
+        self._sm.transition(TurnState.interrupted)
+        self._db.connection.execute(
+            "INSERT INTO interrupted_turns"
+            " (event_json, turn_state, model_call_count, tool_call_count)"
+            " VALUES (?, ?, ?, ?)",
+            (
+                event.model_dump_json(),
+                self._sm.state.value,
+                self._model_call_count,
+                self._tool_call_count,
+            ),
+        )
+        self._db.connection.commit()
+
+    def resume(self, event: RuntimeEvent) -> TurnResult:
+        self._sm.transition(TurnState.resuming)
+        self._start_time = datetime.now(UTC)
+        return self.process(event)
+
     def _transition(self, target: TurnState) -> None:
         self._sm.transition(target)
 
