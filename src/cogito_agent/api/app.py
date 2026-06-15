@@ -251,6 +251,45 @@ def remove_mcp_server(name: str) -> dict[str, str]:
     return {"status": "removed", "name": name}
 
 
+# --- Workspace management ---
+
+
+@app.get("/workspaces")
+def list_workspaces() -> list[dict[str, object]]:
+    db = get_db()
+    repo = WorkspaceRepository(db)
+    return repo.list_all()
+
+
+@app.post("/workspaces")
+def create_workspace(name: str) -> dict[str, object]:
+    db = get_db()
+    repo = WorkspaceRepository(db)
+    wid = str(uuid.uuid4())
+    return repo.create(wid, name)
+
+
+@app.get("/workspaces/{wid}")
+def get_workspace(wid: str) -> dict[str, object]:
+    db = get_db()
+    repo = WorkspaceRepository(db)
+    ws = repo.get_by_id(wid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return ws
+
+
+@app.delete("/workspaces/{wid}")
+def delete_workspace(wid: str) -> dict[str, str]:
+    db = get_db()
+    repo = WorkspaceRepository(db)
+    ws = repo.get_by_id(wid)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    repo.soft_delete(wid)
+    return {"status": "deleted"}
+
+
 # --- Memory endpoints ---
 
 @app.get("/memories")

@@ -276,3 +276,45 @@ def test_export_workspace_not_found(client: TestClient) -> None:
 def test_cleanup_workspace(client: TestClient) -> None:
     resp = client.post("/workspaces/ws-1/cleanup")
     assert resp.status_code == 200
+
+
+def test_list_workspaces(client: TestClient) -> None:
+    _setup(client)
+    resp = client.get("/workspaces")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_create_workspace(client: TestClient) -> None:
+    resp = client.post("/workspaces", params={"name": "My Workspace"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "My Workspace"
+
+
+def test_get_workspace(client: TestClient) -> None:
+    resp = client.get("/workspaces/ws-1")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "ws-1"
+
+
+def test_get_workspace_not_found(client: TestClient) -> None:
+    resp = client.get("/workspaces/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_delete_workspace(client: TestClient) -> None:
+    client.post("/workspaces", params={"name": "Temp"})
+    created = client.get("/workspaces").json()
+    target = next((w for w in created if w["name"] == "Temp"), None)
+    assert target is not None
+    wid = target["id"]
+    resp = client.delete(f"/workspaces/{wid}")
+    assert resp.status_code == 200
+    resp = client.get(f"/workspaces/{wid}")
+    assert resp.status_code == 404
+
+
+def test_delete_nonexistent_workspace(client: TestClient) -> None:
+    resp = client.delete("/workspaces/nonexistent")
+    assert resp.status_code == 404

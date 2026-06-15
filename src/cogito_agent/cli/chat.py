@@ -15,12 +15,13 @@ def run_cli(db_path: str = ":memory:") -> None:
     db.initialize()
 
     ws_repo = WorkspaceRepository(db)
-    ws = ws_repo.create("default", "Default Workspace")
-    workspace_id = str(ws["id"]) if not isinstance(ws["id"], str) else ws["id"]
-
-    sess_repo = SessionRepository(db)
-    sess = sess_repo.create(str(uuid.uuid4()), workspace_id, "CLI Session")
-    session_id = str(sess["id"]) if not isinstance(sess["id"], str) else sess["id"]
+    ws_list = ws_repo.list_all()
+    if ws_list:
+        workspace_id = str(ws_list[0]["id"])
+    else:
+        ws = ws_repo.create("default", "Default Workspace")
+        workspace_id = str(ws["id"])
+    session_id = _ensure_session(db, workspace_id)
 
     kernel = RuntimeKernel(db)
 
@@ -39,7 +40,7 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() in ("exit", "quit", "/exit"):
             break
         if user_input.lower() == "/help":
-            print("Commands: exit, /help, /memory list, /memory edit, /memory delete, /approvals, /approve, /deny, /skill list, /skill run, /stream, /provider, /export, /ws settings")  # noqa: E501
+            print("Commands: exit, /help, /ws list, /ws switch, /ws create, /ws delete, /memory list, /memory edit, /memory delete, /approvals, /approve, /deny, /skill list, /skill run, /stream, /provider, /export, /ws settings")  # noqa: E501
             continue
         if user_input.lower() == "/provider":
             provs = list_providers()
@@ -80,6 +81,38 @@ def run_cli(db_path: str = ":memory:") -> None:
             continue
         if user_input.lower() == "/export":
             _export_workspace(db, workspace_id)
+            continue
+        if user_input.lower() == "/ws list":
+            _list_workspaces(db)
+            continue
+        if user_input.lower().startswith("/ws switch "):
+            new_ws = _switch_workspace(db, user_input[11:].strip())
+            if new_ws:
+                workspace_id = new_ws
+                session_id = _ensure_session(db, workspace_id)
+                print(f"Switched to workspace: {workspace_id}")
+            continue
+        if user_input.lower().startswith("/ws create "):
+            ws_repo = WorkspaceRepository(db)
+            name = user_input[11:].strip()
+            ws = ws_repo.create(str(uuid.uuid4()), name)
+            nid = str(ws["id"])
+            print(f"Created workspace: {nid} ({name})")
+            workspace_id = nid
+            session_id = _ensure_session(db, workspace_id)
+            continue
+        if user_input.lower().startswith("/ws delete "):
+            ws_repo = WorkspaceRepository(db)
+            target = user_input[11:].strip()
+            w = ws_repo.get_by_id(target)
+            if w is None:
+                print(f"Workspace '{target}' not found.")
+                continue
+            if target == workspace_id:
+                print("Cannot delete current workspace. Switch first.")
+                continue
+            ws_repo.soft_delete(target)
+            print(f"Deleted workspace: {target}")
             continue
         if user_input.lower() == "/ws settings":
             _show_workspace_settings(db, workspace_id)
@@ -317,6 +350,37 @@ def _show_workspace_settings(db: Database, workspace_id: str) -> None:
     settings = repo.get(workspace_id)
     for k, v in settings.items():
         print(f"  {k}: {v}")
+
+
+def _ensure_session(db: Database, workspace_id: str) -> str:
+    repo = SessionRepository(db)
+    existing = repo.list_by_workspace(workspace_id)
+    if existing:
+        return str(existing[0]["id"])
+    sess = repo.create(str(uuid.uuid4()), workspace_id, "CLI Session")
+    return str(sess["id"])
+
+
+def _list_workspaces(db: Database) -> None:
+    repo = WorkspaceRepository(db)
+    workspaces = repo.list_all()
+    if not workspaces:
+        print("No workspaces.")
+        return
+    print(f"\nWorkspaces ({len(workspaces)}):")
+    for w in workspaces:
+        wid = str(w.get("id", ""))
+        name = str(w.get("name", ""))
+        print(f"  {wid}  ({name})")
+
+
+def _switch_workspace(db: Database, target: str) -> str | None:
+    repo = WorkspaceRepository(db)
+    ws = repo.get_by_id(target)
+    if ws is None:
+        print(f"Workspace '{target}' not found. Use /ws list to see available workspaces.")
+        return None
+    return target
 
 
 def _handle_deny(db: Database, prefix: str) -> None:
