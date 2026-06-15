@@ -2,7 +2,17 @@
 
 ## State of the Repo
 
-This repo currently has **no code** — only documentation (`docs/01`–`06`) and a Chinese architecture doc. No `pyproject.toml`, no package config. First task is Epic 1 (project bootstrap).
+All V1 MVP epics (1–14) and most V2 items are complete. See session summary for details.
+
+## V2 Status
+
+- ✅ Vector retrieval (hybrid BM25 + semantic)
+- ✅ Multi-workspace management
+- ✅ Proactive loop (ProactiveEngine + cogito-daemon)
+- ✅ Drift runtime (ThreadPoolExecutor async event processing)
+- ✅ Subagents (fork/run/merge lifecycle)
+- ✅ MCP dynamic registration (discovery, health check, sync)
+- ❌ Cloud migration adapters — **deprioritized** (not planned for now)
 
 ## Project Purpose
 

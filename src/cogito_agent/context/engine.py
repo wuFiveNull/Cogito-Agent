@@ -79,7 +79,27 @@ class ContextEngine:
         return items
 
     def _apply_budget_shares(self, items: list[ContextItem]) -> list[ContextItem]:
+        budgets: dict[str, int] = {}
+        for source_type, share in BUDGET_SHARES.items():
+            budgets[source_type] = max(64, int(self._budget * share))
+        for item in items:
+            cat = self._category_for_source(item.source_type)
+            if cat in budgets and item.token_estimate > budgets[cat]:
+                item.included = False
+                item.reason = f"exceeded_{cat}_budget"
         return items
+
+    def _category_for_source(self, source_type: str) -> str:
+        mapping = {
+            "current_message": "system",
+            "message": "recent_messages",
+            "memory": "retrieved_memory",
+            "tool": "tool_file_context",
+            "file": "tool_file_context",
+            "skill": "tool_file_context",
+            "system": "system",
+        }
+        return mapping.get(source_type, "recent_messages")
 
     def _trim(self, items: list[ContextItem]) -> list[ContextItem]:
         total_tokens = sum(i.token_estimate for i in items if i.included)

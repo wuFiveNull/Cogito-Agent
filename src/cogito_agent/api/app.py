@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import get_adapter, list_providers
 from cogito_agent.runtime import RuntimeKernel
@@ -252,7 +253,11 @@ def remove_mcp_server(name: str) -> dict[str, str]:
 @app.post("/mcp/sync")
 def sync_mcp_servers() -> dict[str, object]:
     result = get_mcp_manager().sync()
-    return {"status": "ok", "discovered": result["discovered"], "reconnected": result["reconnected"]}
+    return {
+        "status": "ok",
+        "discovered": result["discovered"],
+        "reconnected": result["reconnected"],
+    }
 
 
 @app.get("/mcp/discover")

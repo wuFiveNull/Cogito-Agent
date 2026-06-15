@@ -32,6 +32,10 @@ class PolicyRule:
 
 class PolicyEngine:
     MVP_MATRIX: list[PolicyRule] = [
+        PolicyRule("*", "call_model", "*",
+                   DecisionType.allow),
+        PolicyRule("*", "tool", "*",
+                   DecisionType.allow),
         PolicyRule("user", "read", "interactive",
                    DecisionType.allow_with_audit, resource="workspace_file"),
         PolicyRule("assistant", "write", "interactive",
@@ -42,6 +46,8 @@ class PolicyEngine:
                    DecisionType.allow, resource="memory"),
         PolicyRule("assistant", "write", "interactive",
                    DecisionType.require_approval, resource="memory"),
+        PolicyRule("assistant", "write", "interactive",
+                   DecisionType.allow_with_audit, resource="trace_log"),
         PolicyRule("skill", "call", "background",
                    DecisionType.deny, resource="network"),
         PolicyRule("scheduler", "notify", "quiet_hours",
