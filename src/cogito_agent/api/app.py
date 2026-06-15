@@ -8,9 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-
-from cogito_agent.mcp import MCPServerConfig
-from cogito_agent.mcp.manager import MCPServerManager
+from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import get_adapter, list_providers
 from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
@@ -249,6 +247,20 @@ def add_mcp_server(config: MCPServerConfig) -> dict[str, str]:
 def remove_mcp_server(name: str) -> dict[str, str]:
     get_mcp_manager().remove_server(name)
     return {"status": "removed", "name": name}
+
+
+@app.post("/mcp/sync")
+def sync_mcp_servers() -> dict[str, object]:
+    result = get_mcp_manager().sync()
+    return {"status": "ok", "discovered": result["discovered"], "reconnected": result["reconnected"]}
+
+
+@app.get("/mcp/discover")
+def discover_mcp_configs(config_dir: str) -> list[dict[str, object]]:
+    from cogito_agent.mcp import MCPServerConfig
+
+    configs = MCPServerConfig.load_from_directory(config_dir)
+    return [c.model_dump() for c in configs]
 
 
 # --- Workspace management ---

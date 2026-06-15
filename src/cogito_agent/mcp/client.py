@@ -52,6 +52,15 @@ class MCPClient:
     def tools(self) -> list[dict[str, Any]]:
         return list(self._tools)
 
+    def is_connected(self) -> bool:
+        return self._process is not None and self._process.poll() is None
+
+    def ping(self) -> bool:
+        if not self.is_connected():
+            return False
+        resp = self._send_request("ping", {})
+        return resp is not None and "result" in resp
+
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         resp = self._send_request("tools/call", {
             "name": name,

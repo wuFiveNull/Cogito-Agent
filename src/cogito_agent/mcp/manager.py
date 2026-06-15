@@ -14,6 +14,7 @@ class MCPServerManager:
     def __init__(self, capability_registry: CapabilityRegistry) -> None:
         self._clients: dict[str, MCPClient] = {}
         self._cap_reg = capability_registry
+        self._config_dir: str | None = None
 
     def add_server(self, config: MCPServerConfig) -> None:
         client = MCPClient(config)
@@ -47,12 +48,43 @@ class MCPServerManager:
         if client:
             client.disconnect()
 
+    def set_config_dir(self, directory: str) -> None:
+        self._config_dir = directory
+
+    def sync(self) -> dict[str, list[str]]:
+        discovered: list[str] = []
+        reconnected: list[str] = []
+        if self._config_dir:
+            configs = MCPServerConfig.load_from_directory(self._config_dir)
+            for cfg in configs:
+                if not cfg.enabled:
+                    if cfg.name in self._clients:
+                        self.remove_server(cfg.name)
+                    continue
+                existing = self._clients.get(cfg.name)
+                if existing is None:
+                    try:
+                        self.add_server(cfg)
+                        discovered.append(cfg.name)
+                    except Exception:
+                        pass
+                elif not existing.is_connected():
+                    try:
+                        existing.disconnect()
+                        existing = MCPClient(cfg)
+                        existing.connect()
+                        self._clients[cfg.name] = existing
+                        reconnected.append(cfg.name)
+                    except Exception:
+                        pass
+        return {"discovered": discovered, "reconnected": reconnected}
+
     def list_servers(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": name,
                 "tools": client.tools,
-                "connected": client._process is not None,
+                "connected": client.is_connected(),
             }
             for name, client in self._clients.items()
         ]

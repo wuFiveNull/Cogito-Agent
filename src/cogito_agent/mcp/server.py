@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from pydantic import BaseModel
 
 
@@ -9,3 +12,23 @@ class MCPServerConfig(BaseModel):
     args: list[str] = []
     env: dict[str, str] = {}
     enabled: bool = True
+
+    @classmethod
+    def load_from_directory(cls, directory: str) -> list[MCPServerConfig]:
+        configs: list[MCPServerConfig] = []
+        path = Path(directory)
+        if not path.is_dir():
+            return configs
+        for entry in sorted(path.iterdir()):
+            if entry.suffix not in (".json",):
+                continue
+            try:
+                data = json.loads(entry.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    for item in data:
+                        configs.append(cls(**item))
+                else:
+                    configs.append(cls(**data))
+            except Exception:
+                continue
+        return configs
