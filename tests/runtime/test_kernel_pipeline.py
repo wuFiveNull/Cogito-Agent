@@ -255,3 +255,83 @@ def test_pipeline_sources_in_result(db: Database) -> None:
     assert result.state == TurnState.completed
     assert len(result.sources) >= 1
     assert any(s.get("type") == "current_message" for s in result.sources)
+
+
+def test_tool_retry_on_failure(db: Database) -> None:
+    _setup(db)
+    call_count = [0]
+
+    def flaky_invoke(**kwargs: object) -> ToolResult:
+        call_count[0] += 1
+        if call_count[0] < 3:
+            raise RuntimeError("transient failure")
+        return ToolResult(status="ok", summary="success on retry")
+
+    cap_reg = CapabilityRegistry()
+    cap_reg.register(
+        "flaky_tool",
+        CapabilityManifest(
+            name="flaky_tool", version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={"type": "object", "properties": {}, "required": []},
+            output_schema={"type": "object"},
+            permissions=[],
+            risk_level=RiskLevel.low,
+            allowed_contexts=["interactive"],
+            approval_required=False,
+            audit_required=False,
+            idempotent=True,
+        ),
+        flaky_invoke,
+    )
+    adapter = MagicMock(spec=ModelAdapter)
+    adapter.chat.return_value = ModelResponse(
+        content="", tool_intents=[{"name": "flaky_tool", "arguments": {}}],
+    )
+    kernel = RuntimeKernel(
+        db, model_adapter=adapter, capability_registry=cap_reg,
+    )
+    result = kernel.process(_make_event())
+    # Should succeed after retry
+    assert result.state == TurnState.completed
+
+
+def test_tool_retry_not_idempotent_skipped(db: Database) -> None:
+    _setup(db)
+    call_count = [0]
+
+    def flaky_invoke(**kwargs: object) -> ToolResult:
+        call_count[0] += 1
+        raise RuntimeError("always fails")
+
+    cap_reg = CapabilityRegistry()
+    cap_reg.register(
+        "non_idempotent_tool",
+        CapabilityManifest(
+            name="non_idempotent_tool", version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={"type": "object", "properties": {}, "required": []},
+            output_schema={"type": "object"},
+            permissions=[],
+            risk_level=RiskLevel.low,
+            allowed_contexts=["interactive"],
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
+        ),
+        flaky_invoke,
+    )
+    adapter = MagicMock(spec=ModelAdapter)
+    adapter.chat.return_value = ModelResponse(
+        content="",
+        tool_intents=[{"name": "non_idempotent_tool", "arguments": {}}],
+    )
+    kernel = RuntimeKernel(
+        db, model_adapter=adapter, capability_registry=cap_reg,
+    )
+    result = kernel.process(_make_event())
+    # Should fail without retry (only 1 attempt since not idempotent)
+    assert result.state == TurnState.failed
+    assert call_count[0] == 1

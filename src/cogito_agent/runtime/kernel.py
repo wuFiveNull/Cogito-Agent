@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.context import ContextEngine, ContextItem
@@ -93,6 +95,23 @@ class RuntimeKernel:
     @property
     def state(self) -> TurnState:
         return self._sm.state
+
+    @staticmethod
+    def _retry_with_backoff(
+        fn: Any,
+        max_retries: int = 2,
+        base_delay: float = 0.5,
+    ) -> Any:
+        last_error: Exception | None = None
+        for attempt in range(1 + max_retries):
+            try:
+                return fn()
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    time.sleep(delay)
+        raise last_error  # type: ignore[misc]
 
     def process(self, event: RuntimeEvent) -> TurnResult:
         trace = self._tracer.create_trace(
@@ -276,7 +295,9 @@ class RuntimeKernel:
             return ModelResponse(content=f"You said: {message}")
         msgs = self._build_model_messages(event, message, trace)
         call_start = datetime.now(UTC)
-        resp: ModelResponse = self._model_adapter.chat(msgs)
+        resp: ModelResponse = self._retry_with_backoff(
+            lambda: self._model_adapter.chat(msgs),
+        )
         latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
         self._model_call_count += 1
 
@@ -399,10 +420,18 @@ class RuntimeKernel:
             else:
                 args = {}
             tool_start = datetime.now(UTC)
-            tool_result = (
-                self._cap_reg.invoke(capability_name, **args)
-                if self._cap_reg else None
-            )
+
+            def _do_invoke() -> object | None:
+                return (
+                    self._cap_reg.invoke(capability_name, **args)
+                    if self._cap_reg else None
+                )
+
+            can_retry = manifest.idempotent
+            if can_retry:
+                tool_result = self._retry_with_backoff(_do_invoke)
+            else:
+                tool_result = _do_invoke()
             tool_latency = int(
                 (datetime.now(UTC) - tool_start).total_seconds() * 1000
             )
