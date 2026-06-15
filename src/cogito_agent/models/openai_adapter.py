@@ -5,6 +5,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from urllib.parse import urljoin
 
 from .adapter import ModelResponse
@@ -44,6 +45,8 @@ class OpenAICompatibleAdapter:
             body["max_tokens"] = kwargs["max_tokens"]
         if "tools" in kwargs:
             body["tools"] = kwargs["tools"]
+        if kwargs.get("stream"):
+            body["stream"] = True
         return body
 
     def chat(self, messages: list[dict[str, str]], **kwargs: object) -> ModelResponse:
@@ -103,3 +106,46 @@ class OpenAICompatibleAdapter:
             stop_reason=stop_reason,
             error=None,
         )
+
+    def stream_chat(
+        self, messages: list[dict[str, str]], **kwargs: object
+    ) -> Iterator[str]:
+        url = urljoin(self.base_url, "chat/completions")
+        body = self._build_body(messages, stream=True, **kwargs)
+        data = json.dumps(body).encode("utf-8")
+
+        req = urllib.request.Request(
+            url, data=data, headers=self._headers, method="POST"
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
+                buffer = ""
+                while True:
+                    chunk = resp.read(1)
+                    if not chunk:
+                        break
+                    buffer += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line or line.startswith(":"):
+                            continue
+                        if line.startswith("data: "):
+                            payload = line[6:]
+                            if payload == "[DONE]":
+                                return
+                            try:
+                                data_obj = json.loads(payload)
+                                choices = data_obj.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    token = delta.get("content", "")
+                                    if token:
+                                        yield token
+                            except json.JSONDecodeError:
+                                continue
+        except urllib.error.HTTPError as e:
+            yield f"[stream error: HTTP {e.code}]"
+        except Exception as e:
+            yield f"[stream error: {e}]"

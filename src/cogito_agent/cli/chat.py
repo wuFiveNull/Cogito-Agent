@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 
+from cogito_agent.models import get_adapter, list_providers
 from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
 from cogito_agent.skill import SkillRunner, WorkspaceSkill
@@ -26,6 +27,8 @@ def run_cli(db_path: str = ":memory:") -> None:
     print("Cogito-Agent CLI  (type 'exit' to quit, '/help' for commands)")
     print("-" * 50)
 
+    current_provider = "openai"
+
     while True:
         try:
             user_input = input("You: ")
@@ -36,7 +39,23 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() in ("exit", "quit", "/exit"):
             break
         if user_input.lower() == "/help":
-            print("Commands: exit, /help, /skill list, /skill run <name> [k=v ...], /approve, /deny, /memory")  # noqa: E501
+            print("Commands: exit, /help, /skill list, /skill run <name>, /stream, /provider, /approve, /deny, /memory")  # noqa: E501
+            continue
+        if user_input.lower() == "/provider":
+            provs = list_providers()
+            print(f"Available providers: {', '.join(provs)}")
+            print(f"Current: {current_provider}")
+            continue
+        if user_input.lower().startswith("/provider "):
+            name = user_input[10:].strip()
+            if name in list_providers():
+                current_provider = name
+                print(f"Switched to provider: {name}")
+            else:
+                print(f"Unknown provider '{name}'. Available: {', '.join(list_providers())}")
+            continue
+        if user_input.lower() == "/stream":
+            _handle_stream(db, workspace_id, session_id, current_provider)
             continue
         if user_input.lower().startswith("/approve "):
             _handle_approve(db, user_input[9:].strip())
@@ -156,6 +175,37 @@ def _run_skill(db: Database, workspace_id: str, session_id: str, args: str) -> N
     print(f"Skill '{skill_name}' finished: {log.status}")
     for step in log.step_logs:
         print(f"  [{step['status']}] {step.get('output', '')}"[:80])
+
+
+def _handle_stream(
+    db: Database, workspace_id: str, session_id: str, provider: str
+) -> None:
+    try:
+        user_input = input("Stream input: ")
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not user_input.strip():
+        return
+
+    adapter = get_adapter(provider=provider)
+    messages = [{"role": "user", "content": user_input}]
+    print("Agent: ", end="", flush=True)
+    full = ""
+    for token in adapter.stream_chat(messages):
+        print(token, end="", flush=True)
+        full += token
+    print()
+
+    event = RuntimeEvent(
+        workspace_id=workspace_id,
+        session_id=session_id,
+        actor_id="user",
+        source=EventSource.cli,
+        type=EventType.user_message,
+        payload={"text": user_input},
+    )
+    kernel = RuntimeKernel(db)
+    kernel.process(event)
 
 
 def _handle_deny(db: Database, prefix: str) -> None:

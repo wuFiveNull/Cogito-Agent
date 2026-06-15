@@ -163,3 +163,39 @@ def test_run_skill_not_found(client: TestClient) -> None:
         json={"workspace_id": "ws-1", "inputs": {}},
     )
     assert resp.status_code == 404
+
+
+def test_list_providers(client: TestClient) -> None:
+    resp = client.get("/providers")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "providers" in data
+    assert "openai" in data["providers"]
+
+
+def test_chat_stream_endpoint(client: TestClient) -> None:
+    _, sid = _setup(client)
+    resp = client.post("/chat/stream", json={
+        "text": "hello",
+        "session_id": sid,
+        "workspace_id": "ws-1",
+        "provider": "openai",
+    })
+    assert resp.status_code == 200
+    assert resp.headers.get("content-type", "").startswith("text/event-stream")
+
+
+def test_chat_stream_no_session(client: TestClient) -> None:
+    resp = client.post("/chat/stream", json={
+        "text": "hello",
+        "session_id": "nonexistent",
+        "workspace_id": "ws-1",
+        "provider": "openai",
+    })
+    assert resp.status_code == 404
+
+
+def test_mcp_servers_empty(client: TestClient) -> None:
+    resp = client.get("/mcp/servers")
+    assert resp.status_code == 200
+    assert resp.json() == []

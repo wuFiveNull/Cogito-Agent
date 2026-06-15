@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from cogito_agent.mcp import MCPServerConfig
+from cogito_agent.mcp.manager import MCPServerManager
+from cogito_agent.models import get_adapter, list_providers
 from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
 from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
@@ -30,6 +34,16 @@ app = FastAPI(title="Cogito-Agent API", version="0.1.0", lifespan=lifespan)
 
 _db: Database | None = None
 _kernel: RuntimeKernel | None = None
+_mcp_manager: MCPServerManager | None = None
+
+
+def get_mcp_manager() -> MCPServerManager:
+    global _mcp_manager
+    if _mcp_manager is None:
+        from cogito_agent.capability import CapabilityRegistry
+
+        _mcp_manager = MCPServerManager(CapabilityRegistry())
+    return _mcp_manager
 
 
 class ChatRequest(BaseModel):
@@ -148,6 +162,13 @@ def action_candidate(req: CandidateAction) -> dict[str, object]:
     return result
 
 
+class ChatStreamRequest(BaseModel):
+    text: str
+    session_id: str
+    workspace_id: str
+    provider: str = "openai"
+
+
 class SkillInstallRequest(BaseModel):
     manifest: SkillManifest
 
@@ -159,6 +180,55 @@ class WorkspaceSkillInstall(BaseModel):
 class RunSkillRequest(BaseModel):
     workspace_id: str
     inputs: dict[str, str] = {}
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
+    db = get_db()
+    sess_repo = SessionRepository(db)
+    sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    adapter = get_adapter(provider=req.provider)
+    messages = [
+        {"role": "user", "content": req.text},
+    ]
+
+    def event_stream() -> Generator[str, None, None]:
+        full_content = ""
+        for token in adapter.stream_chat(messages):
+            full_content += token
+            yield f"data: {json.dumps({'token': token})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'content': full_content})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/providers")
+def list_model_providers() -> dict[str, object]:
+    return {"providers": list_providers()}
+
+
+@app.get("/mcp/servers")
+def list_mcp_servers() -> list[dict[str, object]]:
+    return get_mcp_manager().list_servers()
+
+
+@app.post("/mcp/servers")
+def add_mcp_server(config: MCPServerConfig) -> dict[str, str]:
+    get_mcp_manager().add_server(config)
+    return {"status": "connected", "name": config.name}
+
+
+@app.delete("/mcp/servers/{name}")
+def remove_mcp_server(name: str) -> dict[str, str]:
+    get_mcp_manager().remove_server(name)
+    return {"status": "removed", "name": name}
 
 
 @app.get("/skills")

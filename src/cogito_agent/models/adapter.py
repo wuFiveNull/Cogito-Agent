@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -19,3 +20,7 @@ class ModelResponse:
 
 class ModelAdapter(Protocol):
     def chat(self, messages: list[dict[str, str]], **kwargs: object) -> ModelResponse: ...
+
+    def stream_chat(
+        self, messages: list[dict[str, str]], **kwargs: object
+    ) -> Iterator[str]: ...
