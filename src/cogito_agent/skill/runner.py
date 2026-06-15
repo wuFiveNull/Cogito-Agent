@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 from cogito_agent.capability import CapabilityRegistry
@@ -45,17 +46,24 @@ class SkillRunner:
         )
         log = SkillRunLog(trace.id, manifest.name, "running")
 
+        executed_steps: list[SkillStep] = []
+
+        self._preflight_all(manifest, workspace_id)
+        self._check_semver(manifest)
+
         for step in manifest.steps:
             span = self._tracer.create_span(
                 trace.id, f"step_{step.id}", SpanKind.runtime
             )
             try:
-                self._preflight(step, workspace_id)
                 result = self._execute_step(step, workspace_id, inputs or {})
+                executed_steps.append(step)
                 log.step_logs.append({
                     "step_id": step.id,
                     "status": "ok",
-                    "output": str(result)[:200],
+                    "output": self._normalize_output(result)[:500],
+                    "artifacts": self._extract_artifacts(result),
+                    "lineage": self._extract_lineage(result),
                 })
             except Exception as e:
                 log.step_logs.append({
@@ -69,6 +77,7 @@ class SkillRunner:
                     break
                 if step.on_error == OnError.rollback:
                     log.status = "rolled_back"
+                    self._execute_rollback(manifest, workspace_id, executed_steps)
                     self._tracer.end_span(span)
                     break
             self._tracer.end_span(span)
@@ -79,18 +88,93 @@ class SkillRunner:
         self._persist_run_log(log, workspace_id, manifest.name)
         return log
 
-    def _preflight(self, step: SkillStep, workspace_id: str) -> None:
-        if step.kind == StepKind.capability and step.uses_capability:
-            req = PolicyRequest(
-                actor_id="skill",
-                capability_name=step.uses_capability,
-                resource="workspace_file",
-                operation="read",
-                context="interactive",
+    # ── M.4 Semver enforcement ──────────────────────────────────────────
+
+    def _check_semver(self, manifest: SkillManifest) -> None:
+        from cogito_agent.skill.storage import WorkspaceSkill
+
+        ws_skill_repo = WorkspaceSkill(self._db)
+        previous = ws_skill_repo.get_by_name(manifest.name)
+        if previous is None:
+            return
+        prev_ver = self._parse_semver(str(previous["version"]))
+        curr_ver = self._parse_semver(manifest.version)
+        if prev_ver is None or curr_ver is None:
+            return
+        if curr_ver[0] > prev_ver[0]:
+            raise PermissionError(
+                f"Major version upgrade {previous['version']} -> {manifest.version}"
+                f" for skill '{manifest.name}' requires re-approval"
             )
-            decision = self._policy.evaluate(req)
-            if decision.decision.value == "deny":
-                raise PermissionError(f"Policy denied step '{step.id}': {step.uses_capability}")
+
+    @staticmethod
+    def _parse_semver(version: str) -> tuple[int, ...] | None:
+        m = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
+        if m:
+            return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        return None
+
+    # ── M.2 Permission preflight ──────────────────────────────────────
+
+    def _preflight_all(self, manifest: SkillManifest, workspace_id: str) -> None:
+        for step in manifest.steps:
+            if (step.kind == StepKind.capability
+                    and step.uses_capability
+                    and self._cap_reg.get_manifest(step.uses_capability) is not None):
+                req = PolicyRequest(
+                    actor_id="skill",
+                    capability_name=step.uses_capability,
+                    resource="workspace_file",
+                    operation="read",
+                    context="interactive",
+                )
+                decision = self._policy.evaluate(req)
+                if decision.decision.value == "deny":
+                    raise PermissionError(
+                        f"Policy denied step '{step.id}': {step.uses_capability}"
+                    )
+
+    # ── M.1 Rollback compensation ─────────────────────────────────────
+
+    def _execute_rollback(
+        self,
+        manifest: SkillManifest,
+        workspace_id: str,
+        executed_steps: list[SkillStep],
+    ) -> None:
+        for rollback_step in reversed(manifest.rollback):
+            cap_name = rollback_step.get("uses_capability", "")
+            if cap_name:
+                self._cap_reg.invoke(cap_name, workspace_id=workspace_id)
+
+    # ── M.3 Output normalization ─────────────────────────────────────
+
+    @staticmethod
+    def _normalize_output(result: object) -> str:
+        if result is None:
+            return ""
+        if isinstance(result, str):
+            return result
+        if isinstance(result, (bytes, bytearray)):
+            return result.decode("utf-8", errors="replace")[:500]
+        try:
+            return str(result)[:500]
+        except Exception:
+            return "[unprintable output]"
+
+    @staticmethod
+    def _extract_artifacts(result: object) -> list[dict[str, object]]:
+        if hasattr(result, "artifacts") and isinstance(result.artifacts, list):
+            return result.artifacts
+        return []
+
+    @staticmethod
+    def _extract_lineage(result: object) -> list[dict[str, object]]:
+        if hasattr(result, "lineage") and isinstance(result.lineage, list):
+            return result.lineage
+        return []
+
+    # ── Step execution ─────────────────────────────────────────────────
 
     def _execute_step(
         self, step: SkillStep, workspace_id: str, inputs: dict[str, str]
@@ -100,6 +184,10 @@ class SkillRunner:
         if step.kind == StepKind.capability and step.uses_capability:
             mapped = self._apply_mapping(step, inputs)
             result = self._cap_reg.invoke(step.uses_capability, **mapped)
+            if result is None:
+                raise RuntimeError(
+                    f"Capability '{step.uses_capability}' not registered"
+                )
             return result
         if step.kind == StepKind.llm:
             return f"[llm step] {step.prompt}"

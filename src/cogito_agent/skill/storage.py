@@ -92,6 +92,14 @@ class WorkspaceSkill:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def get_by_name(self, name: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM workspace_skills WHERE name = ? ORDER BY created_at DESC LIMIT 1",
+            (name,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
     def set_enabled(self, wsid: str, enabled: bool) -> None:
         self._db.connection.execute(
             "UPDATE workspace_skills SET enabled = ? WHERE id = ?",
