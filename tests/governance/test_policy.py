@@ -67,6 +67,78 @@ def test_unknown_matches_catchall() -> None:
     assert decision.decision == DecisionType.deny
 
 
+def test_background_deny_delete() -> None:
+    engine = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="background_agent",
+        capability_name="local.file_delete",
+        resource="*",
+        operation="delete",
+        context="background",
+    )
+    assert engine.evaluate(req).decision == DecisionType.deny
+
+
+def test_background_deny_file_write() -> None:
+    engine = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="skill",
+        capability_name="local.file_write",
+        resource="workspace_file",
+        operation="write",
+        context="background",
+    )
+    assert engine.evaluate(req).decision == DecisionType.deny
+
+
+def test_background_deny_secret_read() -> None:
+    engine = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="background_agent",
+        capability_name="secret.get",
+        resource="secret",
+        operation="read",
+        context="background",
+    )
+    assert engine.evaluate(req).decision == DecisionType.deny
+
+
+def test_background_deny_shell_execute() -> None:
+    engine = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="background_agent",
+        capability_name="local.shell",
+        resource="shell",
+        operation="execute",
+        context="background",
+    )
+    assert engine.evaluate(req).decision == DecisionType.deny
+
+
+def test_background_allow_file_read() -> None:
+    engine = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="background_agent",
+        capability_name="local.file_read",
+        resource="workspace_file",
+        operation="read",
+        context="background",
+    )
+    assert engine.evaluate(req).decision == DecisionType.allow_with_audit
+
+
+def test_background_allow_model_call() -> None:
+    engine = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="background_agent",
+        capability_name="model.invoke",
+        resource="model",
+        operation="call_model",
+        context="background",
+    )
+    assert engine.evaluate(req).decision == DecisionType.allow_with_audit
+
+
 def test_custom_rules() -> None:
     from cogito_agent.governance.policy import PolicyRule
 
