@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+cogito_demo.db
+.local/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
