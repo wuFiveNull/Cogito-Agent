@@ -174,9 +174,44 @@ class MemoryRepository:
                 (row["rowid"], text, ""),
             )
             self._db.connection.commit()
+        self._try_create_embedding(mid, text)
         result = self.get_by_id(mid, workspace_id)
         assert result is not None
         return result
+
+    def _try_create_embedding(self, mid: str, text: str) -> None:
+        try:
+            from cogito_agent.memory.vector import EmbeddingService, _pack_embedding
+            svc = EmbeddingService()
+            vec = svc.encode(text)
+            blob = _pack_embedding(vec)
+            self._db.connection.execute(
+                "INSERT OR REPLACE INTO memory_embeddings"
+                " (memory_id, embedding, model_name)"
+                " VALUES (?, ?, ?)",
+                (mid, blob, svc.model_name),
+            )
+            self._db.connection.commit()
+        except Exception:
+            pass
+
+    def backfill_embeddings(self) -> int:
+        count = 0
+        try:
+            cur = self._db.connection.execute(
+                "SELECT id, text FROM memories WHERE deleted_at IS NULL"
+            )
+            for row in cur.fetchall():
+                mid, text = row["id"], row["text"]
+                existing = self._db.connection.execute(
+                    "SELECT 1 FROM memory_embeddings WHERE memory_id = ?", (mid,)
+                )
+                if existing.fetchone() is None:
+                    self._try_create_embedding(mid, text)
+                    count += 1
+        except Exception:
+            pass
+        return count
 
     def get_by_id(
         self, mid: str, workspace_id: str
@@ -213,6 +248,9 @@ class MemoryRepository:
                 "DELETE FROM memories_fts WHERE rowid = ?",
                 (row["rowid"],),
             )
+        self._db.connection.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
+        )
         self._db.connection.commit()
 
 
@@ -371,6 +409,9 @@ class MemoryEditRepository:
         rowid = row["rowid"]
         self._db.connection.execute(
             "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
+        )
+        self._db.connection.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
         )
         self._db.connection.execute(
             "DELETE FROM memories WHERE id = ? AND workspace_id = ?",

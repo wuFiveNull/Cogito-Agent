@@ -31,6 +31,22 @@ class MemoryRetriever:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def search_hybrid(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        bm25_weight: float = 0.5,
+        semantic_weight: float = 0.5,
+    ) -> list[dict[str, object]]:
+        try:
+            from cogito_agent.memory.vector import HybridRetriever
+
+            hybrid = HybridRetriever(self._db)
+            return hybrid.search(workspace_id, query, limit, bm25_weight, semantic_weight)
+        except Exception:
+            return self.search(workspace_id, query, limit)
+
     def list_recent(self, workspace_id: str, limit: int = 20) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
             "SELECT * FROM memories WHERE workspace_id = ?"
