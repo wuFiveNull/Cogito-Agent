@@ -63,6 +63,7 @@ class SchedulerEngine:
     def schedule(self, job: ScheduleJob) -> str:
         now = datetime.now(UTC).isoformat()
         jid = job.id or str(uuid.uuid4())
+        next_run = job.next_run_at or job.run_at or now
         self._db.connection.execute(
             "INSERT INTO scheduled_jobs"
             " (id, name, workspace_id, actor, capability_name, input_json,"
@@ -77,7 +78,7 @@ class SchedulerEngine:
                 job.max_retries, job.retry_count,
                 job.quiet_hours_start, job.quiet_hours_end,
                 job.timezone, int(job.enabled), int(job.dry_run),
-                job.status.value, job.last_run_at, job.next_run_at,
+                job.status.value, job.last_run_at, next_run,
                 now, now,
             ),
         )
@@ -115,8 +116,9 @@ class SchedulerEngine:
             "SELECT * FROM scheduled_jobs"
             " WHERE enabled = 1 AND status IN ('pending', 'failed')"
             " AND (next_run_at IS NULL OR next_run_at <= ?)"
+            " AND (run_at IS NULL OR run_at <= ?)"
             " ORDER BY next_run_at ASC",
-            (now_iso,),
+            (now_iso, now_iso),
         )
         rows = cur.fetchall()
         processed: list[ScheduleJob] = []

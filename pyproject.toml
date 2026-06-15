@@ -39,6 +39,7 @@ disallow_any_unimported = false
 [project.scripts]
 cogito = "cogito_agent.cli:run_cli"
 cogito-demo = "cogito_agent.cli.e2e_demo:run_e2e_demo"
+cogito-daemon = "cogito_agent.cli.daemon:run_daemon"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
