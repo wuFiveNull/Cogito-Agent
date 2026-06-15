@@ -2,25 +2,26 @@
 
 ## State of the Repo
 
-All V1 MVP epics (1–14) and most V2 items are complete. See session summary for details.
+All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–4 (Epics A–J) are complete. Working on Phase 5.
+
+## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
+
+- ✅ Phase 1 (Epics A–B): Runtime full turn pipeline, context engine with budget shares
+- ✅ Phase 2 (Epics C–E): Tool dispatch, approval flow, budget enforcement
+- ✅ Phase 3 (Epics F–G): Trace/audit integration, policy matrix (call_model/tool/trace_log)
+- ✅ Phase 4 (Epics H–J): Candidate extraction, memory ranking, memory versioning, token_count utility
+- ❌ Phase 5 (Epics K–L): Capability safety (path sandboxing, JSON Schema), storage completeness (hard delete, export, migration)
+- ❌ Phase 6 (Epics M–P): CLI polish, config files, context ranking/trimming
+- ❌ Phase 7 (Epics Q–S): Error handling, documentation, E2E tests
 
 ## V2 Status
 
-- ✅ Vector retrieval (hybrid BM25 + semantic)
-- ✅ Multi-workspace management
-- ✅ Proactive loop (ProactiveEngine + cogito-daemon)
-- ✅ Drift runtime (ThreadPoolExecutor async event processing)
-- ✅ Subagents (fork/run/merge lifecycle)
-- ✅ MCP dynamic registration (discovery, health check, sync)
-- ❌ Cloud migration adapters — **deprioritized** (not planned for now)
+- ✅ All V2 items except cloud migration adapters (deprioritized)
+- ✅ 251 tests passing, ruff clean, mypy clean
 
 ## Project Purpose
 
 Local-first personal Agent runtime with long-term memory, governed capabilities, traceable execution, reusable skills, and constrained proactive behavior.
-
-## MVP Scope (do not expand)
-
-CLI chat, one model adapter, SQLite storage, basic memory/context retrieval, static policy matrix, capability registry with safe local tools, trace/audit logs, one end-to-end demo.
 
 ## Implementation Order (Epic sequence from backlog)
 
