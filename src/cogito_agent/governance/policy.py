@@ -44,6 +44,10 @@ class PolicyEngine:
                    DecisionType.require_approval, resource="memory"),
         PolicyRule("skill", "call", "background",
                    DecisionType.deny, resource="network"),
+        PolicyRule("scheduler", "notify", "quiet_hours",
+                   DecisionType.deny),
+        PolicyRule("scheduler", "execute", "background",
+                   DecisionType.allow_with_audit, resource="*"),
         PolicyRule("*", "*", "*", DecisionType.escalate),
     ]
 

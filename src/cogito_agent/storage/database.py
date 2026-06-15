@@ -200,6 +200,54 @@ CREATE TABLE IF NOT EXISTS skill_run_logs (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS workspace_settings (
+    workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+    quiet_hours_start TEXT NOT NULL DEFAULT '',
+    quiet_hours_end TEXT NOT NULL DEFAULT '',
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    max_daily_notifications INTEGER NOT NULL DEFAULT 3
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+    actor TEXT NOT NULL DEFAULT 'scheduler',
+    capability_name TEXT NOT NULL,
+    input_json TEXT NOT NULL DEFAULT '{}',
+    schedule_type TEXT NOT NULL DEFAULT 'one_shot',
+    run_at TEXT,
+    interval_seconds INTEGER,
+    max_retries INTEGER NOT NULL DEFAULT 0,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    quiet_hours_start TEXT,
+    quiet_hours_end TEXT,
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    dry_run INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'pending',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    job_id TEXT,
+    event_hash TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    decision TEXT NOT NULL DEFAULT '',
+    sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+    feedback TEXT,
+    feedback_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_workspace ON scheduled_jobs(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(next_run_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(job_id);
 CREATE INDEX IF NOT EXISTS idx_source_lineage_trace ON source_lineage(trace_id);
 CREATE INDEX IF NOT EXISTS idx_context_items_trace ON context_items(trace_id);
 """
