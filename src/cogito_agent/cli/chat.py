@@ -39,7 +39,7 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() in ("exit", "quit", "/exit"):
             break
         if user_input.lower() == "/help":
-            print("Commands: exit, /help, /skill list, /skill run <name>, /stream, /provider, /approve, /deny, /memory")  # noqa: E501
+            print("Commands: exit, /help, /memory list, /memory edit, /memory delete, /approvals, /approve, /deny, /skill list, /skill run, /stream, /provider, /export, /ws settings")  # noqa: E501
             continue
         if user_input.lower() == "/provider":
             provs = list_providers()
@@ -57,6 +57,15 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() == "/stream":
             _handle_stream(db, workspace_id, session_id, current_provider)
             continue
+        if user_input.lower() == "/memory list":
+            _list_all_memories(db, workspace_id)
+            continue
+        if user_input.lower().startswith("/memory edit "):
+            _edit_memory(db, workspace_id, user_input[12:].strip())
+            continue
+        if user_input.lower().startswith("/memory delete "):
+            _delete_memory(db, workspace_id, user_input[14:].strip())
+            continue
         if user_input.lower().startswith("/approve "):
             _handle_approve(db, user_input[9:].strip())
             continue
@@ -65,6 +74,15 @@ def run_cli(db_path: str = ":memory:") -> None:
             continue
         if user_input.lower() == "/memory":
             _show_memory_candidates(db, workspace_id)
+            continue
+        if user_input.lower() == "/approvals":
+            _list_approvals(db, workspace_id)
+            continue
+        if user_input.lower() == "/export":
+            _export_workspace(db, workspace_id)
+            continue
+        if user_input.lower() == "/ws settings":
+            _show_workspace_settings(db, workspace_id)
             continue
         if user_input.lower() == "/skill list":
             _list_skills(db, workspace_id)
@@ -206,6 +224,99 @@ def _handle_stream(
     )
     kernel = RuntimeKernel(db)
     kernel.process(event)
+
+
+def _list_all_memories(db: Database, workspace_id: str) -> None:
+    from cogito_agent.memory import MemoryRetriever
+
+    retriever = MemoryRetriever(db)
+    memories = retriever.list_recent(workspace_id, limit=50)
+    if not memories:
+        print("No memories.")
+        return
+    print(f"\nMemories ({len(memories)}):")
+    for m in memories:
+        mid = str(m.get("id", ""))[:8]
+        text = str(m.get("text", ""))[:60]
+        mtype = str(m.get("type", "general"))
+        print(f"  [{mtype}] {mid}  {text}")
+
+
+def _edit_memory(db: Database, workspace_id: str, args: str) -> None:
+    parts = args.split(maxsplit=1)
+    if len(parts) < 2:
+        print("Usage: /memory edit <id> <new text>")
+        return
+    from cogito_agent.storage.repositories import MemoryEditRepository
+
+    repo = MemoryEditRepository(db)
+    result = repo.update_text(parts[0], workspace_id, parts[1])
+    if result:
+        print(f"Memory updated: {str(result.get('text', ''))[:60]}")
+    else:
+        print(f"Memory '{parts[0]}' not found.")
+
+
+def _delete_memory(db: Database, workspace_id: str, mid: str) -> None:
+    from cogito_agent.storage.repositories import MemoryEditRepository
+
+    repo = MemoryEditRepository(db)
+    if repo.hard_delete(mid, workspace_id):
+        print(f"Memory '{mid}' deleted.")
+    else:
+        print(f"Memory '{mid}' not found.")
+
+
+def _list_approvals(db: Database, workspace_id: str) -> None:
+    from cogito_agent.storage.repositories import ApprovalRepository
+
+    repo = ApprovalRepository(db)
+    pending = repo.list_pending(workspace_id)
+    if not pending:
+        print("No pending approvals.")
+        return
+    print(f"\nPending approvals ({len(pending)}):")
+    for a in pending:
+        aid = str(a.get("id", ""))[:8]
+        cap = str(a.get("capability_name", ""))
+        op = str(a.get("operation", ""))
+        print(f"  [{aid}] {cap} / {op}")
+
+
+def _export_workspace(db: Database, workspace_id: str) -> None:
+    import json
+
+    from cogito_agent.storage.repositories import WorkspaceRepository
+
+    ws_repo = WorkspaceRepository(db)
+    ws = ws_repo.get_by_id(workspace_id)
+    if ws is None:
+        print(f"Workspace '{workspace_id}' not found.")
+        return
+
+    cur = db.connection.execute(
+        "SELECT * FROM sessions WHERE workspace_id = ? AND deleted_at IS NULL",
+        (workspace_id,),
+    )
+    sessions = [dict(r) for r in cur.fetchall()]
+    cur = db.connection.execute(
+        "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
+        (workspace_id,),
+    )
+    memories = [dict(r) for r in cur.fetchall()]
+
+    data = {"workspace": ws, "sessions": sessions, "memories": memories}
+    print(json.dumps(data, indent=2, default=str)[:2000])
+    print(f"\n... ({len(json.dumps(data, default=str))} bytes total)")
+
+
+def _show_workspace_settings(db: Database, workspace_id: str) -> None:
+    from cogito_agent.storage.repositories import WorkspaceSettingsRepository
+
+    repo = WorkspaceSettingsRepository(db)
+    settings = repo.get(workspace_id)
+    for k, v in settings.items():
+        print(f"  {k}: {v}")
 
 
 def _handle_deny(db: Database, prefix: str) -> None:

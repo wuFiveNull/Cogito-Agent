@@ -341,3 +341,158 @@ class FileArtifactRepository:
         )
         self._db.connection.execute(sql, (fid, workspace_id))
         self._db.connection.commit()
+
+
+class MemoryEditRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def update_text(self, mid: str, workspace_id: str, text: str) -> dict[str, object] | None:
+        self._db.connection.execute(
+            "UPDATE memories SET text = ?, updated_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (text, mid, workspace_id),
+        )
+        self._db.connection.commit()
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ?", (mid,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def hard_delete(self, mid: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "SELECT rowid FROM memories WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return False
+        rowid = row["rowid"]
+        self._db.connection.execute(
+            "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
+        )
+        self._db.connection.execute(
+            "DELETE FROM memories WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+        return True
+
+    def list_by_type(
+        self, workspace_id: str, memory_type: str, limit: int = 50
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE workspace_id = ?"
+            " AND type = ? AND deleted_at IS NULL"
+            " ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, memory_type, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+
+class ApprovalRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(
+        self,
+        workspace_id: str,
+        actor_id: str,
+        capability_name: str,
+        operation: str = "",
+        resource: str = "",
+        reason: str = "",
+        session_id: str = "",
+    ) -> dict[str, object]:
+        aid = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO approval_records"
+            " (id, workspace_id, session_id, actor_id, capability_name,"
+            " operation, resource, reason, status)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+            (aid, workspace_id, session_id, actor_id, capability_name,
+             operation, resource, reason),
+        )
+        self._db.connection.commit()
+        cur = self._db.connection.execute(
+            "SELECT * FROM approval_records WHERE id = ?", (aid,)
+        )
+        return dict(cur.fetchone())
+
+    def resolve(
+        self, aid: str, decision: str, decided_by: str = ""
+    ) -> dict[str, object] | None:
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        cur = self._db.connection.execute(
+            "UPDATE approval_records"
+            " SET status = ?, decision = ?, decided_by = ?, decided_at = ?"
+            " WHERE id = ? AND status = 'pending'",
+            (decision, decision, decided_by, now, aid),
+        )
+        self._db.connection.commit()
+        if cur.rowcount == 0:
+            return None
+        cur = self._db.connection.execute(
+            "SELECT * FROM approval_records WHERE id = ?", (aid,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_pending(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM approval_records"
+            " WHERE workspace_id = ? AND status = 'pending'"
+            " ORDER BY created_at DESC",
+            (workspace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_workspace(
+        self, workspace_id: str, limit: int = 50
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM approval_records"
+            " WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+
+class WorkspaceSettingsRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def get(self, workspace_id: str) -> dict[str, object]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM workspace_settings WHERE workspace_id = ?",
+            (workspace_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+        return {"workspace_id": workspace_id, "quiet_hours_start": "",
+                "quiet_hours_end": "", "timezone": "UTC",
+                "max_daily_notifications": 3}
+
+    def upsert(self, workspace_id: str, **kwargs: str | int) -> dict[str, object]:
+        cols = ", ".join(kwargs.keys())
+        placeholders = ", ".join("?" for _ in kwargs)
+        values = list(kwargs.values())
+        self._db.connection.execute(
+            "INSERT INTO workspace_settings (workspace_id, quiet_hours_start,"
+            " quiet_hours_end, timezone, max_daily_notifications)"
+            " VALUES (?, '', '', 'UTC', 3)"
+            " ON CONFLICT(workspace_id) DO NOTHING",
+            (workspace_id,),
+        )
+        if cols:
+            self._db.connection.execute(
+                f"UPDATE workspace_settings SET ({cols}) = ({placeholders})"
+                f" WHERE workspace_id = ?",
+                [*values, workspace_id],
+            )
+        self._db.connection.commit()
+        return self.get(workspace_id)

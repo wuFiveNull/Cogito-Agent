@@ -17,9 +17,12 @@ from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManif
 from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
+    ApprovalRepository,
     MemoryCandidateRepository,
+    MemoryEditRepository,
     SessionRepository,
     WorkspaceRepository,
+    WorkspaceSettingsRepository,
 )
 
 
@@ -67,6 +70,23 @@ class SessionCreate(BaseModel):
 class CandidateAction(BaseModel):
     candidate_id: str
     action: str
+
+
+class MemoryUpdateRequest(BaseModel):
+    text: str
+
+
+class ApprovalResolveRequest(BaseModel):
+    decision: str
+    decided_by: str = "user"
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    name: str | None = None
+    quiet_hours_start: str | None = None
+    quiet_hours_end: str | None = None
+    timezone: str | None = None
+    max_daily_notifications: int | None = None
 
 
 def get_db() -> Database:
@@ -229,6 +249,163 @@ def add_mcp_server(config: MCPServerConfig) -> dict[str, str]:
 def remove_mcp_server(name: str) -> dict[str, str]:
     get_mcp_manager().remove_server(name)
     return {"status": "removed", "name": name}
+
+
+# --- Memory endpoints ---
+
+@app.get("/memories")
+def list_memories(
+    workspace_id: str, memory_type: str = "", limit: int = 50
+) -> list[dict[str, object]]:
+    db = get_db()
+    if memory_type:
+        repo = MemoryEditRepository(db)
+        return repo.list_by_type(workspace_id, memory_type, limit)
+    from cogito_agent.memory import MemoryRetriever
+
+    retriever = MemoryRetriever(db)
+    return retriever.list_recent(workspace_id, limit)
+
+
+@app.put("/memories/{mid}")
+def update_memory(mid: str, workspace_id: str, req: MemoryUpdateRequest) -> dict[str, object]:
+    db = get_db()
+    repo = MemoryEditRepository(db)
+    result = repo.update_text(mid, workspace_id, req.text)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return result
+
+
+@app.delete("/memories/{mid}")
+def delete_memory(mid: str, workspace_id: str) -> dict[str, str]:
+    db = get_db()
+    repo = MemoryEditRepository(db)
+    if not repo.hard_delete(mid, workspace_id):
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"status": "deleted"}
+
+
+# --- Approval endpoints ---
+
+@app.get("/approvals")
+def list_approvals(
+    workspace_id: str, pending_only: bool = False
+) -> list[dict[str, object]]:
+    db = get_db()
+    repo = ApprovalRepository(db)
+    if pending_only:
+        return repo.list_pending(workspace_id)
+    return repo.list_by_workspace(workspace_id)
+
+
+@app.post("/approvals")
+def create_approval(
+    workspace_id: str, actor_id: str, capability_name: str,
+    operation: str = "", resource: str = "", reason: str = "",
+) -> dict[str, object]:
+    db = get_db()
+    repo = ApprovalRepository(db)
+    return repo.create(workspace_id, actor_id, capability_name,
+                       operation, resource, reason)
+
+
+@app.post("/approvals/{aid}/resolve")
+def resolve_approval(aid: str, req: ApprovalResolveRequest) -> dict[str, object]:
+    db = get_db()
+    repo = ApprovalRepository(db)
+    result = repo.resolve(aid, req.decision, req.decided_by)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Approval not found or already resolved")
+    return result
+
+
+# --- Workspace settings ---
+
+@app.get("/workspaces/{wid}/settings")
+def get_workspace_settings(wid: str) -> dict[str, object]:
+    repo = WorkspaceSettingsRepository(get_db())
+    return repo.get(wid)
+
+
+@app.put("/workspaces/{wid}/settings")
+def update_workspace_settings(
+    wid: str, req: WorkspaceUpdateRequest
+) -> dict[str, object]:
+    repo = WorkspaceSettingsRepository(get_db())
+    kwargs: dict[str, str | int] = {}
+    if req.name is not None:
+        repo._db.connection.execute(
+            "UPDATE workspaces SET name = ? WHERE id = ?", (req.name, wid)
+        )
+        repo._db.connection.commit()
+    if req.quiet_hours_start is not None:
+        kwargs["quiet_hours_start"] = req.quiet_hours_start
+    if req.quiet_hours_end is not None:
+        kwargs["quiet_hours_end"] = req.quiet_hours_end
+    if req.timezone is not None:
+        kwargs["timezone"] = req.timezone
+    if req.max_daily_notifications is not None:
+        kwargs["max_daily_notifications"] = req.max_daily_notifications
+    return repo.upsert(wid, **kwargs)
+
+
+# --- Export / Cleanup ---
+
+@app.get("/export")
+def export_workspace(workspace_id: str) -> dict[str, object]:
+    db = get_db()
+    cur = db.connection.execute(
+        "SELECT * FROM workspaces WHERE id = ?", (workspace_id,)
+    )
+    ws = cur.fetchone()
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    data: dict[str, object] = {
+        "workspace": dict(ws),
+        "sessions": [],
+        "memories": [],
+        "traces": [],
+    }
+    cur = db.connection.execute(
+        "SELECT * FROM sessions WHERE workspace_id = ? AND deleted_at IS NULL",
+        (workspace_id,),
+    )
+    data["sessions"] = [dict(r) for r in cur.fetchall()]
+
+    cur = db.connection.execute(
+        "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
+        (workspace_id,),
+    )
+    data["memories"] = [dict(r) for r in cur.fetchall()]
+
+    cur = db.connection.execute(
+        "SELECT * FROM traces WHERE workspace_id = ?", (workspace_id,)
+    )
+    data["traces"] = [dict(r) for r in cur.fetchall()]
+
+    return data
+
+
+@app.post("/workspaces/{wid}/cleanup")
+def cleanup_workspace(wid: str) -> dict[str, int]:
+    db = get_db()
+    from datetime import UTC, datetime, timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+    deleted_sessions = db.connection.execute(
+        "DELETE FROM sessions WHERE workspace_id = ?"
+        " AND deleted_at IS NOT NULL AND deleted_at < ?",
+        (wid, cutoff),
+    ).rowcount
+    deleted_traces = db.connection.execute(
+        "DELETE FROM traces WHERE workspace_id = ?"
+        " AND ended_at IS NOT NULL AND ended_at < ?",
+        (wid, cutoff),
+    ).rowcount
+    db.connection.commit()
+    return {"deleted_sessions": deleted_sessions, "deleted_traces": deleted_traces}
 
 
 @app.get("/skills")

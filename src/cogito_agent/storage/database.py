@@ -247,7 +247,25 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_workspace ON scheduled_jobs(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(next_run_at);
+CREATE TABLE IF NOT EXISTS approval_records (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    session_id TEXT,
+    actor_id TEXT NOT NULL,
+    capability_name TEXT NOT NULL,
+    operation TEXT NOT NULL DEFAULT '',
+    resource TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    decision TEXT,
+    decided_by TEXT,
+    decided_at TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_notifications_job ON notifications(job_id);
+CREATE INDEX IF NOT EXISTS idx_approval_records_workspace ON approval_records(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_source_lineage_trace ON source_lineage(trace_id);
 CREATE INDEX IF NOT EXISTS idx_context_items_trace ON context_items(trace_id);
 """

@@ -199,3 +199,80 @@ def test_mcp_servers_empty(client: TestClient) -> None:
     resp = client.get("/mcp/servers")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_list_memories(client: TestClient) -> None:
+    resp = client.get("/memories", params={"workspace_id": "ws-1"})
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_update_memory_not_found(client: TestClient) -> None:
+    resp = client.put("/memories/nonexistent?workspace_id=ws-1",
+                      json={"text": "new text"})
+    assert resp.status_code == 404
+
+
+def test_delete_memory_not_found(client: TestClient) -> None:
+    resp = client.delete("/memories/nonexistent?workspace_id=ws-1")
+    assert resp.status_code == 404
+
+
+def test_approvals_empty(client: TestClient) -> None:
+    resp = client.get("/approvals", params={"workspace_id": "ws-1"})
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_create_and_resolve_approval(client: TestClient) -> None:
+    resp = client.post("/approvals", params={
+        "workspace_id": "ws-1", "actor_id": "user",
+        "capability_name": "read_file", "operation": "read",
+    })
+    assert resp.status_code == 200
+    aid = resp.json()["id"]
+    resolve = client.post(f"/approvals/{aid}/resolve",
+                          json={"decision": "allow"})
+    assert resolve.status_code == 200
+    assert resolve.json()["status"] == "allow"
+
+
+def test_resolve_nonexistent_approval(client: TestClient) -> None:
+    resp = client.post("/approvals/nonexistent/resolve",
+                       json={"decision": "allow"})
+    assert resp.status_code == 404
+
+
+def test_workspace_settings(client: TestClient) -> None:
+    resp = client.get("/workspaces/ws-1/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["workspace_id"] == "ws-1"
+
+
+def test_update_workspace_settings(client: TestClient) -> None:
+    resp = client.put("/workspaces/ws-1/settings",
+                      json={"timezone": "Asia/Shanghai",
+                            "max_daily_notifications": 5})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["timezone"] == "Asia/Shanghai"
+
+
+def test_export_workspace(client: TestClient) -> None:
+    _setup(client)
+    resp = client.get("/export", params={"workspace_id": "ws-1"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "workspace" in data
+    assert "sessions" in data
+
+
+def test_export_workspace_not_found(client: TestClient) -> None:
+    resp = client.get("/export", params={"workspace_id": "nonexistent"})
+    assert resp.status_code == 404
+
+
+def test_cleanup_workspace(client: TestClient) -> None:
+    resp = client.post("/workspaces/ws-1/cleanup")
+    assert resp.status_code == 200
