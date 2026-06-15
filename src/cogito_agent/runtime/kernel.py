@@ -513,14 +513,11 @@ class RuntimeKernel:
             )
             row = cur.fetchone()
             source_id = str(row["id"]) if row else event.id
-            self._cand_extractor.extract(
+            self._cand_extractor.extract_from_turn(
                 workspace_id=event.workspace_id,
                 session_id=event.session_id,
                 source_message_id=source_id,
                 text=output,
-                type="general",
-                reason="assistant_reply",
-                confidence=0.5,
             )
         except Exception:
             pass

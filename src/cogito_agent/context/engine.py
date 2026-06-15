@@ -35,18 +35,32 @@ class ContextEngine:
         recent_messages: list[dict[str, object]],
         memories: list[dict[str, object]],
         current_message: str = "",
+        tool_results: list[dict[str, object]] | None = None,
+        file_context: list[dict[str, object]] | None = None,
+        system_text: str = "",
         db: Any = None,
         trace_id: str = "",
         workspace_id: str = "",
     ) -> list[ContextItem]:
         items: list[ContextItem] = []
 
+        if system_text:
+            items.append(ContextItem(
+                source_type="system",
+                source_id="",
+                text=system_text,
+                rank=0,
+                token_estimate=self._estimate_tokens(system_text),
+                included=True,
+                reason="system_policy",
+            ))
+
         items.append(ContextItem(
             source_type="current_message",
             source_id="",
             text=current_message,
             rank=0,
-            token_estimate=max(1, len(current_message.split())),
+            token_estimate=self._estimate_tokens(current_message),
             included=True,
             reason="required",
         ))
@@ -58,7 +72,7 @@ class ContextEngine:
                 source_id=str(msg.get("id", "")),
                 text=text,
                 rank=i + 1,
-                token_estimate=max(1, len(text.split())),
+                token_estimate=self._estimate_tokens(text),
                 reason="recent_history",
             ))
         for i, mem in enumerate(memories):
@@ -68,9 +82,31 @@ class ContextEngine:
                 source_id=str(mem.get("id", "")),
                 text=text,
                 rank=i + 1,
-                token_estimate=max(1, len(text.split())),
+                token_estimate=self._estimate_tokens(text),
                 reason="retrieved",
             ))
+        for i, tr in enumerate(tool_results or []):
+            text = str(tr.get("summary", "") or tr.get("error", ""))
+            if text:
+                items.append(ContextItem(
+                    source_type="tool",
+                    source_id=str(tr.get("tool", f"tool_{i}")),
+                    text=text,
+                    rank=i + 1,
+                    token_estimate=self._estimate_tokens(text),
+                    reason="tool_result",
+                ))
+        for i, fc in enumerate(file_context or []):
+            text = str(fc.get("text", ""))
+            if text:
+                items.append(ContextItem(
+                    source_type="file",
+                    source_id=str(fc.get("id", f"file_{i}")),
+                    text=text,
+                    rank=i + 1,
+                    token_estimate=self._estimate_tokens(text),
+                    reason="file_context",
+                ))
 
         items = self._apply_budget_shares(items)
         items = self._trim(items)
@@ -78,15 +114,28 @@ class ContextEngine:
         self._persist(items, db, trace_id, workspace_id)
         return items
 
+    def _estimate_tokens(self, text: str) -> int:
+        try:
+            from cogito_agent.models import token_count
+            return token_count(text)
+        except Exception:
+            char_count = len(text)
+            return max(1, char_count // 4)
+
     def _apply_budget_shares(self, items: list[ContextItem]) -> list[ContextItem]:
         budgets: dict[str, int] = {}
         for source_type, share in BUDGET_SHARES.items():
             budgets[source_type] = max(64, int(self._budget * share))
-        for item in items:
+        cat_usage: dict[str, int] = {}
+        for item in sorted(items, key=lambda x: x.rank):
             cat = self._category_for_source(item.source_type)
-            if cat in budgets and item.token_estimate > budgets[cat]:
+            cat_budget = budgets.get(cat, self._budget)
+            used = cat_usage.get(cat, 0)
+            if used + item.token_estimate > cat_budget:
                 item.included = False
                 item.reason = f"exceeded_{cat}_budget"
+            else:
+                cat_usage[cat] = used + item.token_estimate
         return items
 
     def _category_for_source(self, source_type: str) -> str:

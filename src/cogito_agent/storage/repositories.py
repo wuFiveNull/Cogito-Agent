@@ -386,6 +386,30 @@ class MemoryEditRepository:
         self._db = db
 
     def update_text(self, mid: str, workspace_id: str, text: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ?"
+            " AND deleted_at IS NULL",
+            (mid, workspace_id),
+        )
+        old = cur.fetchone()
+        if old is None:
+            return None
+        old_text = str(old["text"])
+        if old_text != text:
+            version_id = str(uuid.uuid4())
+            self._db.connection.execute(
+                "INSERT INTO memories"
+                " (id, workspace_id, type, status, text, summary, confidence,"
+                " sensitivity, source_id, created_at, updated_at)"
+                " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?,"
+                " datetime('now'), datetime('now'))",
+                (
+                    version_id, workspace_id, old["type"],
+                    old_text, old["summary"],
+                    old["confidence"], old["sensitivity"],
+                    old["source_id"],
+                ),
+            )
         self._db.connection.execute(
             "UPDATE memories SET text = ?, updated_at = datetime('now')"
             " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
