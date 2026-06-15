@@ -83,3 +83,83 @@ def test_candidates_endpoint(client: TestClient) -> None:
         "action": "accept",
     })
     assert resp.status_code == 404
+
+
+def test_list_pool_skills_empty(client: TestClient) -> None:
+    resp = client.get("/skills")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_install_skill(client: TestClient) -> None:
+    manifest = {
+        "name": "greeter",
+        "version": "1.0.0",
+        "description": "A test skill",
+        "inputs": {"name": "string"},
+        "outputs": {},
+        "steps": [
+            {
+                "id": "s1",
+                "name": "greet",
+                "kind": "transform",
+                "input_mapping": {"out": "$name"},
+            },
+        ],
+        "permissions": [],
+        "risk_level": "low",
+    }
+    resp = client.post("/skills", json={"manifest": manifest})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "greeter"
+
+
+def test_list_pool_skills_after_install(client: TestClient) -> None:
+    resp = client.get("/skills")
+    assert resp.status_code == 200
+    data = resp.json()
+    names = [s["name"] for s in data]
+    assert "greeter" in names
+
+
+def test_install_to_workspace(client: TestClient) -> None:
+    _setup(client)
+    pool_resp = client.get("/skills")
+    pool = pool_resp.json()
+    assert len(pool) > 0
+    pool_id = pool[0]["id"]
+    resp = client.post("/workspaces/ws-1/skills", json={"pool_skill_id": pool_id})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == pool[0]["name"]
+    assert data["workspace_id"] == "ws-1"
+
+
+def test_list_workspace_skills(client: TestClient) -> None:
+    resp = client.get("/workspaces/ws-1/skills")
+    assert resp.status_code == 200
+    data = resp.json()
+    names = [s["name"] for s in data]
+    assert "greeter" in names
+
+
+def test_run_skill(client: TestClient) -> None:
+    _, sid = _setup(client)
+    resp = client.post(
+        f"/sessions/{sid}/skills/greeter/run",
+        json={"workspace_id": "ws-1", "inputs": {"name": "world"}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert "trace_id" in data
+
+
+def test_run_skill_not_found(client: TestClient) -> None:
+    _, sid = _setup(client)
+    resp = client.post(
+        f"/sessions/{sid}/skills/nonexistent/run",
+        json={"workspace_id": "ws-1", "inputs": {}},
+    )
+    assert resp.status_code == 404

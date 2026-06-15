@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,7 +9,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from cogito_agent.runtime import RuntimeKernel
-from cogito_agent.shared import EventSource, EventType, RuntimeEvent
+from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
+from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
     MemoryCandidateRepository,
@@ -144,6 +146,67 @@ def action_candidate(req: CandidateAction) -> dict[str, object]:
     if result is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return result
+
+
+class SkillInstallRequest(BaseModel):
+    manifest: SkillManifest
+
+
+class WorkspaceSkillInstall(BaseModel):
+    pool_skill_id: str
+
+
+class RunSkillRequest(BaseModel):
+    workspace_id: str
+    inputs: dict[str, str] = {}
+
+
+@app.get("/skills")
+def list_pool_skills() -> list[dict[str, object]]:
+    pool = SkillPool(get_db())
+    return pool.list_all()
+
+
+@app.post("/skills")
+def install_skill(req: SkillInstallRequest) -> dict[str, object]:
+    pool = SkillPool(get_db())
+    return pool.install(req.manifest)
+
+
+@app.get("/workspaces/{wid}/skills")
+def list_workspace_skills(wid: str) -> list[dict[str, object]]:
+    ws_skill = WorkspaceSkill(get_db())
+    return ws_skill.list_by_workspace(wid)
+
+
+@app.post("/workspaces/{wid}/skills")
+def install_to_workspace(wid: str, req: WorkspaceSkillInstall) -> dict[str, object]:
+    ws_skill = WorkspaceSkill(get_db())
+    result = ws_skill.copy_from_pool(wid, req.pool_skill_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Pool skill not found")
+    return result
+
+
+@app.post("/sessions/{sid}/skills/{skill_name}/run")
+def run_skill(sid: str, skill_name: str, req: RunSkillRequest) -> dict[str, object]:
+    db = get_db()
+    ws_skill = WorkspaceSkill(db)
+    skills = ws_skill.list_by_workspace(req.workspace_id)
+    matches = [s for s in skills if s["name"] == skill_name and s.get("enabled")]
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found or disabled")
+
+    manifest_json = str(matches[0].get("manifest_json", "{}"))
+    manifest = SkillManifest(**json.loads(manifest_json))
+    runner = SkillRunner(db)
+    log = runner.run(manifest, req.workspace_id, session_id=sid, inputs=req.inputs)
+    return {
+        "trace_id": log.trace_id,
+        "skill_id": log.skill_id,
+        "status": log.status,
+        "step_logs": log.step_logs,
+    }
 
 
 def run_api(host: str = "127.0.0.1", port: int = 8000) -> None:

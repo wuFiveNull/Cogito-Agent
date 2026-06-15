@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import uuid
 
 from cogito_agent.runtime import RuntimeKernel
-from cogito_agent.shared import EventSource, EventType, RuntimeEvent
+from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
+from cogito_agent.skill import SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database, SessionRepository, WorkspaceRepository
 
 
@@ -34,7 +36,7 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() in ("exit", "quit", "/exit"):
             break
         if user_input.lower() == "/help":
-            print("Commands: exit, /help, /approve, /deny, /memory")
+            print("Commands: exit, /help, /skill list, /skill run <name> [k=v ...], /approve, /deny, /memory")  # noqa: E501
             continue
         if user_input.lower().startswith("/approve "):
             _handle_approve(db, user_input[9:].strip())
@@ -44,6 +46,12 @@ def run_cli(db_path: str = ":memory:") -> None:
             continue
         if user_input.lower() == "/memory":
             _show_memory_candidates(db, workspace_id)
+            continue
+        if user_input.lower() == "/skill list":
+            _list_skills(db, workspace_id)
+            continue
+        if user_input.lower().startswith("/skill run "):
+            _run_skill(db, workspace_id, session_id, user_input[11:].strip())
             continue
         if not user_input.strip():
             continue
@@ -105,6 +113,49 @@ def _handle_approve(db: Database, prefix: str) -> None:
     result = repo.accept(cid)
     if result:
         print(f"Accepted: {str(result.get('text', ''))[:60]}")
+
+
+def _list_skills(db: Database, workspace_id: str) -> None:
+    ws_skill = WorkspaceSkill(db)
+    skills = ws_skill.list_by_workspace(workspace_id)
+    if not skills:
+        print("No skills installed in this workspace.")
+        return
+    print(f"\nSkills in workspace ({len(skills)}):")
+    for s in skills:
+        enabled = "enabled" if s.get("enabled") else "disabled"
+        sname = str(s.get("name", ""))
+        sversion = str(s.get("version", ""))
+        sdesc = str(s.get("description", ""))
+        print(f"  {sname} v{sversion} [{enabled}]  — {sdesc[:60]}")
+
+
+def _run_skill(db: Database, workspace_id: str, session_id: str, args: str) -> None:
+    parts = args.split()
+    if not parts:
+        print("Usage: /skill run <name> [k=v ...]")
+        return
+    skill_name = parts[0]
+    inputs: dict[str, str] = {}
+    for p in parts[1:]:
+        if "=" in p:
+            k, _, v = p.partition("=")
+            inputs[k] = v
+
+    ws_skill = WorkspaceSkill(db)
+    skills = ws_skill.list_by_workspace(workspace_id)
+    matches = [s for s in skills if s["name"] == skill_name and s.get("enabled")]
+    if not matches:
+        print(f"Skill '{skill_name}' not found or not enabled in this workspace.")
+        return
+
+    manifest_json = str(matches[0].get("manifest_json", "{}"))
+    manifest = SkillManifest(**json.loads(manifest_json))
+    runner = SkillRunner(db)
+    log = runner.run(manifest, workspace_id, session_id=session_id, inputs=inputs)
+    print(f"Skill '{skill_name}' finished: {log.status}")
+    for step in log.step_logs:
+        print(f"  [{step['status']}] {step.get('output', '')}"[:80])
 
 
 def _handle_deny(db: Database, prefix: str) -> None:
