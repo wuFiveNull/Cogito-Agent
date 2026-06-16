@@ -2,7 +2,10 @@
 
 ## Version
 
-**v0.1.0-alpha candidate** (commit `d6961fe`)
+**v0.1.0-alpha**
+
+- **Code baseline:** `d6961fe` (Phase 7: CLI/API polish, replay commands, drift maintenance)
+- **Release readiness audit:** `b42386c` (doc sync 306→320, fresh checkout verification, release checklist)
 
 ## Verified Commands
 
