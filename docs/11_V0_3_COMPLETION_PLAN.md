@@ -6,7 +6,7 @@
 ## Baseline
 
 - **Base commit**: `1272449`
-- **Current commit**: `3b41347`
+- **Current commit**: `6e98743`
 - **Package**: cogito-agent 0.3.0-dev
 
 ## Epic A: Approval CLI — Complete (new in v0.3 stable candidate)

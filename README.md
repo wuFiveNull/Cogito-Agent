@@ -19,12 +19,32 @@ cogito doctor                                         # check system health
 # Interactive chat (uses config model provider)
 cogito chat
 
+# Memory management
+cogito memory list                                    # list memories
+cogito memory search <query>                          # search memories
+cogito memory review                                  # review pending candidates
+cogito memory edit <id> --text "..."                  # edit a memory
+cogito memory pin <id>                                # pin a memory
+cogito memory merge <src> <tgt>                       # merge memories
+
+# Skill management & approval workflow
+cogito skill list                                     # list installed skills
+cogito skill validate <file>                          # validate skill manifest
+cogito skill run <name>                               # run a skill
+cogito approval list                                  # list pending approvals
+cogito approval show <id>                             # show approval details
+cogito approval approve <id>                          # approve a pending request
+cogito approval reject <id>                           # reject a pending request
+cogito approval resume <skill_run_id>                 # resume after approval decision
+
 # Observability
 cogito traces list                                    # list traces with filtering
 cogito traces show <trace_id>                         # show trace detail
 cogito audit list                                     # list audit logs
 cogito audit show <audit_id>                          # show audit log detail
-cogito usage summary --last 7d                        # usage summary
+cogito usage --last 7d                                # usage summary
+cogito replay list                                    # list replayable traces
+cogito replay show <trace_id>                         # show full replay detail
 
 # Export
 cogito export --workspace default --out export.json
@@ -35,9 +55,17 @@ cogito daemon status                                  # check daemon status
 cogito schedule list                                  # list scheduled jobs
 cogito schedule maintenance consolidate --daily 03:00 # schedule a task
 
+# Inbox
+cogito inbox list                                     # list inbox items
+cogito inbox read <id>                                # show inbox item detail
+
 # API authentication (single-key, optional)
 export COGITO_API_KEY=your-secret-key
 cogito-demo              # start API server with Bearer token auth
+
+# Experimental: /chat/stream (requires env var)
+export COGITO_ENABLE_EXPERIMENTAL=1
+# POST /chat/stream — experimental SSE streaming (bypasses RuntimeKernel)
 ```
 
 **Notes:**
@@ -53,7 +81,8 @@ cogito-demo              # start API server with Bearer token auth
 
 ## Release Status
 
-**v0.2.0-alpha** — Verified: **364 tests passing**, `ruff check src/` clean, `mypy src/` clean (62 files).
+**v0.3.0-dev (stable local core candidate)** — Not released. No GitHub tag.
+Verified: **603 tests passing**, `ruff check src/` clean, `mypy src/` clean (64 files).
 
 ## Development
 

@@ -3,15 +3,18 @@
 ## State of the Repo
 
 v0.1.0-alpha released.
-v0.2.0-alpha productization complete (current release candidate):
-- Epics A–E (Real Model Config, Minimal API Auth, Data Export UX, Maintenance Scheduling, CLI Observability) are ✅ complete.
-- All prior V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–7 (Epics A–S) are complete.
+v0.2.0-alpha released.
+v0.3.0-dev (stable local core candidate, not released):
+- Approval CLI (`cogito approval list|show|approve|reject|resume`)
+- /chat/stream gated behind `COGITO_ENABLE_EXPERIMENTAL=1`
+- ruff/mypy clean across all 64 source files
+- E2E approval lifecycle validated
 
 ## Verification Status
 
-- **364 tests passing** (`pytest` clean)
+- **603 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 62 files)
+- **mypy clean** (`mypy src/` clean, 64 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 

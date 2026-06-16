@@ -517,7 +517,7 @@ def run_cli() -> None:
 
     args = parser.parse_args()
 
-    db_path = args.db_path if args.db_path else _default_db_path()
+    db_path = getattr(args, "db_path", None) or _default_db_path()
 
     if args.command == "migrate":
         _run_migrate(argparse.Namespace(db_path=db_path))
