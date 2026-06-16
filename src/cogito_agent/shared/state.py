@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
+
+from pydantic import BaseModel
 
 
 class TurnState(StrEnum):
     received = "received"
     loading_session = "loading_session"
     building_context = "building_context"
-    awaiting_model = "awaiting_model"
-    calling_tool = "calling_tool"
-    awaiting_approval = "awaiting_approval"
-    evaluating_result = "evaluating_result"
+    model_calling = "model_calling"
+    planning_tool = "planning_tool"
+    policy_checking = "policy_checking"
+    waiting_approval = "waiting_approval"
+    executing_capability = "executing_capability"
+    updating_context = "updating_context"
     composing_result = "composing_result"
-    persisting = "persisting"
+    extracting_memory = "extracting_memory"
     retrying = "retrying"
     interrupted = "interrupted"
     resuming = "resuming"
@@ -20,43 +25,90 @@ class TurnState(StrEnum):
     failed = "failed"
     denied = "denied"
     cancelled = "cancelled"
+    budget_exceeded = "budget_exceeded"
+
+
+class TurnBudget(BaseModel):
+    max_steps: int = 12
+    max_model_calls: int = 4
+    max_tool_calls: int = 5
+    max_context_tokens: int = 24000
+    max_output_tokens: int = 4000
+    max_cost_usd: float | None = None
+    deadline_at: datetime | None = None
 
 
 _TRANSITIONS: dict[TurnState, set[TurnState]] = {
-    TurnState.received: {TurnState.loading_session, TurnState.failed, TurnState.interrupted},
+    TurnState.received: {
+        TurnState.loading_session, TurnState.failed,
+        TurnState.interrupted, TurnState.cancelled, TurnState.budget_exceeded,
+    },
     TurnState.loading_session: {
-        TurnState.building_context, TurnState.failed, TurnState.interrupted,
+        TurnState.building_context, TurnState.failed,
+        TurnState.interrupted, TurnState.cancelled, TurnState.budget_exceeded,
     },
-    TurnState.building_context: {TurnState.awaiting_model, TurnState.failed, TurnState.interrupted},
-    TurnState.awaiting_model: {
-        TurnState.evaluating_result, TurnState.calling_tool,
+    TurnState.building_context: {
+        TurnState.model_calling, TurnState.failed,
+        TurnState.interrupted, TurnState.cancelled, TurnState.budget_exceeded,
+    },
+    TurnState.model_calling: {
+        TurnState.composing_result, TurnState.planning_tool,
         TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
     },
-    TurnState.calling_tool: {
-        TurnState.awaiting_approval, TurnState.evaluating_result,
-        TurnState.retrying, TurnState.failed, TurnState.interrupted,
+    TurnState.planning_tool: {
+        TurnState.policy_checking, TurnState.composing_result,
+        TurnState.model_calling,
+        TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
     },
-    TurnState.awaiting_approval: {TurnState.calling_tool, TurnState.denied, TurnState.interrupted},
-    TurnState.evaluating_result: {
-        TurnState.composing_result, TurnState.awaiting_model,
-        TurnState.calling_tool, TurnState.failed, TurnState.interrupted,
+    TurnState.policy_checking: {
+        TurnState.executing_capability, TurnState.waiting_approval,
+        TurnState.model_calling,
+        TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
     },
-    TurnState.composing_result: {TurnState.persisting, TurnState.failed, TurnState.interrupted},
-    TurnState.persisting: {TurnState.completed, TurnState.failed, TurnState.interrupted},
+    TurnState.waiting_approval: {
+        TurnState.executing_capability, TurnState.denied,
+        TurnState.interrupted, TurnState.cancelled, TurnState.budget_exceeded,
+    },
+    TurnState.executing_capability: {
+        TurnState.updating_context, TurnState.retrying,
+        TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
+    },
+    TurnState.updating_context: {
+        TurnState.model_calling, TurnState.composing_result,
+        TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
+    },
+    TurnState.composing_result: {
+        TurnState.extracting_memory, TurnState.model_calling,
+        TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
+    },
+    TurnState.extracting_memory: {
+        TurnState.completed, TurnState.failed,
+        TurnState.interrupted, TurnState.cancelled, TurnState.budget_exceeded,
+    },
     TurnState.retrying: {
-        TurnState.awaiting_model, TurnState.calling_tool,
+        TurnState.model_calling, TurnState.executing_capability,
         TurnState.failed, TurnState.interrupted,
+        TurnState.cancelled, TurnState.budget_exceeded,
     },
-    TurnState.interrupted: {TurnState.resuming, TurnState.cancelled, TurnState.failed},
+    TurnState.interrupted: {
+        TurnState.resuming, TurnState.cancelled, TurnState.failed,
+    },
     TurnState.resuming: {
         TurnState.loading_session, TurnState.building_context,
-        TurnState.calling_tool, TurnState.awaiting_model,
+        TurnState.model_calling, TurnState.executing_capability,
         TurnState.failed,
     },
     TurnState.completed: set(),
     TurnState.failed: set(),
     TurnState.denied: set(),
     TurnState.cancelled: set(),
+    TurnState.budget_exceeded: set(),
 }
 
 

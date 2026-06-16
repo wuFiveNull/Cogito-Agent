@@ -332,7 +332,7 @@ def _display_result(
     if tr.error:
         print(f"Error: {tr.error}")
 
-    if tr.state.value == "awaiting_approval" and tr.approval_pending:
+    if tr.state.value == "waiting_approval" and tr.approval_pending:
         aid = tr.approval_id or ""
         print(f"\n[Approval Required] id={aid[:8]}")
         print("  Approve? (y/N): ", end="", flush=True)

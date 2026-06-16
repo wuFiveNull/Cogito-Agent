@@ -1,0 +1,50 @@
+app:
+  name: "Cogito-Agent"
+  data_dir: "~/.cogito/data"
+  workspace_root: "~/.cogito/workspace"
+  default_entrypoint: "cli"
+
+model:
+  provider: "mock"
+  base_url: null
+  api_key_ref: null
+  model: "mock-chat"
+  timeout_seconds: 60
+  max_retries: 2
+
+runtime:
+  max_turn_steps: 12
+  max_model_calls: 4
+  max_tool_calls: 5
+  max_context_tokens: 24000
+  max_output_tokens: 4000
+  max_cost_usd_per_turn: 0.20
+  turn_timeout_seconds: 120
+
+memory:
+  enabled: true
+  write_mode: "candidate_requires_approval"
+  retrieval:
+    bm25_top_k: 8
+    vector_top_k: 0
+    final_top_k: 6
+
+trace:
+  enabled: true
+  payload_mode: "metadata_plus_redacted"
+  retention_days: 30
+
+audit:
+  enabled: true
+
+capabilities:
+  enabled:
+    - "time.now"
+    - "file.list"
+    - "file.read"
+    - "note.write"
+
+security:
+  deny_shell: true
+  deny_workspace_escape: true
+  external_content_trust: "untrusted"

@@ -1,0 +1,56 @@
+default_decision: "deny"
+
+rules:
+  - id: allow_time_now
+    actor: ["agent"]
+    capability: ["time.now"]
+    resource:
+      type: "system"
+      pattern: "*"
+    operation: ["read"]
+    decision: "allow"
+
+  - id: allow_file_list_workspace
+    actor: ["agent"]
+    capability: ["file.list"]
+    resource:
+      type: "directory"
+      pattern: "workspace://**"
+    operation: ["read"]
+    decision: "allow_with_audit"
+
+  - id: allow_file_read_workspace
+    actor: ["agent"]
+    capability: ["file.read"]
+    resource:
+      type: "file"
+      pattern: "workspace://**"
+    operation: ["read"]
+    decision: "allow_with_audit"
+
+  - id: require_approval_note_write
+    actor: ["agent"]
+    capability: ["note.write"]
+    resource:
+      type: "file"
+      pattern: "workspace://notes/**"
+    operation: ["write"]
+    decision: "require_approval"
+
+  - id: deny_shell_default
+    actor: ["agent", "skill", "plugin", "scheduler", "subagent"]
+    capability: ["shell.execute"]
+    resource:
+      type: "shell"
+      pattern: "*"
+    operation: ["execute"]
+    decision: "deny"
+
+  - id: deny_workspace_escape
+    actor: ["agent", "skill", "plugin", "scheduler", "subagent"]
+    capability: ["file.read", "file.write", "file.delete"]
+    resource:
+      type: "file"
+      pattern: "file:///**"
+    operation: ["read", "write", "delete"]
+    decision: "deny"

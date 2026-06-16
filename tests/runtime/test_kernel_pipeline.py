@@ -207,7 +207,7 @@ def test_pipeline_approval_required(db: Database) -> None:
         db, model_adapter=mock_adapter, capability_registry=cap_reg,
     )
     result = kernel.process(_make_event("write a file"))
-    assert result.state == TurnState.awaiting_approval
+    assert result.state == TurnState.waiting_approval
     assert result.approval_pending
     assert result.approval_id is not None
 

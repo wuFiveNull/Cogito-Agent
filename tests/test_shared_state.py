@@ -19,10 +19,9 @@ def test_complete_flow() -> None:
     path = [
         TurnState.loading_session,
         TurnState.building_context,
-        TurnState.awaiting_model,
-        TurnState.evaluating_result,
+        TurnState.model_calling,
         TurnState.composing_result,
-        TurnState.persisting,
+        TurnState.extracting_memory,
         TurnState.completed,
     ]
     for s in path:

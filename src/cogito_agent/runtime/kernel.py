@@ -19,6 +19,7 @@ from cogito_agent.shared import (
     TurnState,
     TurnStateMachine,
 )
+from cogito_agent.shared.safety import wrap_untrusted
 from cogito_agent.storage import Database, MessageRepository, SessionRepository
 from cogito_agent.storage.repositories import ApprovalRepository
 from cogito_agent.trace import SourceLineage, Tracer
@@ -132,7 +133,7 @@ class RuntimeKernel:
                 for c in ctx if isinstance(c, ContextItem) and c.included
             ]
 
-            self._transition(TurnState.awaiting_model)
+            self._transition(TurnState.model_calling)
             self._check_budget_model()
             self._check_model_policy(event)
             raw_text = (
@@ -143,13 +144,13 @@ class RuntimeKernel:
             text = str(raw_text) if raw_text is not None else ""
             model_resp = self._generate_reply(event, text, trace, span)
 
-            self._transition(TurnState.evaluating_result)
+            self._transition(TurnState.planning_tool)
 
             model_result = self._compose_result(event, model_resp, trace, span)
             tool_summaries = list(self._tool_results)
 
             self._transition(TurnState.composing_result)
-            self._transition(TurnState.persisting)
+            self._transition(TurnState.extracting_memory)
             output_text = model_result.content
             self._persist(event, output_text)
             self._candidate_extract(event, output_text)
@@ -191,11 +192,11 @@ class RuntimeKernel:
 
         except ApprovalRequiredError as exc:
             try:
-                self._sm.transition(TurnState.awaiting_approval)
+                self._sm.transition(TurnState.waiting_approval)
             except ValueError:
                 pass
             result = TurnResult(
-                state=TurnState.awaiting_approval,
+                state=TurnState.waiting_approval,
                 approval_pending=True,
                 approval_id=exc.approval_id,
                 error=str(exc),
@@ -350,6 +351,8 @@ class RuntimeKernel:
         for msg in recent[-6:]:
             role = str(msg.get("role", "user"))
             content = str(msg.get("content", ""))
+            if role == "tool":
+                content = wrap_untrusted(content)
             msgs.append({"role": role, "content": content})
         msgs.append({"role": "user", "content": message})
         return msgs
@@ -509,11 +512,10 @@ class RuntimeKernel:
                 "content": str(resp.content),
             })
             for r in collected_results:
+                raw = str(r.get("summary", "") or r.get("error", ""))
                 follow_up_msgs.append({
                     "role": "tool",
-                    "content": str(
-                        r.get("summary", "") or r.get("error", "")
-                    ),
+                    "content": wrap_untrusted(raw),
                 })
             follow_up = self._model_adapter.chat(follow_up_msgs)
             self._model_call_count += 1

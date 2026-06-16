@@ -4,12 +4,12 @@ from .manifests import CapabilityManifest, CapabilityType, Permission, RiskLevel
 from .policy import DecisionType, PolicyDecision, PolicyRequest
 from .schedule import JobStatus, ScheduleJob
 from .skill import OnError, SkillManifest, SkillRiskLevel, SkillStep, StepKind
-from .state import TurnState, TurnStateMachine
+from .state import TurnBudget, TurnState, TurnStateMachine
 from .trace import Span, SpanKind, Trace
 
 __all__ = [
     "RuntimeEvent", "EventSource", "EventType",
-    "TurnState", "TurnStateMachine",
+    "TurnState", "TurnStateMachine", "TurnBudget",
     "CapabilityManifest", "CapabilityType", "Permission", "RiskLevel",
     "PolicyRequest", "PolicyDecision", "DecisionType",
     "Trace", "Span", "SpanKind",
