@@ -156,15 +156,18 @@ Transition Cogito-Agent from Alpha Runtime Kernel to real local use: real model 
 
 ---
 
-## Known Limitations
+## Known Limitations (v0.2.0-alpha)
 
 1. **MockModel still default** — `config set model.provider mock` is default; real model requires env var key
-2. **API auth is single-key only** — no user management, no scopes, no rate limiting
+2. **API auth is single-key only** — no user management, no scopes, no rate limiting, no OAuth/RBAC; `/docs` and `/openapi.json` are also protected when auth enabled
 3. **Export is workspace-scoped only** — no full-database export
 4. **Daemon is blocking** — `cogito daemon run` blocks terminal; no background process management
 5. **Schedule maintenance uses one_shot fallback** — if neither `--daily` nor `--weekly` given, runs once immediately
 6. **Usage summary is time-window only** — no per-workspace breakdown, no trend visualization
 7. **Audit log show is raw SQL dump** — no redaction on audit log values (audit logs should not contain secrets)
+8. **No encrypted secret store** — API keys stored only in env vars
+9. **No rate limiting** — single-user tool, no abuse protection
+10. **No Web UI or TUI** — CLI-only and REST API
 
 ## Next Steps (v0.3.0+)
 

@@ -2,7 +2,15 @@
 
 ## State of the Repo
 
-All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–7 (Epics A–S) are complete.
+v0.2.0-alpha productization complete:
+- Epics A–E (Real Model Config, Minimal API Auth, Data Export UX, Maintenance Scheduling, CLI Observability) are ✅ complete.
+- All prior V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–7 (Epics A–S) are complete.
+
+## Verification Status
+
+- **361 tests passing** (`pytest` clean)
+- **ruff clean** (`ruff check src/` clean)
+- **mypy clean** (`mypy src/` clean, 62 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -19,7 +27,6 @@ All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–
 ## V2 Status
 
 - ✅ All V2 items except cloud migration adapters (deprioritized)
-- ✅ 320 tests passing, ruff clean, mypy clean
 
 ## Project Purpose
 

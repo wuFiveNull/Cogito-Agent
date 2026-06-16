@@ -173,6 +173,48 @@ def test_list_providers(client: TestClient) -> None:
     assert "openai" in data["providers"]
 
 
+def test_chat_with_configured_provider() -> None:
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    from cogito_agent.models.adapter import ModelAdapter, ModelResponse
+
+    fake_adapter = MagicMock(spec=ModelAdapter)
+    fake_adapter.chat.return_value = ModelResponse(
+        content="Hello from config", provider="config", model="test",
+    )
+
+    mod = sys.modules["cogito_agent.api.app"]
+    saved_kernel = mod._kernel
+    saved_db = mod._db
+    mod._kernel = None
+    mod._db = None
+    try:
+        with patch(
+            "cogito_agent.cli.config_manager.build_model_adapter_from_config",
+            return_value=fake_adapter,
+        ):
+            client = TestClient(app)
+            ws_resp = client.post("/workspaces", params={"name": "config-test"})
+            assert ws_resp.status_code == 200
+            wid = ws_resp.json()["id"]
+            sess_resp = client.post("/sessions", json={"workspace_id": wid, "title": "test"})
+            assert sess_resp.status_code == 200
+            sid = sess_resp.json()["id"]
+            resp = client.post("/chat", json={
+                "text": "hello",
+                "session_id": sid,
+                "workspace_id": wid,
+            })
+            assert resp.status_code == 200, f"Got {resp.status_code}: {resp.text}"
+            data = resp.json()
+            assert data["output"] == "Hello from config"
+            fake_adapter.chat.assert_called_once()
+    finally:
+        mod._kernel = saved_kernel
+        mod._db = saved_db
+
+
 def test_chat_stream_endpoint(client: TestClient) -> None:
     _, sid = _setup(client)
     resp = client.post("/chat/stream", json={

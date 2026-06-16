@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Cogito-Agent API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Cogito-Agent API", version="0.2.0-alpha", lifespan=lifespan)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -128,7 +128,10 @@ def get_db() -> Database:
 def get_kernel() -> RuntimeKernel:
     global _kernel
     if _kernel is None:
-        _kernel = RuntimeKernel(get_db())
+        db = get_db()
+        from cogito_agent.cli.config_manager import build_model_adapter_from_config
+        adapter = build_model_adapter_from_config()
+        _kernel = RuntimeKernel(db, model_adapter=adapter) if adapter else RuntimeKernel(db)
     return _kernel
 
 

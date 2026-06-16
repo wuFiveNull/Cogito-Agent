@@ -70,6 +70,22 @@ def test_auth_protected_endpoints_without_key() -> None:
             assert resp.status_code == 401, f"{method} {path} should return 401"
 
 
+def test_auth_docs_protected() -> None:
+    with patch.dict(os.environ, {"COGITO_API_KEY": "secret123"}, clear=True):
+        client = TestClient(app)
+        for path in ("/docs", "/openapi.json"):
+            resp = client.get(path)
+            assert resp.status_code == 401, f"{path} should return 401 with auth enabled"
+
+
+def test_auth_docs_accessible_when_disabled() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        client = TestClient(app)
+        for path in ("/docs", "/openapi.json"):
+            resp = client.get(path)
+            assert resp.status_code in (200, 307), f"{path} should be accessible without auth"
+
+
 def test_auth_protected_endpoints_with_key() -> None:
     with patch.dict(os.environ, {"COGITO_API_KEY": "secret123"}, clear=True):
         client = TestClient(app)

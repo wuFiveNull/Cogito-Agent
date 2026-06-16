@@ -11,7 +11,7 @@ from cogito_agent.storage import Database, SessionRepository, WorkspaceRepositor
 
 
 def run_cli(db_path: str = ":memory:") -> None:
-    from .config_manager import get_config
+    from .config_manager import build_model_adapter_from_config, get_config
 
     db = Database(db_path)
     db.initialize()
@@ -27,21 +27,8 @@ def run_cli(db_path: str = ":memory:") -> None:
 
     cfg = get_config()
     current_provider = cfg.get("model.provider", "mock")
-    if current_provider == "mock":
-        kernel = RuntimeKernel(db)
-    else:
-        import os as _os
-
-        from cogito_agent.models import get_adapter
-        api_key_env = cfg.get("model.api_key_env", "MODEL_API_KEY")
-        api_key = _os.environ.get(api_key_env, "")
-        adapter = get_adapter(
-            provider=current_provider,
-            model=cfg.get("model.model", ""),
-            api_key=api_key,
-            base_url=cfg.get("model.base_url", ""),
-        )
-        kernel = RuntimeKernel(db, model_adapter=adapter)
+    adapter = build_model_adapter_from_config()
+    kernel = RuntimeKernel(db, model_adapter=adapter) if adapter else RuntimeKernel(db)
 
     print("Cogito-Agent CLI  (type 'exit' to quit, '/help' for commands)")
     print("-" * 50)

@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from cogito_agent.models import list_providers
+from cogito_agent.models import ModelAdapter, get_adapter, list_providers
 from cogito_agent.models.registry import _PROVIDERS
 
 CONFIG_DIR = os.path.expanduser("~/.cogito")
@@ -62,6 +62,21 @@ def set_config_key(key: str, value: str) -> None:
     cfg = _load_raw()
     cfg[key] = value
     _save_raw(cfg)
+
+
+def build_model_adapter_from_config() -> ModelAdapter | None:
+    cfg = _load_raw()
+    provider = cfg.get("model.provider", "mock")
+    if provider == "mock":
+        return None
+    api_key_env = cfg.get("model.api_key_env", "MODEL_API_KEY")
+    api_key = os.environ.get(api_key_env, "")
+    return get_adapter(
+        provider=provider,
+        model=cfg.get("model.model", ""),
+        api_key=api_key,
+        base_url=cfg.get("model.base_url", ""),
+    )
 
 
 def doctor() -> list[dict[str, str]]:
