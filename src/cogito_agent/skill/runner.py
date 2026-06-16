@@ -58,6 +58,7 @@ class SkillRunner:
         log = SkillRunLog(trace.id, manifest.name, "running")
         audit = AuditLogger(self._db)
 
+        total_cost: float = 0.0
         executed_steps: list[SkillStep] = []
         step_context: dict[str, dict[str, str]] = {}
 
@@ -69,6 +70,16 @@ class SkillRunner:
                 span = self._tracer.create_span(
                     trace.id, f"step_{step.id}", SpanKind.runtime
                 )
+
+            cfg = step.execution
+            if cfg.max_budget_cost is not None and total_cost >= cfg.max_budget_cost:
+                log.status = "failed"
+                log.step_logs.append({
+                    "step_id": step.id,
+                    "status": "error",
+                    "error": f"Budget exhausted ({total_cost}/{cfg.max_budget_cost})",
+                })
+                break
 
             # Governance: audit each step execution
             decision = "allow"
@@ -96,6 +107,9 @@ class SkillRunner:
                 if step.output_mapping:
                     for out_key, out_val in step.output_mapping.items():
                         step_context[step.id][out_key] = str(out_val)
+
+                step_cost = self._estimate_step_cost(step)
+                total_cost += step_cost
 
                 step_status = "ok"
                 step_output = norm[:500]
@@ -417,6 +431,14 @@ class SkillRunner:
             else:
                 result[k] = v
         return result
+
+    @staticmethod
+    def _estimate_step_cost(step: SkillStep) -> float:
+        if step.kind == StepKind.llm:
+            return 0.002
+        if step.kind == StepKind.capability:
+            return 0.001
+        return 0.0
 
     def _persist_run_log(
         self, log: SkillRunLog, workspace_id: str, skill_name: str

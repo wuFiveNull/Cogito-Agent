@@ -36,7 +36,7 @@ class ProactiveEngine:
             f"INSERT INTO daemon_state (id, {cols}, updated_at)"
             f" VALUES ('main', {placeholders}, ?)"
             f" ON CONFLICT(id) DO UPDATE SET {set_clause}, updated_at = ?",
-            [*vals, now, now],
+            [*vals, now, *vals, now],
         )
         self._db.connection.commit()
 

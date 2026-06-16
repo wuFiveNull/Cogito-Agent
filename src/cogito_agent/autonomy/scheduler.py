@@ -89,12 +89,14 @@ class SchedulerEngine:
         self._db.connection.commit()
         return jid
 
-    def cancel(self, job_id: str) -> None:
-        self._db.connection.execute(
-            "UPDATE scheduled_jobs SET enabled = 0, updated_at = ? WHERE id = ?",
-            (datetime.now(UTC).isoformat(), job_id),
+    def cancel(self, job_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "UPDATE scheduled_jobs SET status = ?, enabled = 0, updated_at = ?"
+            " WHERE id = ?",
+            (JobStatus.cancelled.value, datetime.now(UTC).isoformat(), job_id),
         )
         self._db.connection.commit()
+        return cur.rowcount > 0
 
     def get_job(self, job_id: str) -> ScheduleJob | None:
         cur = self._db.connection.execute(

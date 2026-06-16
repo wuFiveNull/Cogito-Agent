@@ -11,6 +11,7 @@ class JobStatus(StrEnum):
     completed = "completed"
     failed = "failed"
     skipped = "skipped"
+    cancelled = "cancelled"
 
 
 class ScheduleJob(BaseModel):

@@ -113,7 +113,12 @@ class Tracer:
         latency_ms: int = 0,
         stop_reason: str = "",
         error: str | None = None,
+        redactions: list[str] | None = None,
     ) -> None:
+        if redactions:
+            for token in redactions:
+                prompt_summary = prompt_summary.replace(token, "[REDACTED]")
+                response_summary = response_summary.replace(token, "[REDACTED]")
         self._db.connection.execute(
             "INSERT INTO model_calls"
             " (trace_id, span_id, provider, model,"
