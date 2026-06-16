@@ -2,7 +2,7 @@
 
 ## Release Candidate
 
-**v0.2.0-alpha** — eef875f
+**v0.2.0-alpha** — 2f3a3ec
 
 ## Verification Environment
 
@@ -15,10 +15,10 @@
 
 ## Test Results
 
-### pytest (361 passed, 0 failed)
+### pytest (364 passed, 0 failed)
 
 ```
-collected 361 items
+collected 364 items
 ... (all passed)
 ```
 
@@ -89,4 +89,4 @@ Success: no issues found in 62 source files
 
 ## Tag Recommendation
 
-**Yes** — suggested tag: `v0.2.0-alpha` at commit `eef875f`.
+**Yes** — suggested tag: `v0.2.0-alpha` at commit `2f3a3ec`.

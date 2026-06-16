@@ -14,9 +14,9 @@ Transition Cogito-Agent from Alpha Runtime Kernel to real local use: real model 
 | D: Drift Maintenance Scheduling | ✅ Complete | 6 | `cli/__init__.py` — daemon once/run/status, schedule list/maintenance |
 | E: CLI Observability | ✅ Complete | 9 | `cli/__init__.py` — traces list/show, audit list/show, usage summary |
 
-**Total new tests:** 41
+**Total new tests:** 44 (41 epic + 3 release closure)
 
-**Final test count:** 361 passed
+**Final test count:** 364 passed
 
 **Lint:** ruff clean | **Typecheck:** mypy clean (62 files)
 

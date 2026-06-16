@@ -2,13 +2,14 @@
 
 ## State of the Repo
 
-v0.2.0-alpha productization complete:
+v0.1.0-alpha released.
+v0.2.0-alpha productization complete (current release candidate):
 - Epics A–E (Real Model Config, Minimal API Auth, Data Export UX, Maintenance Scheduling, CLI Observability) are ✅ complete.
 - All prior V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–7 (Epics A–S) are complete.
 
 ## Verification Status
 
-- **361 tests passing** (`pytest` clean)
+- **364 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
 - **mypy clean** (`mypy src/` clean, 62 files)
 
