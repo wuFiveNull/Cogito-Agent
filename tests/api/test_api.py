@@ -215,7 +215,8 @@ def test_chat_with_configured_provider() -> None:
         mod._db = saved_db
 
 
-def test_chat_stream_endpoint(client: TestClient) -> None:
+def test_chat_stream_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COGITO_ENABLE_EXPERIMENTAL", "1")
     _, sid = _setup(client)
     resp = client.post("/chat/stream", json={
         "text": "hello",
@@ -227,7 +228,8 @@ def test_chat_stream_endpoint(client: TestClient) -> None:
     assert resp.headers.get("content-type", "").startswith("text/event-stream")
 
 
-def test_chat_stream_no_session(client: TestClient) -> None:
+def test_chat_stream_no_session(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COGITO_ENABLE_EXPERIMENTAL", "1")
     resp = client.post("/chat/stream", json={
         "text": "hello",
         "session_id": "nonexistent",

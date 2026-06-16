@@ -1,3 +1,4 @@
+# mypy: disable-error-code="return-value"
 from __future__ import annotations
 
 import json
@@ -239,7 +240,10 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
     if sess is None:
-        return _error_response("NOT_FOUND", "Session not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Session not found",
+            request.state.request_id, status_code=404,
+        )
 
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
@@ -265,7 +269,10 @@ def resume_chat(req: ResumeRequest, request: Request) -> ChatResponse:
     repo = ApprovalRepository(db)
     approval = repo.resolve(req.approval_id, req.decision, "api")
     if approval is None:
-        return _error_response("NOT_FOUND", "Approval not found or already resolved", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Approval not found or already resolved",
+            request.state.request_id, status_code=404,
+        )
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
         session_id=req.session_id,
@@ -318,7 +325,10 @@ def get_trace_full(trace_id: str, request: Request) -> dict[str, object]:
     inspector = TraceInspector(get_db())
     trace = inspector.get_trace_full(trace_id)
     if trace is None:
-        return _error_response("NOT_FOUND", "Trace not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Trace not found",
+            request.state.request_id, status_code=404,
+        )
     return trace
 
 
@@ -330,7 +340,10 @@ def get_trace(trace_id: str, request: Request) -> dict[str, object]:
     )
     row = cur.fetchone()
     if row is None:
-        return _error_response("NOT_FOUND", "Trace not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Trace not found",
+            request.state.request_id, status_code=404,
+        )
     trace = dict(row)
     cur = db.connection.execute(
         "SELECT * FROM spans WHERE trace_id = ?", (trace_id,)
@@ -348,9 +361,16 @@ def action_candidate(req: CandidateAction, request: Request) -> dict[str, object
     elif req.action == "reject":
         result = repo.reject(req.candidate_id)
     else:
-        return _error_response("VALIDATION_ERROR", "Invalid action, use 'accept' or 'reject'", request.state.request_id, status_code=400)
+        return _error_response(
+            "VALIDATION_ERROR",
+            "Invalid action, use 'accept' or 'reject'",
+            request.state.request_id, status_code=400,
+        )
     if result is None:
-        return _error_response("NOT_FOUND", "Candidate not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Candidate not found",
+            request.state.request_id, status_code=404,
+        )
     return result
 
 
@@ -376,12 +396,21 @@ class RunSkillRequest(BaseModel):
 
 @app.post("/chat/stream")
 def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
-    logger.warning("/chat/stream is EXPERIMENTAL — bypasses RuntimeKernel. Use /chat for production.")
+    if not os.environ.get("COGITO_ENABLE_EXPERIMENTAL"):
+        return _error_response(
+            "FEATURE_DISABLED",
+            "/chat/stream is experimental and disabled by default."
+            " Set COGITO_ENABLE_EXPERIMENTAL=1 to enable.",
+            request.state.request_id, status_code=403,
+        )
     db = get_db()
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
     if sess is None:
-        return _error_response("NOT_FOUND", "Session not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Session not found",
+            request.state.request_id, status_code=404,
+        )
 
     adapter = get_adapter(provider=req.provider)
     messages = [
@@ -389,7 +418,7 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
     ]
 
     def event_stream() -> Generator[str, None, None]:
-        logger.warning("/chat/stream event_stream: experimental code path — bypasses RuntimeKernel")
+        logger.info("/chat/stream streaming response started")
         full_content = ""
         for token in adapter.stream_chat(messages):
             full_content += token
@@ -470,7 +499,10 @@ def get_workspace(wid: str, request: Request) -> dict[str, object]:
     repo = WorkspaceRepository(db)
     ws = repo.get_by_id(wid)
     if ws is None:
-        return _error_response("NOT_FOUND", "Workspace not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Workspace not found",
+            request.state.request_id, status_code=404,
+        )
     return ws
 
 
@@ -480,7 +512,10 @@ def delete_workspace(wid: str, request: Request) -> dict[str, str]:
     repo = WorkspaceRepository(db)
     ws = repo.get_by_id(wid)
     if ws is None:
-        return _error_response("NOT_FOUND", "Workspace not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Workspace not found",
+            request.state.request_id, status_code=404,
+        )
     repo.soft_delete(wid)
     return {"status": "deleted"}
 
@@ -502,12 +537,18 @@ def list_memories(
 
 
 @app.put("/memories/{mid}")
-def update_memory(mid: str, workspace_id: str, req: MemoryUpdateRequest, request: Request) -> dict[str, object]:
+def update_memory(
+    mid: str, workspace_id: str,
+    req: MemoryUpdateRequest, request: Request,
+) -> dict[str, object]:
     db = get_db()
     repo = MemoryEditRepository(db)
     result = repo.update_text(mid, workspace_id, req.text)
     if result is None:
-        return _error_response("NOT_FOUND", "Memory not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Memory not found",
+            request.state.request_id, status_code=404,
+        )
     return result
 
 
@@ -516,7 +557,10 @@ def delete_memory(mid: str, workspace_id: str, request: Request) -> dict[str, st
     db = get_db()
     repo = MemoryEditRepository(db)
     if not repo.hard_delete(mid, workspace_id):
-        return _error_response("NOT_FOUND", "Memory not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Memory not found",
+            request.state.request_id, status_code=404,
+        )
     return {"status": "deleted"}
 
 
@@ -550,7 +594,10 @@ def resolve_approval(aid: str, req: ApprovalResolveRequest, request: Request) ->
     repo = ApprovalRepository(db)
     result = repo.resolve(aid, req.decision, req.decided_by)
     if result is None:
-        return _error_response("NOT_FOUND", "Approval not found or already resolved", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Approval not found or already resolved",
+            request.state.request_id, status_code=404,
+        )
     return result
 
 
@@ -594,7 +641,10 @@ def export_workspace(workspace_id: str, request: Request) -> dict[str, object]:
     )
     ws = cur.fetchone()
     if ws is None:
-        return _error_response("NOT_FOUND", "Workspace not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Workspace not found",
+            request.state.request_id, status_code=404,
+        )
 
     data: dict[str, object] = {
         "workspace": dict(ws),
@@ -619,7 +669,7 @@ def export_workspace(workspace_id: str, request: Request) -> dict[str, object]:
     )
     data["traces"] = [dict(r) for r in cur.fetchall()]
 
-    return _redact_dict(data, RedactionHelper())  # type: ignore[return-value]
+    return _redact_dict(data, RedactionHelper())
 
 
 @app.post("/workspaces/{wid}/cleanup")
@@ -661,22 +711,34 @@ def list_workspace_skills(wid: str) -> list[dict[str, object]]:
 
 
 @app.post("/workspaces/{wid}/skills")
-def install_to_workspace(wid: str, req: WorkspaceSkillInstall, request: Request) -> dict[str, object]:
+def install_to_workspace(
+    wid: str, req: WorkspaceSkillInstall, request: Request,
+) -> dict[str, object]:
     ws_skill = WorkspaceSkill(get_db())
     result = ws_skill.copy_from_pool(wid, req.pool_skill_id)
     if result is None:
-        return _error_response("NOT_FOUND", "Pool skill not found", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND", "Pool skill not found",
+            request.state.request_id, status_code=404,
+        )
     return result
 
 
 @app.post("/sessions/{sid}/skills/{skill_name}/run")
-def run_skill(sid: str, skill_name: str, req: RunSkillRequest, request: Request) -> dict[str, object]:
+def run_skill(
+    sid: str, skill_name: str,
+    req: RunSkillRequest, request: Request,
+) -> dict[str, object]:
     db = get_db()
     ws_skill = WorkspaceSkill(db)
     skills = ws_skill.list_by_workspace(req.workspace_id)
     matches = [s for s in skills if s["name"] == skill_name and s.get("enabled")]
     if not matches:
-        return _error_response("NOT_FOUND", f"Skill '{skill_name}' not found or disabled", request.state.request_id, status_code=404)
+        return _error_response(
+            "NOT_FOUND",
+            f"Skill '{skill_name}' not found or disabled",
+            request.state.request_id, status_code=404,
+        )
 
     manifest_json = str(matches[0].get("manifest_json", "{}"))
     manifest = SkillManifest(**json.loads(manifest_json))

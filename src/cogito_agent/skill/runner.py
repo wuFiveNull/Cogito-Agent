@@ -99,7 +99,8 @@ class SkillRunner:
 
             try:
                 result = self._execute_step_with_controls(
-                    step, workspace_id, inputs or {}, step_context
+                    step, workspace_id, inputs or {}, step_context,
+                    session_id=session_id,
                 )
                 executed_steps.append(step)
                 norm = self._normalize_output(result)
@@ -277,7 +278,8 @@ class SkillRunner:
 
                 try:
                     result = self._execute_step_with_controls(
-                        step, workspace_id, inputs, step_context
+                        step, workspace_id, inputs, step_context,
+                        session_id=session_id,
                     )
                     executed_steps.append(step)
                     norm = self._normalize_output(result)
@@ -455,6 +457,7 @@ class SkillRunner:
         workspace_id: str,
         inputs: dict[str, str],
         step_context: dict[str, dict[str, str]],
+        session_id: str = "",
     ) -> object:
         if step.kind == StepKind.transform:
             return self._apply_mapping(step, inputs, step_context)
@@ -473,7 +476,9 @@ class SkillRunner:
                 step.condition_expression, inputs, step_context
             )
         if step.kind == StepKind.approval:
-            return self._execute_approval_step(step, workspace_id, step_context)
+            return self._execute_approval_step(
+                step, workspace_id, step_context, session_id=session_id,
+            )
         return None
 
     def _execute_step_with_controls(
@@ -482,6 +487,7 @@ class SkillRunner:
         workspace_id: str,
         inputs: dict[str, str],
         step_context: dict[str, dict[str, str]],
+        session_id: str = "",
     ) -> object:
         cfg = step.execution
 
@@ -492,7 +498,8 @@ class SkillRunner:
             start = _time.monotonic()
             try:
                 result = self._execute_step(
-                    step, workspace_id, inputs, step_context
+                    step, workspace_id, inputs, step_context,
+                    session_id=session_id,
                 )
                 elapsed = _time.monotonic() - start
                 if cfg.timeout_seconds > 0 and elapsed > cfg.timeout_seconds:
@@ -557,6 +564,7 @@ class SkillRunner:
         step: SkillStep,
         workspace_id: str,
         step_context: dict[str, dict[str, str]],
+        session_id: str = "",
     ) -> dict[str, str]:
         from cogito_agent.storage.repositories import ApprovalRepository
 
@@ -568,7 +576,7 @@ class SkillRunner:
             capability_name=f"skill.{step.name}",
             operation="execute",
             reason=f"Approval step: {step.name}",
-            session_id=step_context.get("_session_id", ""),
+            session_id=session_id,
         )
         audit.log(
             actor_id="skill",

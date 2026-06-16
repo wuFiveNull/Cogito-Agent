@@ -24,7 +24,6 @@ class SecretProvider(Protocol):
 
 class EnvSecretProvider:
     def __init__(self, prefix: str = "COGITO_") -> None:
-        import os
         self._prefix = prefix
 
     def get_secret(self, key: str) -> str | None:
@@ -55,12 +54,18 @@ class RedactionHelper:
             PatternRule(r"Bearer\s+\S+", "Bearer [REDACTED]"),
             PatternRule(r"sk-[A-Za-z0-9]{20,}", "[REDACTED_API_KEY]"),
             PatternRule(r"sk-[A-Za-z0-9_-]{20,}", "[REDACTED_API_KEY]"),
-            PatternRule(r"(?:api[_-]?key|apikey|secret|token)\s*[:=]\s*['\"]?\S+", "[KEY]=[REDACTED]"),
+            PatternRule(
+                r"(?:api[_-]?key|apikey|secret|token)\s*[:=]\s*['\"]?\S+",
+                "[KEY]=[REDACTED]",
+            ),
             PatternRule(r"Authorization\s*:\s*\S+", "Authorization: [REDACTED]"),
             PatternRule(r"Cookie\s*:\s*[^;\n]+", "Cookie: [REDACTED]"),
             PatternRule(r"https?://[^:@\s]+:[^@\s]+@", "https://[REDACTED]@"),
             PatternRule(r"(?i)(token|api_key|access_token)=[^&\s]+", r"\1=[REDACTED]"),
-            PatternRule(r"(?i)(session|auth|xsrf|jwt)[_\-.](token|key|id)\s*[:=]\s*['\"]?\S+", r"\1_\2=[REDACTED]"),
+            PatternRule(
+                r"(?i)(session|auth|xsrf|jwt)[_\-.](token|key|id)\s*[:=]\s*['\"]?\S+",
+                r"\1_\2=[REDACTED]",
+            ),
         ]
         self._secret_providers = secret_providers or [EnvSecretProvider()]
         self._compile_env_rules()

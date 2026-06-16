@@ -86,7 +86,9 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Name:        {skill['name']}")
             print(f"  Version:     {skill['version']}")
             print(f"  Description: {skill.get('description', '')}")
-            manifest = SkillManifest.model_validate_json(skill.get("manifest_json", "{}"))
+            manifest = SkillManifest.model_validate_json(
+                str(skill.get("manifest_json", "{}"))
+            )
             print(f"  Risk Level:  {manifest.risk_level.value}")
             print(f"  Steps:       {len(manifest.steps)}")
             for step in manifest.steps:
@@ -118,7 +120,9 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Skill '{args.skill_name}' not found.")
         else:
             import json as _json
-            manifest = SkillManifest.model_validate_json(skill.get("manifest_json", "{}"))
+            manifest = SkillManifest.model_validate_json(
+                str(skill.get("manifest_json", "{}"))
+            )
             output = manifest.model_dump_json(indent=2)
             if args.output_path:
                 with open(args.output_path, "w", encoding="utf-8") as f:
@@ -132,19 +136,21 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Skill '{args.skill_name}' not found.")
             db.close()
             return
-        manifest = SkillManifest.model_validate_json(skill.get("manifest_json", "{}"))
+        manifest = SkillManifest.model_validate_json(
+            str(skill.get("manifest_json", "{}"))
+        )
         ws_skill = WorkspaceSkill(db)
         ws_skills = ws_skill.list_by_workspace("*")
-        ws_id = ws_skills[0]["workspace_id"] if ws_skills else "default"
+        ws_id = str(ws_skills[0]["workspace_id"]) if ws_skills else "default"
         inputs: dict[str, str] = {}
         if args.input_path:
             import json as _json
             with open(args.input_path, encoding="utf-8") as f:
                 inputs = _json.load(f)
         runner = SkillRunner(db)
-        result = runner.run(manifest, ws_id, inputs=inputs)
-        print(f"  Skill run: {result.status}")
-        for sl in result.step_logs:
+        log = runner.run(manifest, ws_id, inputs=inputs)
+        print(f"  Skill run: {log.status}")
+        for sl in log.step_logs:
             st = sl.get("status", "")
             sid = sl.get("step_id", "")
             out = str(sl.get("output", ""))[:80]
@@ -372,6 +378,45 @@ def run_cli() -> None:
     skill_run_cmd = skill_sub.add_parser("run", help="Run a skill")
     skill_run_cmd.add_argument("skill_name", help="Skill name")
     skill_run_cmd.add_argument("--input", dest="input_path", default=None, help="Input JSON file")
+
+    # Approval CLI
+    approval_parser = sub.add_parser("approval", help="Manage approvals")
+    approval_parser.set_defaults(db_path=None)
+    approval_parser.add_argument(
+        "--db", dest="db_path",
+        help="SQLite database path (default: ~/.cogito/cogito.db)",
+    )
+    approval_sub = approval_parser.add_subparsers(dest="approval_action", help="Approval command")
+
+    approval_list = approval_sub.add_parser("list", help="List approvals")
+    approval_list.add_argument(
+        "--status", default="pending",
+        choices=["pending", "approved", "rejected", "all"],
+        help="Filter by status (default: pending)",
+    )
+    approval_list.add_argument("--workspace-id", default="*", help="Workspace ID filter")
+
+    approval_show = approval_sub.add_parser("show", help="Show approval details")
+    approval_show.add_argument("approval_id", help="Approval ID")
+
+    approval_approve = approval_sub.add_parser("approve", help="Approve a pending approval")
+    approval_approve.add_argument("approval_id", help="Approval ID")
+    approval_approve.add_argument(
+        "--force", action="store_true",
+        help="Force approve even if already resolved",
+    )
+
+    approval_reject = approval_sub.add_parser("reject", help="Reject a pending approval")
+    approval_reject.add_argument("approval_id", help="Approval ID")
+    approval_reject.add_argument(
+        "--force", action="store_true",
+        help="Force reject even if already resolved",
+    )
+
+    approval_resume = approval_sub.add_parser(
+        "resume", help="Resume a pending skill run after approval",
+    )
+    approval_resume.add_argument("skill_run_id", help="Skill run ID to resume")
 
     schedule_parser = sub.add_parser("schedule", help="View or create scheduled jobs")
     schedule_sub = schedule_parser.add_subparsers(dest="schedule_action", help="Schedule command")
@@ -883,6 +928,33 @@ def run_cli() -> None:
             output_path=getattr(args, "output_path", None),
             input_path=getattr(args, "input_path", None),
         ))
+    elif args.command == "approval":
+        from .approval import (
+            _run_approval_approve,
+            _run_approval_list,
+            _run_approval_reject,
+            _run_approval_resume,
+            _run_approval_show,
+        )
+        approval_dispatch = {
+            "list": _run_approval_list,
+            "show": _run_approval_show,
+            "approve": _run_approval_approve,
+            "reject": _run_approval_reject,
+            "resume": _run_approval_resume,
+        }
+        handler = approval_dispatch.get(args.approval_action)
+        if handler:
+            handler(argparse.Namespace(
+                db_path=db_path,
+                approval_id=getattr(args, "approval_id", ""),
+                skill_run_id=getattr(args, "skill_run_id", ""),
+                status=getattr(args, "status", "pending"),
+                workspace_id=getattr(args, "workspace_id", "*"),
+                force=getattr(args, "force", False),
+            ))
+        else:
+            print("Usage: cogito approval list|show|approve|reject|resume")
     elif args.command == "config":
         from .config_manager import KEYS, get_config, set_config_key
 

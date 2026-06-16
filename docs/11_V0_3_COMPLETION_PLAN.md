@@ -1,15 +1,27 @@
-# 11 V0.3.0 Core Completion Candidate
+# 11 V0.3.0 Stable Local Core Candidate
 
-> **Status**: Core-complete candidate. Not released. No GitHub tag or release.
+> **Status**: Stable local core candidate. Not released. No GitHub tag or release.
 > **Do not use in production until formal release.**
 
 ## Baseline
 
 - **Base commit**: `1272449`
-- **Current commit**: `1830449` (pending)
+- **Current commit**: `3b41347`
 - **Package**: cogito-agent 0.3.0-dev
 
-## Epic A: Memory V2 — Complete
+## Epic A: Approval CLI — Complete (new in v0.3 stable candidate)
+
+### Completed Capabilities
+- CLI: `cogito approval list|show|approve|reject|resume`
+- `_run_approval_list` — lists approvals with `--status` (pending/approved/rejected/all) and `--workspace-id` filters
+- `_run_approval_show` — shows approval details with redaction
+- `_run_approval_approve` — approves a pending approval via `ApprovalRepository.resolve()`, links to skill run for resume hint
+- `_run_approval_reject` — rejects a pending approval via `ApprovalRepository.resolve()`, links to skill run for resume hint
+- `_run_approval_resume` — resumes a pending skill run after approval decision using `SkillRunner.resume()`
+- Audit logging for all approval CLI actions
+- 26 tests in `tests/cli/test_approval_cli.py`
+
+## Epic B: Memory V2 — Complete (from v0.3 core-complete)
 
 ### Completed Capabilities
 - CLI: `cogito memory list|search|review|accept|reject|delete|pin|edit|correct|archive|unarchive|unpin|merge|consolidate`
@@ -49,7 +61,7 @@
 - `Tracer.log_model_call()` now accepts `redactions` parameter (like log_tool_call)
 
 ### Known Limitations
-- `/chat/stream` still bypasses RuntimeKernel (governance/trace/audit) — explicitly marked experimental
+- `/chat/stream` still bypasses RuntimeKernel (governance/trace/audit) — gated behind `COGITO_ENABLE_EXPERIMENTAL=1` env var
 - Rate limit is in-memory only, not shared across process restarts
 - No request body size limits
 
@@ -103,7 +115,6 @@
 - Added skill run/replay tests: run log creation, step logs persistence, status persistence, approval interruption, resume trace
 
 ### Known Limitations
-- No `cogito approval` CLI subcommand (approvals are resolvable via API or directly via `ApprovalRepository`)
 - `max_budget_cost` uses simple per-step cost estimates (0.002 for LLM, 0.001 for capability), not actual provider costs
 
 ## Epic E: Secret Redaction — Complete
@@ -134,28 +145,34 @@
 
 | Suite | Result |
 |-------|--------|
-| pytest | **576 passed**, 0 failed |
-| ruff check src/ | **30 pre-existing issues** (29 E501 line-too-long, 1 F401 unused-import). No new issues from v0.3 changes. |
-| mypy src/ | **24 pre-existing type errors** in 4 files (api/app.py, cli/__init__.py, cli/daemon.py, skill/runner.py). No new issues from v0.3 changes. |
+| pytest | **603 passed**, 0 failed |
+| ruff check src/ | **0 issues** (29 E501 fixed, 1 F401 fixed) |
+| mypy src/ | **0 issues** (24 type errors fixed, all 64 files clean) |
 
-## Files Modified (code changes)
+## Files Modified (code changes — v0.3 stable candidate)
 
 | File | Change |
 |------|--------|
 | `src/cogito_agent/autonomy/loop.py:39` | Fixed `_update_state()` SQL binding count (5→8) |
 | `src/cogito_agent/autonomy/scheduler.py:92` | `cancel()` sets `status='cancelled'` + enabled=0, returns bool |
 | `src/cogito_agent/shared/schedule.py:14` | Added `JobStatus.cancelled` |
-| `src/cogito_agent/skill/runner.py` | Approval step blocking + resume; budget tracking (`_estimate_step_cost`, total_cost, max_budget_cost check) |
+| `src/cogito_agent/skill/runner.py` | Approval step blocking + resume; budget tracking; added `session_id` parameter to `_execute_step_with_controls`, `_execute_step`, `_execute_approval_step` |
 | `src/cogito_agent/trace/tracer.py:103` | `log_model_call()` accepts `redactions: list[str] \| None = None` |
 | `src/cogito_agent/storage/database.py` | Added migration 5 (`ALTER TABLE skill_run_logs ADD COLUMN resume_data_json TEXT`) |
 | `src/cogito_agent/storage/repositories.py` | Added `ApprovalRepository.get_by_id()` |
-| `src/cogito_agent/api/app.py` | Added `_db.migrate()` in `get_db()` |
+| `src/cogito_agent/api/app.py` | Added `_db.migrate()` in `get_db()`; `/chat/stream` gated behind `COGITO_ENABLE_EXPERIMENTAL`; E501 line length fixes; mypy return-value suppressions |
+| `src/cogito_agent/cli/approval.py` | **New** — approval CLI handlers (list/show/approve/reject/resume) |
+| `src/cogito_agent/cli/__init__.py` | Added `approval` subcommand parser + dispatch; `model_validate_json()` str() casts; `SkillRunner.run()` result type fix |
+| `src/cogito_agent/cli/daemon.py` | Fixed `ProactiveEngine()` call (named params: `db=db, tick_interval=...`) |
+| `src/cogito_agent/trace/redaction.py` | E501 line length fixes |
+| `src/cogito_agent/storage/repositories.py` | E501 line length fixes in MemoryEditRepository |
 | `tests/skill/conftest.py` | Added `database.migrate()` to `db` fixture |
 | `tests/skill/test_runner.py` | Added `db.migrate()` |
 | `tests/skill/test_runner_extended.py` | Added `db.migrate()` |
 | `tests/skill/test_skill_approval_step.py` | Updated assertions to expect `pending_approval` status |
+| `tests/api/test_api.py` | Added `monkeypatch.setenv("COGITO_ENABLE_EXPERIMENTAL", "1")` for chat_stream tests |
 
-## New Test Files (27 files, 156 new tests)
+## New Test Files (29 files, 183 new tests)
 
 | Epic | Test File | Tests |
 |------|-----------|-------|
@@ -181,10 +198,12 @@
 | E | `tests/trace/test_secret_redaction.py` | 11 |
 | E | `tests/export/test_secret_redaction.py` | 5 |
 | E | `tests/cli/test_doctor_redaction.py` | 9 |
-
+| A | `tests/cli/test_approval_cli.py` | 26 |
+| E | `tests/e2e/test_v0_3_core_flow.py` | 1 |
+ 
 ## New CLI Commands
 
-None added (all CLI commands existed from first round).
+- `cogito approval list|show|approve|reject|resume`
 
 ## Database Schema Changes
 
@@ -193,8 +212,7 @@ None added (all CLI commands existed from first round).
 
 ## Next Priorities (v0.4)
 
-1. `cogito approval list|resolve` CLI subcommand
-2. `/chat/stream` full RuntimeKernel integration (remove experimental bypass)
-3. OS keychain integration for `KeychainSecretProvider`
-4. Vector DB integration for semantic memory search
-5. Cross-process daemon control
+1. `/chat/stream` full RuntimeKernel integration (remove experimental bypass)
+2. OS keychain integration for `KeychainSecretProvider`
+3. Vector DB integration for semantic memory search
+4. Cross-process daemon control

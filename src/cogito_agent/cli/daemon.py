@@ -13,7 +13,7 @@ def run_daemon(db_path: str = ":memory:", tick_interval: float = 30.0) -> None:
 
     scheduler = SchedulerEngine(db)
     gate = NotificationGate(db)
-    engine = ProactiveEngine(scheduler, gate, tick_interval)
+    engine = ProactiveEngine(scheduler, gate, db=db, tick_interval=tick_interval)
 
     def _handle_signal(signum: int, _frame: object) -> None:
         print(f"\n[daemon] Signal {signum} received, shutting down...")

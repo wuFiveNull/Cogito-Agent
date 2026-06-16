@@ -432,7 +432,8 @@ class MemoryRepository:
                 (rowid, merged_text, str(target["summary"] or "")),
             )
         self._db.connection.execute(
-            "UPDATE memories SET archived_at = datetime('now'), source_id = ?, updated_at = datetime('now')"
+            "UPDATE memories SET archived_at = datetime('now'),"
+            " source_id = ?, updated_at = datetime('now')"
             " WHERE id = ?",
             (target_mid, source_mid),
         )
@@ -449,13 +450,15 @@ class MemoryRepository:
         )
         log_id1 = str(uuid.uuid4())
         self._db.connection.execute(
-            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            "INSERT INTO memory_edit_log"
+            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
             " VALUES (?, ?, ?, ?, ?, 'merge_source_archived', ?)",
             (log_id1, source_mid, workspace_id, source_text, merged_text, "cli"),
         )
         log_id2 = str(uuid.uuid4())
         self._db.connection.execute(
-            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            "INSERT INTO memory_edit_log"
+            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
             " VALUES (?, ?, ?, ?, ?, 'merge_target_updated', ?)",
             (log_id2, target_mid, workspace_id, target_text, merged_text, "cli"),
         )
@@ -476,7 +479,8 @@ class MemoryRepository:
         version_id = str(uuid.uuid4())
         self._db.connection.execute(
             "INSERT INTO memories"
-            " (id, workspace_id, type, status, text, summary, confidence, sensitivity, source_id, created_at, updated_at)"
+            " (id, workspace_id, type, status, text, summary,"
+            " confidence, sensitivity, source_id, created_at, updated_at)"
             " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
             (version_id, workspace_id, str(old["type"]), old_text, str(old["summary"] or ""),
              float(old["confidence"] or 0.5), str(old["sensitivity"] or "normal"), mid),
@@ -504,14 +508,17 @@ class MemoryRepository:
         )
         log_id = str(uuid.uuid4())
         self._db.connection.execute(
-            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            "INSERT INTO memory_edit_log"
+            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
             " VALUES (?, ?, ?, ?, ?, 'edit', ?)",
             (log_id, mid, workspace_id, old_text, new_text, actor_id),
         )
         self._db.connection.commit()
         return True
 
-    def correct_text(self, mid: str, workspace_id: str, new_text: str, actor_id: str = "cli") -> bool:
+    def correct_text(
+        self, mid: str, workspace_id: str, new_text: str, actor_id: str = "cli",
+    ) -> bool:
         cur = self._db.connection.execute(
             "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (mid, workspace_id),
@@ -525,7 +532,8 @@ class MemoryRepository:
         version_id = str(uuid.uuid4())
         self._db.connection.execute(
             "INSERT INTO memories"
-            " (id, workspace_id, type, status, text, summary, confidence, sensitivity, source_id, created_at, updated_at)"
+            " (id, workspace_id, type, status, text, summary,"
+            " confidence, sensitivity, source_id, created_at, updated_at)"
             " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
             (version_id, workspace_id, str(old["type"]), old_text, str(old["summary"] or ""),
              float(old["confidence"] or 0.5), str(old["sensitivity"] or "normal"), mid),
@@ -553,7 +561,8 @@ class MemoryRepository:
         )
         log_id = str(uuid.uuid4())
         self._db.connection.execute(
-            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            "INSERT INTO memory_edit_log"
+            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
             " VALUES (?, ?, ?, ?, ?, 'correct', ?)",
             (log_id, mid, workspace_id, old_text, new_text, actor_id),
         )
