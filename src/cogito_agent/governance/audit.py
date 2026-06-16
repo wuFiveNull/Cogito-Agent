@@ -18,7 +18,13 @@ class AuditLogger:
         decision: str = "",
         reason: str = "",
         details: str = "{}",
+        redact_details: bool = True,
     ) -> None:
+        if redact_details and details and details != "{}":
+            from cogito_agent.trace.redaction import RedactionHelper
+
+            helper = RedactionHelper()
+            details = helper.redact(details)
         self._db.connection.execute(
             "INSERT INTO audit_logs"
             " (actor_id, action, resource, workspace_id, session_id,"

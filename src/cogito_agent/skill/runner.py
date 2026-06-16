@@ -6,6 +6,7 @@ import uuid
 
 from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.governance import PolicyEngine
+from cogito_agent.models import ModelAdapter
 from cogito_agent.shared import PolicyRequest, SpanKind
 from cogito_agent.shared.skill import OnError, SkillManifest, SkillStep, StepKind
 from cogito_agent.storage import Database
@@ -18,6 +19,7 @@ class SkillRunLog:
         self.skill_id = skill_id
         self.status = status
         self.step_logs: list[dict[str, object]] = []
+        self.outputs: dict[str, str] = {}
 
 
 class SkillRunner:
@@ -26,10 +28,12 @@ class SkillRunner:
         db: Database,
         capability_registry: CapabilityRegistry | None = None,
         policy_engine: PolicyEngine | None = None,
+        model_adapter: ModelAdapter | None = None,
     ) -> None:
         self._db = db
         self._cap_reg = capability_registry or CapabilityRegistry()
         self._policy = policy_engine or PolicyEngine()
+        self._model_adapter = model_adapter
         self._tracer = Tracer(db)
 
     def run(
@@ -47,21 +51,30 @@ class SkillRunner:
         log = SkillRunLog(trace.id, manifest.name, "running")
 
         executed_steps: list[SkillStep] = []
+        step_context: dict[str, dict[str, str]] = {}
 
         self._preflight_all(manifest, workspace_id)
         self._check_semver(manifest)
 
         for step in manifest.steps:
-            span = self._tracer.create_span(
-                trace.id, f"step_{step.id}", SpanKind.runtime
-            )
+            if step.trace_required:
+                span = self._tracer.create_span(
+                    trace.id, f"step_{step.id}", SpanKind.runtime
+                )
             try:
-                result = self._execute_step(step, workspace_id, inputs or {})
+                result = self._execute_step(
+                    step, workspace_id, inputs or {}, step_context
+                )
                 executed_steps.append(step)
+                norm = self._normalize_output(result)
+                step_context[step.id] = {"_output": norm}
+                if step.output_mapping:
+                    for out_key, out_val in step.output_mapping.items():
+                        step_context[step.id][out_key] = str(out_val)
                 log.step_logs.append({
                     "step_id": step.id,
                     "status": "ok",
-                    "output": self._normalize_output(result)[:500],
+                    "output": norm[:500],
                     "artifacts": self._extract_artifacts(result),
                     "lineage": self._extract_lineage(result),
                 })
@@ -73,14 +86,17 @@ class SkillRunner:
                 })
                 if step.on_error == OnError.stop:
                     log.status = "failed"
-                    self._tracer.end_span(span)
+                    if step.trace_required:
+                        self._tracer.end_span(span)
                     break
                 if step.on_error == OnError.rollback:
                     log.status = "rolled_back"
                     self._execute_rollback(manifest, workspace_id, executed_steps)
-                    self._tracer.end_span(span)
+                    if step.trace_required:
+                        self._tracer.end_span(span)
                     break
-            self._tracer.end_span(span)
+            if step.trace_required:
+                self._tracer.end_span(span)
 
         if log.status == "running":
             log.status = "completed"
@@ -177,12 +193,16 @@ class SkillRunner:
     # ── Step execution ─────────────────────────────────────────────────
 
     def _execute_step(
-        self, step: SkillStep, workspace_id: str, inputs: dict[str, str]
+        self,
+        step: SkillStep,
+        workspace_id: str,
+        inputs: dict[str, str],
+        step_context: dict[str, dict[str, str]],
     ) -> object:
         if step.kind == StepKind.transform:
-            return self._apply_mapping(step, inputs)
+            return self._apply_mapping(step, inputs, step_context)
         if step.kind == StepKind.capability and step.uses_capability:
-            mapped = self._apply_mapping(step, inputs)
+            mapped = self._apply_mapping(step, inputs, step_context)
             result = self._cap_reg.invoke(step.uses_capability, **mapped)
             if result is None:
                 raise RuntimeError(
@@ -190,17 +210,51 @@ class SkillRunner:
                 )
             return result
         if step.kind == StepKind.llm:
-            return f"[llm step] {step.prompt}"
+            return self._execute_llm_step(step, inputs, step_context)
         return None
 
+    def _execute_llm_step(
+        self,
+        step: SkillStep,
+        inputs: dict[str, str],
+        step_context: dict[str, dict[str, str]],
+    ) -> str:
+        if self._model_adapter is None:
+            prompt = step.prompt or ""
+            mapped = self._apply_mapping(step, inputs, step_context)
+            if mapped:
+                prompt = prompt.format(**mapped)
+            return f"[llm stub] {prompt[:200]}"
+        messages: list[dict[str, str]] = [{"role": "user", "content": step.prompt}]
+        response = self._model_adapter.chat(messages)
+        return response.content or ""
+
+    def _resolve_ref(
+        self,
+        ref: str,
+        inputs: dict[str, str],
+        step_context: dict[str, dict[str, str]],
+    ) -> str:
+        parts = ref.split(".")
+        if parts[0] == "input" and len(parts) == 2:
+            return inputs.get(parts[1], "")
+        if parts[0] == "step" and len(parts) >= 2:
+            ctx = step_context.get(parts[1], {})
+            if len(parts) == 2:
+                return ctx.get("_output", "")
+            return ctx.get(parts[2], "")
+        return inputs.get(ref, "")
+
     def _apply_mapping(
-        self, step: SkillStep, inputs: dict[str, str]
+        self,
+        step: SkillStep,
+        inputs: dict[str, str],
+        step_context: dict[str, dict[str, str]],
     ) -> dict[str, str]:
         result: dict[str, str] = {}
         for k, v in step.input_mapping.items():
             if v.startswith("$"):
-                key = v[1:]
-                result[k] = inputs.get(key, "")
+                result[k] = self._resolve_ref(v[1:], inputs, step_context)
             else:
                 result[k] = v
         return result
@@ -208,6 +262,10 @@ class SkillRunner:
     def _persist_run_log(
         self, log: SkillRunLog, workspace_id: str, skill_name: str
     ) -> None:
+        payload = {
+            "step_logs": log.step_logs,
+            "outputs": log.outputs,
+        }
         self._db.connection.execute(
             "INSERT INTO skill_run_logs"
             " (id, workspace_id, skill_name, trace_id, status, step_logs_json)"
@@ -218,7 +276,7 @@ class SkillRunner:
                 skill_name,
                 log.trace_id,
                 log.status,
-                json.dumps(log.step_logs),
+                json.dumps(payload),
             ),
         )
         self._db.connection.commit()

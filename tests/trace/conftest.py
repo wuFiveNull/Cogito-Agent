@@ -10,6 +10,7 @@ from cogito_agent.trace import Tracer
 def db() -> Database:
     database = Database(":memory:")
     database.initialize()
+    database.migrate()
     return database
 
 

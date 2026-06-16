@@ -338,6 +338,25 @@ class MemoryRepository:
         cur = self._db.connection.execute(sql, (workspace_id,))
         return _rows_to_dicts(cur.fetchall())
 
+    def pin(self, mid: str, workspace_id: str) -> bool:
+        from datetime import UTC, datetime
+        cur = self._db.connection.execute(
+            "UPDATE memories SET pinned_at = ?"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (datetime.now(UTC).isoformat(), mid, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
+
+    def archive(self, mid: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "UPDATE memories SET archived_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
+
     def soft_delete(self, mid: str, workspace_id: str) -> None:
         self._db.connection.execute(
             "UPDATE memories SET deleted_at = datetime('now')"
@@ -520,7 +539,7 @@ class MemoryEditRepository:
                     version_id, workspace_id, old["type"],
                     old_text, old["summary"],
                     old["confidence"], old["sensitivity"],
-                    old["source_id"],
+                    mid,
                 ),
             )
         self._db.connection.execute(

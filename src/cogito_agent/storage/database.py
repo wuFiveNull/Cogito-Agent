@@ -7,9 +7,9 @@ from typing import Any
 _SCHEMA_VERSION = 1
 
 
-def _load_migration_sql() -> str:
+def _load_migration_sql(name: str = "0001_initial.sql") -> str:
     here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "migrations", "0001_initial.sql")
+    path = os.path.join(here, "migrations", name)
     with open(path, encoding="utf-8") as f:
         return f.read()
 
@@ -21,6 +21,9 @@ _MIGRATIONS: dict[int, str] = {}
 
 def register_migration(version: int, sql: str) -> None:
     _MIGRATIONS[version] = sql
+
+
+register_migration(2, _load_migration_sql("0002_memory_v2.sql"))
 
 
 class Database:

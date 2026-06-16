@@ -292,6 +292,31 @@ def run_cli() -> None:
         help="Time period (e.g. 7d, 30d, 1d)",
     )
 
+    mem_parser = sub.add_parser("memory", help="Manage memories")
+    mem_parser.set_defaults(db_path=None)
+    mem_parser.add_argument(
+        "--db", dest="db_path",
+        help="SQLite database path (default: ~/.cogito/cogito.db)",
+    )
+    mem_parser.add_argument(
+        "--workspace-id", dest="workspace_id", default=None,
+        help="Scope to a specific workspace",
+    )
+    mem_sub = mem_parser.add_subparsers(dest="memory_action", help="Memory command")
+    mem_sub.add_parser("list", help="List memories")
+    mem_search = mem_sub.add_parser("search", help="Search memories")
+    mem_search.add_argument("query", help="Search query")
+    mem_sub.add_parser("review", help="Review pending candidates")
+    mem_accept = mem_sub.add_parser("accept", help="Accept a candidate")
+    mem_accept.add_argument("candidate_id", help="Candidate ID")
+    mem_reject = mem_sub.add_parser("reject", help="Reject a candidate")
+    mem_reject.add_argument("candidate_id", help="Candidate ID")
+    mem_delete = mem_sub.add_parser("delete", help="Delete a memory")
+    mem_delete.add_argument("memory_id", help="Memory ID")
+    mem_pin = mem_sub.add_parser("pin", help="Pin a memory")
+    mem_pin.add_argument("memory_id", help="Memory ID")
+    mem_sub.add_parser("consolidate", help="Deduplicate memories")
+
     args = parser.parse_args()
 
     db_path = args.db_path if args.db_path else _default_db_path()
@@ -580,6 +605,40 @@ def run_cli() -> None:
         print(f"    messages:    {messages}")
         print(f"    audit_logs:  {audit_logs}")
         _udb.close()
+    elif args.command == "memory":
+        ws_id = getattr(args, "workspace_id", None) or "*"
+        mem_ns = argparse.Namespace(
+            db_path=db_path,
+            workspace_id=ws_id,
+            query=getattr(args, "query", ""),
+            candidate_id=getattr(args, "candidate_id", ""),
+            memory_id=getattr(args, "memory_id", ""),
+        )
+        from .memory import (
+            _run_memory_accept,
+            _run_memory_consolidate,
+            _run_memory_delete,
+            _run_memory_list,
+            _run_memory_pin,
+            _run_memory_reject,
+            _run_memory_review,
+            _run_memory_search,
+        )
+        dispatch = {
+            "list": _run_memory_list,
+            "search": _run_memory_search,
+            "review": _run_memory_review,
+            "accept": _run_memory_accept,
+            "reject": _run_memory_reject,
+            "delete": _run_memory_delete,
+            "pin": _run_memory_pin,
+            "consolidate": _run_memory_consolidate,
+        }
+        handler = dispatch.get(args.memory_action)
+        if handler:
+            handler(mem_ns)
+        else:
+            print("Usage: cogito memory list|search|review|accept|reject|delete|pin|consolidate")
     elif args.command == "config":
         from .config_manager import KEYS, get_config, set_config_key
 

@@ -82,7 +82,12 @@ class Tracer:
         output_summary: str = "",
         latency_ms: int = 0,
         error: str | None = None,
+        redactions: list[str] | None = None,
     ) -> None:
+        if redactions:
+            for token in redactions:
+                input_summary = input_summary.replace(token, "[REDACTED]")
+                output_summary = output_summary.replace(token, "[REDACTED]")
         self._db.connection.execute(
             "INSERT INTO tool_calls"
             " (trace_id, span_id, capability_name, input_summary,"

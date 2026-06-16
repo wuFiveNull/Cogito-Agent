@@ -9,10 +9,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 
+from cogito_agent.cli.export import _redact_dict
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import get_adapter, list_providers
 from cogito_agent.runtime import RuntimeKernel
@@ -41,6 +44,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Cogito-Agent API", version="0.2.0-alpha", lifespan=lifespan)
 
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Validation error", "errors": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request.state.request_id = rid
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        return response
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Any:
         api_key = os.environ.get("COGITO_API_KEY", "")
@@ -53,6 +93,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
 
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(AuthMiddleware)
 
 
@@ -521,7 +562,9 @@ def export_workspace(workspace_id: str) -> dict[str, object]:
     )
     data["traces"] = [dict(r) for r in cur.fetchall()]
 
-    return data
+    from cogito_agent.trace.redaction import RedactionHelper
+
+    return _redact_dict(data, RedactionHelper())  # type: ignore[return-value]
 
 
 @app.post("/workspaces/{wid}/cleanup")

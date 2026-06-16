@@ -493,6 +493,9 @@ class RuntimeKernel:
                 if hasattr(policy_dec.decision, "value")
                 else str(policy_dec.decision)
             )
+            tool_redactions = (
+                list(getattr(tool_result, "redactions", [])) if tool_result else []
+            )
             self._tracer.log_tool_call(
                 trace_id=str(getattr(trace, "id", "")),
                 span_id=str(getattr(span, "id", "")),
@@ -503,6 +506,7 @@ class RuntimeKernel:
                 output_summary=summary[:200] if summary else "",
                 latency_ms=tool_latency,
                 error=error,
+                redactions=tool_redactions or None,
             )
 
             self._audit.log(

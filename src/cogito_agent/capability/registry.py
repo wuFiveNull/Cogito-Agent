@@ -122,7 +122,8 @@ class CapabilityRegistry:
         if entry is None:
             return None
         manifest, invoke_fn = entry
-        if manifest.input_schema and isinstance(manifest.input_schema, dict):
+        has_schema = manifest is not None and bool(manifest.input_schema)
+        if has_schema and isinstance(manifest.input_schema, dict):
             err = _validate_json_schema(manifest.input_schema, kwargs)
             if err:
                 return ToolResult(

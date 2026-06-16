@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.shared import (
     DecisionType,
@@ -53,12 +54,14 @@ class SchedulerEngine:
         audit_logger: AuditLogger | None = None,
         policy_engine: PolicyEngine | None = None,
         notification_gate: NotificationGate | None = None,
+        capability_registry: CapabilityRegistry | None = None,
     ) -> None:
         self._db = db
         self._tracer = tracer or Tracer(db)
         self._audit = audit_logger or AuditLogger(db)
         self._policy = policy_engine or PolicyEngine()
         self._gate = notification_gate or NotificationGate(db)
+        self._cap_reg = capability_registry or CapabilityRegistry()
 
     def schedule(self, job: ScheduleJob) -> str:
         now = datetime.now(UTC).isoformat()
@@ -142,6 +145,15 @@ class SchedulerEngine:
                 (JobStatus.skipped.value, now.isoformat(), job.id),
             )
             self._db.connection.commit()
+            self._audit.log(
+                actor_id=job.actor,
+                action="job.skipped",
+                resource=f"job:{job.id}",
+                workspace_id=job.workspace_id,
+                decision="deny",
+                reason="quiet_hours",
+                details=json.dumps({"job_name": job.name, "reason": "quiet_hours"}),
+            )
             return
 
         req = PolicyRequest(
@@ -158,7 +170,25 @@ class SchedulerEngine:
                 (JobStatus.skipped.value, now.isoformat(), job.id),
             )
             self._db.connection.commit()
+            self._audit.log(
+                actor_id=job.actor,
+                action="job.skipped",
+                resource=f"job:{job.id}",
+                workspace_id=job.workspace_id,
+                decision="deny",
+                reason="policy_denied",
+                details=json.dumps({
+                    "job_name": job.name,
+                    "policy_reason": decision.reason,
+                }),
+            )
             return
+
+        self._db.connection.execute(
+            "UPDATE scheduled_jobs SET status = ?, updated_at = ? WHERE id = ?",
+            (JobStatus.running.value, now.isoformat(), job.id),
+        )
+        self._db.connection.commit()
 
         trace = self._tracer.create_trace(
             workspace_id=job.workspace_id,
@@ -186,24 +216,48 @@ class SchedulerEngine:
         new_status = JobStatus.completed
         if not job.dry_run:
             try:
-                self._db.connection.execute(
-                    "UPDATE scheduled_jobs SET retry_count = retry_count + 1"
-                    " WHERE id = ?",
-                    (job.id,),
-                )
-                self._db.connection.commit()
+                registry = self._cap_reg
+                kwargs = json.loads(job.input_json) if job.input_json else {}
+                result = registry.invoke(job.capability_name, **kwargs)
+                if result is None:
+                    new_status = JobStatus.failed
+                elif result.status == "error":
+                    new_status = JobStatus.failed
             except Exception:
                 new_status = JobStatus.failed
+
+            self._db.connection.execute(
+                "UPDATE scheduled_jobs SET retry_count = retry_count + 1"
+                " WHERE id = ?",
+                (job.id,),
+            )
+            self._db.connection.commit()
+
+            if new_status == JobStatus.failed and job.retry_count < job.max_retries:
+                new_status = JobStatus.failed
+                retry_next = (now + timedelta(seconds=60 * (2 ** job.retry_count))).isoformat()
+                self._db.connection.execute(
+                    "UPDATE scheduled_jobs"
+                    " SET status = ?, last_run_at = ?, next_run_at = ?,"
+                    " updated_at = ?, retry_count = ?"
+                    " WHERE id = ?",
+                    (new_status.value, now.isoformat(), retry_next,
+                     now.isoformat(), job.retry_count + 1, job.id),
+                )
+                self._db.connection.commit()
+                self._tracer.end_span(span)
+                self._tracer.end_trace(trace)
+                return
 
         self._tracer.end_span(span)
         self._tracer.end_trace(trace)
 
-        next_run = self._compute_next_run(job, now)
+        final_next = self._compute_next_run(job, now) if new_status == JobStatus.completed else None
         self._db.connection.execute(
             "UPDATE scheduled_jobs"
             " SET status = ?, last_run_at = ?, next_run_at = ?, updated_at = ?"
             " WHERE id = ?",
-            (new_status.value, now.isoformat(), next_run, now.isoformat(), job.id),
+            (new_status.value, now.isoformat(), final_next, now.isoformat(), job.id),
         )
         self._db.connection.commit()
 
