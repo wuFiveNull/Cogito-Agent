@@ -181,6 +181,25 @@ def list_sessions(workspace_id: str) -> list[dict[str, object]]:
     return sess_repo.list_by_workspace(workspace_id)
 
 
+@app.get("/traces")
+def list_traces(workspace_id: str) -> list[dict[str, object]]:
+    from cogito_agent.cli.replay import TraceInspector
+
+    inspector = TraceInspector(get_db())
+    return inspector.list_traces(workspace_id)
+
+
+@app.get("/traces/{trace_id}/full")
+def get_trace_full(trace_id: str) -> dict[str, object]:
+    from cogito_agent.cli.replay import TraceInspector
+
+    inspector = TraceInspector(get_db())
+    trace = inspector.get_trace_full(trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return trace
+
+
 @app.get("/traces/{trace_id}")
 def get_trace(trace_id: str) -> dict[str, object]:
     db = get_db()

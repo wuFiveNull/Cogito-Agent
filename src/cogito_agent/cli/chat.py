@@ -40,7 +40,7 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() in ("exit", "quit", "/exit"):
             break
         if user_input.lower() == "/help":
-            print("Commands: exit, /help, /ws list, /ws switch, /ws create, /ws delete, /memory list, /memory edit, /memory delete, /approvals, /approve, /deny, /skill list, /skill run, /stream, /provider, /export, /ws settings")  # noqa: E501
+            print("Commands: exit, /help, /ws list, /ws switch, /ws create, /ws delete, /memory list, /memory edit, /memory delete, /approvals, /approve, /deny, /skill list, /skill run, /trace list, /trace show, /stream, /provider, /export, /ws settings")  # noqa: E501
             continue
         if user_input.lower() == "/provider":
             provs = list_providers()
@@ -122,6 +122,12 @@ def run_cli(db_path: str = ":memory:") -> None:
             continue
         if user_input.lower().startswith("/skill run "):
             _run_skill(db, workspace_id, session_id, user_input[11:].strip())
+            continue
+        if user_input.lower() == "/trace list":
+            _list_traces(db, workspace_id)
+            continue
+        if user_input.lower().startswith("/trace show "):
+            _show_trace(db, user_input[12:].strip())
             continue
         if not user_input.strip():
             continue
@@ -463,3 +469,30 @@ def _handle_deny(db: Database, prefix: str) -> None:
     result = repo.reject(cid)
     if result:
         print(f"Rejected: {str(result.get('text', ''))[:60]}")
+
+
+def _list_traces(db: Database, workspace_id: str) -> None:
+    from cogito_agent.cli.replay import TraceInspector
+
+    inspector = TraceInspector(db)
+    traces = inspector.list_traces(workspace_id)
+    if not traces:
+        print("No traces found.")
+        return
+    print(f"\nTraces ({len(traces)}):")
+    for t in traces:
+        tid = str(t.get("id", ""))[:12]
+        status = str(t.get("status", ""))
+        started = str(t.get("started_at", ""))[:19]
+        print(f"  {tid}  [{status}]  {started}")
+
+
+def _show_trace(db: Database, trace_id: str) -> None:
+    from cogito_agent.cli.replay import TraceInspector
+
+    inspector = TraceInspector(db)
+    trace = inspector.get_trace_full(trace_id)
+    if trace is None:
+        print(f"Trace '{trace_id}' not found.")
+        return
+    print(inspector.format_trace_detail(trace))
