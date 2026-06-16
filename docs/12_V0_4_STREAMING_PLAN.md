@@ -1,12 +1,13 @@
 # 12 V0.4.0 Streaming Runtime Integration
 
-> **Status**: Complete — /chat/stream now uses RuntimeKernel.
+> **Status**: Complete — /chat/stream now uses RuntimeKernel. Dogfood validation passed.
 > **Not released. No GitHub tag or release.**
 
 ## Baseline
 
 - **Base commit**: `6839589`
-- **Current commit**: (pending dogfood commit)
+- **Current commit**: (pending dogfood commit — see below)
+- **Dogfood validation commit**: (current HEAD, see git log)
 - **Package**: cogito-agent 0.3.0-dev
 
 ## Epic A: /chat/stream RuntimeKernel Integration — Complete
@@ -44,7 +45,7 @@ event: final
 data: {"response": "...", "trace_id": "...", "state": "completed"}
 
 event: approval_required
-data: { "approval_id": "...", "summary": "..." }
+data: {"approval_id": "...", "trace_id": "...", "summary": "Approval required"}
 
 event: error
 data: {"error": {"code": "...", "message": "...", "request_id": "...", "trace_id": "...", "retryable": false}}
@@ -65,17 +66,39 @@ Nothing — /chat/stream now fully uses RuntimeKernel.
 
 | File | Tests |
 |------|-------|
-| `tests/api/test_stream_runtime.py` | 6 — runtime kernel integration, metadata, final, redaction, gate removal |
+| `tests/api/test_stream_runtime.py` | 7 — runtime kernel integration, metadata, final, approval_required SSE format, redaction, gate removal |
 | `tests/api/test_stream_error_schema.py` | 4 — 404, 422, unified error schema, no secrets |
 | `tests/e2e/test_stream_runtime_e2e.py` | 2 — full E2E streaming flow, trace verification |
 
-Total: **12 new tests**
+Total: **13 new tests**
+
+## Dogfood Validation
+
+A standalone validation script `scripts/dogfood_v0_4_validate.py` covers 70 checks across Parts 2–6 using FastAPI `TestClient` in-process (no uvicorn needed):
+
+| Part | Checks | Coverage |
+|------|--------|----------|
+| Part 2: API / Stream Dogfood | 24 | SSE format, metadata, final, X-Request-ID, no X-Experimental, redaction |
+| Part 3a: API Auth | 12 | No key / wrong key / correct key, error schema, no token leak |
+| Part 3b: Rate Limit | 5 | 429, retryable=true, no traceback |
+| Part 3c: Validation Error | 5 | 422, request_id, no traceback |
+| Part 4: Trace / Replay | 7 | Traces exist, trace_id match, spans |
+| Part 5: Approval Required | 3 | SSE event emitted, approval_id, trace_id |
+| Part 6: Redaction | 14 | All pattern rules, /chat/stream, error responses, no raw secrets |
+
+**Result: 70/70 passed.**
+
+## Bugs Fixed During Dogfood
+
+1. **Middleware ordering crash** (`app.py` lines 151–153): `RateLimitMiddleware` ran before `RequestIDMiddleware`, so `request.state.request_id` was undefined when rate‑limit triggered → `AttributeError`. Fixed by reordering middleware so `RequestIDMiddleware` runs first (outermost).
+
+2. **`approval_required` SSE event had empty `{}` data** (`app.py` line 439–443): Missing `approval_id` and `trace_id` fields. Fixed to include `approval_id`, `trace_id`, and a redacted `summary`.
 
 ## Test Results
 
 | Suite | Result |
 |-------|--------|
-| pytest | **615 passed**, 0 failed |
+| pytest | **616 passed**, 0 failed |
 | ruff check src/ | **0 issues** |
 | mypy src/ | **0 issues** (64 files) |
 

@@ -148,9 +148,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return _error_response("UNAUTHORIZED", "Unauthorized", rid, status_code=401)
 
 
-app.add_middleware(RequestIDMiddleware)
+# Order: innermost first, outermost last.
+# RequestIDMiddleware must run first (outermost) so request.state.request_id is set
+# before AuthMiddleware/RateLimitMiddleware dispatch.
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
+app.add_middleware(RequestIDMiddleware)
 
 
 _db: Database | None = None
@@ -434,9 +437,18 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
                 )
 
             if result.approval_pending and result.approval_id:
+                safe_summary = (
+                    redactor.redact(result.approval_summary)
+                    if hasattr(result, "approval_summary") and result.approval_summary
+                    else "Approval required"
+                )
                 yield (
                     f"event: approval_required\n"
-                    f"data: {json.dumps({})}\n\n"
+                    f"data: {json.dumps({
+                        'approval_id': result.approval_id,
+                        'trace_id': trace_id,
+                        'summary': safe_summary,
+                    })}\n\n"
                 )
                 return
 

@@ -2,11 +2,22 @@
 from __future__ import annotations
 
 import json
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app
+from cogito_agent.capability import CapabilityRegistry
+from cogito_agent.capability.registry import ToolResult
+from cogito_agent.models import ModelAdapter, ModelResponse
+from cogito_agent.runtime import RuntimeKernel
+from cogito_agent.shared.manifests import (
+    CapabilityManifest,
+    CapabilityType,
+    RiskLevel,
+)
 
 
 @pytest.fixture
@@ -111,3 +122,78 @@ def test_chat_stream_response_is_redacted(client: TestClient) -> None:
     assert "event: final" in body
     assert "Bearer" not in body
     assert "Authorization" not in body
+
+
+def _get_api_mod():
+    """Get module object despite __init__.py shadowing."""
+    return sys.modules.get("cogito_agent.api.app")
+
+
+def test_chat_stream_approval_required_event() -> None:
+    """Stream outputs approval_required event with approval_id and trace_id."""
+    api_mod = _get_api_mod()
+    original_kernel = getattr(api_mod, "_kernel", None)
+
+    # Register a capability that requires approval
+    cap_reg = CapabilityRegistry()
+    cap_reg.register(
+        "write_file",
+        CapabilityManifest(
+            name="write_file",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="Write a file",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.medium,
+            allowed_contexts=["interactive"],
+            approval_required=True,
+            audit_required=True,
+            idempotent=False,
+        ),
+        lambda **kw: ToolResult(status="ok", summary="written"),
+    )
+
+    mock_adapter = MagicMock(spec=ModelAdapter)
+    mock_adapter.chat.return_value = ModelResponse(
+        content="writing file now",
+        tool_intents=[{"name": "write_file", "arguments": {}}],
+    )
+
+    custom_kernel = RuntimeKernel(
+        getattr(api_mod, "_db") if getattr(api_mod, "_db") else api_mod.get_db(),
+        model_adapter=mock_adapter,
+        capability_registry=cap_reg,
+    )
+    api_mod._kernel = custom_kernel
+
+    try:
+        with patch.dict("os.environ", {}, clear=True):
+            c = TestClient(app)
+            sresp = c.post("/sessions",
+                           json={"workspace_id": "ws-approval", "title": "t"})
+            sid = str(sresp.json().get("id", ""))
+            resp = c.post("/chat/stream", json={
+                "text": "write file",
+                "session_id": sid,
+                "workspace_id": "ws-approval",
+            })
+            assert resp.status_code == 200
+            body = resp.text
+            assert "event: approval_required" in body
+            lines = body.strip().split("\n")
+            payload = None
+            for i, line in enumerate(lines):
+                if line == "event: approval_required":
+                    data_line = lines[i + 1] if i + 1 < len(lines) else ""
+                    if data_line.startswith("data: "):
+                        payload = json.loads(data_line[6:])
+                        break
+            assert payload is not None, "No data line after approval_required event"
+            assert "approval_id" in payload, "approval_required data missing approval_id"
+            assert "trace_id" in payload, "approval_required data missing trace_id"
+            assert payload["approval_id"], "approval_id must be non-empty"
+            assert payload["trace_id"], "trace_id must be non-empty"
+    finally:
+        api_mod._kernel = original_kernel

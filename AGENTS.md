@@ -11,9 +11,17 @@ v0.3.0-dev (stable local core candidate, not released):
 - ruff/mypy clean across all 64 source files
 - E2E approval lifecycle validated
 
+v0.4.0-dev (streaming runtime integration, not released):
+- /chat/stream fully integrated with RuntimeKernel (no experimental gate, no bypass header)
+- SSE events include approval_id + trace_id in approval_required event
+- Middleware ordering fixed: RequestID runs before Auth and RateLimit
+- Dogfood validation passed (70/70 checks)
+- Current limitation: chunked final response, not true per-token streaming
+- No GitHub tag or release
+
 ## Verification Status
 
-- **603 tests passing** (`pytest` clean)
+- **616 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
 - **mypy clean** (`mypy src/` clean, 64 files)
 

@@ -77,7 +77,7 @@ curl -X POST http://localhost:8000/chat/stream \
 - **MockModel** is the default provider. For a real model, set `model.provider` via `cogito config` and configure the API key through an environment variable (never written to config file, trace, audit, or export).
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
-- **Limitations:** No Web UI or TUI, no rate limiting, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only.
+- **Limitations:** No Web UI or TUI, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only.
 - **/chat/stream**: Uses chunked final response (not true per-token streaming). RuntimeKernel executes fully before emitting SSE events. Future versions may add true token streaming with tool-interrupt support.
 
 ## Requirements
@@ -86,8 +86,9 @@ curl -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.3.0-dev (stable local core candidate)** — Not released. No GitHub tag.
-Verified: **603 tests passing**, `ruff check src/` clean, `mypy src/` clean (64 files).
+**v0.4.0-dev (streaming runtime integration)** — Not released. No GitHub tag or release.
+Verified: **616 tests passing**, `ruff check src/` clean, `mypy src/` clean (64 files).
+/chat/stream fully integrated with RuntimeKernel. Dogfood validation passed (70/70 checks).
 
 ## Development
 
