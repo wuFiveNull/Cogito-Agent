@@ -66,6 +66,13 @@ class SessionCreate(BaseModel):
     title: str = "API Session"
 
 
+class ResumeRequest(BaseModel):
+    approval_id: str
+    session_id: str
+    workspace_id: str
+    decision: str = "approved"
+
+
 class CandidateAction(BaseModel):
     candidate_id: str
     action: str
@@ -121,6 +128,31 @@ def chat(req: ChatRequest) -> ChatResponse:
         payload={"text": req.text},
     )
     result = kernel.process(event)
+    return ChatResponse(
+        output=result.output,
+        error=result.error,
+        session_id=req.session_id,
+        state=result.state.value if hasattr(result.state, "value") else str(result.state),
+    )
+
+
+@app.post("/chat/resume", response_model=ChatResponse)
+def resume_chat(req: ResumeRequest) -> ChatResponse:
+    db = get_db()
+    kernel = get_kernel()
+    repo = ApprovalRepository(db)
+    approval = repo.resolve(req.approval_id, req.decision, "api")
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found or already resolved")
+    event = RuntimeEvent(
+        workspace_id=req.workspace_id,
+        session_id=req.session_id,
+        actor_id="user",
+        source=EventSource.api,
+        type=EventType.resume,
+        payload={"approval_id": req.approval_id},
+    )
+    result = kernel.resume(event) if hasattr(kernel, "resume") else kernel.process(event)
     return ChatResponse(
         output=result.output,
         error=result.error,

@@ -137,10 +137,7 @@ def run_cli(db_path: str = ":memory:") -> None:
 
         result = kernel.process(event)
 
-        if result.error:
-            print(f"Error: {result.error}")
-        else:
-            print(f"Agent: {result.output}")
+        _display_result(result, workspace_id, session_id, kernel)
 
     db.close()
     print("Goodbye!")
@@ -314,6 +311,78 @@ def _list_approvals(db: Database, workspace_id: str) -> None:
         cap = str(a.get("capability_name", ""))
         op = str(a.get("operation", ""))
         print(f"  [{aid}] {cap} / {op}")
+
+
+def _display_result(
+    result: object, workspace_id: str, session_id: str, kernel: object,
+) -> None:
+    from cogito_agent.runtime import TurnResult
+
+    tr = result
+    if not isinstance(tr, TurnResult):
+        print(str(result))
+        return
+
+    if tr.error:
+        print(f"Error: {tr.error}")
+
+    if tr.state.value == "awaiting_approval" and tr.approval_pending:
+        aid = tr.approval_id or ""
+        print(f"\n[Approval Required] id={aid[:8]}")
+        print("  Approve? (y/N): ", end="", flush=True)
+        try:
+            ans = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = "n"
+        db = kernel._db if hasattr(kernel, "_db") else None
+        if ans in ("y", "yes"):
+            if db:
+                from cogito_agent.storage.repositories import ApprovalRepository
+                repo = ApprovalRepository(db)
+                repo.resolve(aid, "approved", "user")
+                print("  Approved. Resuming...")
+                from cogito_agent.shared import RuntimeEvent
+                resume_event = RuntimeEvent(
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    actor_id="user",
+                    source=EventSource.cli,
+                    type=EventType.resume,
+                    payload={"approval_id": aid},
+                )
+                resumed = kernel.resume(resume_event) if hasattr(kernel, "resume") else None
+                if resumed:
+                    _display_result(resumed, workspace_id, session_id, kernel)
+                    return
+        else:
+            if db:
+                from cogito_agent.storage.repositories import ApprovalRepository
+                repo = ApprovalRepository(db)
+                repo.resolve(aid, "denied", "user")
+            print("  Denied.")
+        return
+
+    if tr.output:
+        print(f"Agent: {tr.output}")
+
+    if tr.tool_summaries:
+        print()
+        for ts in tr.tool_summaries:
+            tool_name = str(ts.get("tool", ""))
+            summary = str(ts.get("summary", ""))
+            err = str(ts.get("error", ""))
+            if err and err != "None":
+                print(f"  \u2716 {tool_name}: {err}")
+            else:
+                print(f"  \u2713 {tool_name}: {summary[:60]}")
+
+    if tr.sources:
+        print()
+        for s in tr.sources:
+            stype = str(s.get("type", ""))
+            text = str(s.get("text", ""))[:40]
+            if text:
+                print(f"  [{stype}] {text}")
 
 
 def _export_workspace(db: Database, workspace_id: str) -> None:
