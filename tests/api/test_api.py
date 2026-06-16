@@ -215,26 +215,24 @@ def test_chat_with_configured_provider() -> None:
         mod._db = saved_db
 
 
-def test_chat_stream_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COGITO_ENABLE_EXPERIMENTAL", "1")
+def test_chat_stream_endpoint(client: TestClient) -> None:
     _, sid = _setup(client)
     resp = client.post("/chat/stream", json={
         "text": "hello",
         "session_id": sid,
         "workspace_id": "ws-1",
-        "provider": "openai",
     })
     assert resp.status_code == 200
     assert resp.headers.get("content-type", "").startswith("text/event-stream")
+    body = resp.text
+    assert "event: metadata" in body or "data:" in body
 
 
-def test_chat_stream_no_session(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("COGITO_ENABLE_EXPERIMENTAL", "1")
+def test_chat_stream_no_session(client: TestClient) -> None:
     resp = client.post("/chat/stream", json={
         "text": "hello",
         "session_id": "nonexistent",
         "workspace_id": "ws-1",
-        "provider": "openai",
     })
     assert resp.status_code == 404
 

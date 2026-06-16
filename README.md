@@ -63,9 +63,13 @@ cogito inbox read <id>                                # show inbox item detail
 export COGITO_API_KEY=your-secret-key
 cogito-demo              # start API server with Bearer token auth
 
-# Experimental: /chat/stream (requires env var)
-export COGITO_ENABLE_EXPERIMENTAL=1
-# POST /chat/stream — experimental SSE streaming (bypasses RuntimeKernel)
+# Streaming: /chat/stream (RuntimeKernel-backed)
+# POST /chat/stream — SSE streaming via RuntimeKernel (governance/trace/audit/redaction)
+# Responses use SSE events: metadata, final, approval_required, error
+# Exposes trace_id in metadata and final events for replay
+curl -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"text": "hello", "session_id": "...", "workspace_id": "..."}'
 ```
 
 **Notes:**
@@ -74,6 +78,7 @@ export COGITO_ENABLE_EXPERIMENTAL=1
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
 - **Limitations:** No Web UI or TUI, no rate limiting, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only.
+- **/chat/stream**: Uses chunked final response (not true per-token streaming). RuntimeKernel executes fully before emitting SSE events. Future versions may add true token streaming with tool-interrupt support.
 
 ## Requirements
 

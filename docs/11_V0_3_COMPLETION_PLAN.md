@@ -210,9 +210,7 @@
 - `skill_run_logs` table: added `resume_data_json TEXT` column (migration 5)
 - `scheduled_jobs.status` now supports `'cancelled'` value (no schema DDL change — just enum expansion)
 
-## Next Priorities (v0.4)
+## Next Priorities
 
-1. `/chat/stream` full RuntimeKernel integration (remove experimental bypass)
-2. OS keychain integration for `KeychainSecretProvider`
-3. Vector DB integration for semantic memory search
-4. Cross-process daemon control
+See `docs/12_V0_4_STREAMING_PLAN.md` for v0.4 streaming runtime integration status.
+- `v0.5`: True per-token streaming, tool dispatch during streaming, streaming state types

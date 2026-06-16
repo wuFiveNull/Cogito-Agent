@@ -117,6 +117,11 @@ class RuntimeKernel:
         raise last_error  # type: ignore[misc]
 
     def process(self, event: RuntimeEvent) -> TurnResult:
+        terminal = {TurnState.completed, TurnState.failed, TurnState.denied,
+                    TurnState.cancelled, TurnState.budget_exceeded}
+        if self._sm.state in terminal:
+            self._sm._state = TurnState.received
+
         trace = self._tracer.create_trace(
             workspace_id=event.workspace_id,
             root_event_id=event.id,

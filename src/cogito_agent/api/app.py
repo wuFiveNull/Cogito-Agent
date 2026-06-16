@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from cogito_agent.cli.export import _redact_dict
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
-from cogito_agent.models import get_adapter, list_providers
+from cogito_agent.models import list_providers
 from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
 from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
@@ -378,7 +378,6 @@ class ChatStreamRequest(BaseModel):
     text: str
     session_id: str
     workspace_id: str
-    provider: str = "openai"
 
 
 class SkillInstallRequest(BaseModel):
@@ -396,14 +395,9 @@ class RunSkillRequest(BaseModel):
 
 @app.post("/chat/stream")
 def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
-    if not os.environ.get("COGITO_ENABLE_EXPERIMENTAL"):
-        return _error_response(
-            "FEATURE_DISABLED",
-            "/chat/stream is experimental and disabled by default."
-            " Set COGITO_ENABLE_EXPERIMENTAL=1 to enable.",
-            request.state.request_id, status_code=403,
-        )
     db = get_db()
+    kernel = get_kernel()
+    redactor = RedactionHelper()
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
     if sess is None:
@@ -412,25 +406,90 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
             request.state.request_id, status_code=404,
         )
 
-    adapter = get_adapter(provider=req.provider)
-    messages = [
-        {"role": "user", "content": req.text},
-    ]
+    event = RuntimeEvent(
+        workspace_id=req.workspace_id,
+        session_id=req.session_id,
+        actor_id="user",
+        source=EventSource.api,
+        type=EventType.user_message,
+        payload={
+            "text": req.text,
+            "_request_id": request.state.request_id,
+            "channel": "api_stream",
+        },
+    )
 
     def event_stream() -> Generator[str, None, None]:
-        logger.info("/chat/stream streaming response started")
-        full_content = ""
-        for token in adapter.stream_chat(messages):
-            full_content += token
-            yield f"data: {json.dumps({'token': token})}\n\n"
-        yield f"data: {json.dumps({'done': True, 'content': full_content})}\n\n"
+        # Step 1: Send metadata event
+        yield f"event: metadata\ndata: {json.dumps({'request_id': request.state.request_id})}\n\n"
+
+        try:
+            result = kernel.process(event)
+            trace_id = result.trace_id or ""
+
+            if trace_id:
+                yield (
+                    f"event: metadata\n"
+                    f"data: {json.dumps({'trace_id': trace_id, 'session_id': req.session_id})}\n\n"
+                )
+
+            if result.approval_pending and result.approval_id:
+                yield (
+                    f"event: approval_required\n"
+                    f"data: {json.dumps({})}\n\n"
+                )
+                return
+
+            if result.error:
+                safe_error = redactor.redact(result.error)
+                yield (
+                    f"event: error\n"
+                    f"data: {json.dumps({
+                        'error': {
+                            'code': 'RUNTIME_ERROR',
+                            'message': safe_error,
+                            'request_id': request.state.request_id,
+                            'trace_id': trace_id,
+                            'retryable': False,
+                        },
+                    })}\n\n"
+                )
+                return
+
+            safe_output = redactor.redact(result.output)
+            state_val = (
+                result.state.value
+                if hasattr(result.state, "value")
+                else str(result.state)
+            )
+            yield (
+                f"event: final\n"
+                f"data: {json.dumps({
+                    'response': safe_output,
+                    'trace_id': trace_id,
+                    'state': state_val,
+                })}\n\n"
+            )
+
+        except Exception:
+            logger.exception("chat_stream runtime error")
+            yield (
+                f"event: error\n"
+                f"data: {json.dumps({
+                    'error': {
+                        'code': 'RUNTIME_ERROR',
+                        'message': 'Internal error during processing',
+                        'request_id': request.state.request_id,
+                        'retryable': False,
+                    },
+                })}\n\n"
+            )
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-            "X-Experimental": "bypasses RuntimeKernel",
         },
     )
 

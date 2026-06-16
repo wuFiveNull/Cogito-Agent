@@ -6,7 +6,8 @@ v0.1.0-alpha released.
 v0.2.0-alpha released.
 v0.3.0-dev (stable local core candidate, not released):
 - Approval CLI (`cogito approval list|show|approve|reject|resume`)
-- /chat/stream gated behind `COGITO_ENABLE_EXPERIMENTAL=1`
+- /chat/stream now uses RuntimeKernel (governance/trace/audit/redaction)
+- SSE format: metadata, final, approval_required, error
 - ruff/mypy clean across all 64 source files
 - E2E approval lifecycle validated
 

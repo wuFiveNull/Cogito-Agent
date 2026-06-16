@@ -104,11 +104,11 @@ _TRANSITIONS: dict[TurnState, set[TurnState]] = {
         TurnState.model_calling, TurnState.executing_capability,
         TurnState.failed,
     },
-    TurnState.completed: set(),
-    TurnState.failed: set(),
-    TurnState.denied: set(),
-    TurnState.cancelled: set(),
-    TurnState.budget_exceeded: set(),
+    TurnState.completed: {TurnState.received},
+    TurnState.failed: {TurnState.received},
+    TurnState.denied: {TurnState.received},
+    TurnState.cancelled: {TurnState.received},
+    TurnState.budget_exceeded: {TurnState.received},
 }
 
 
