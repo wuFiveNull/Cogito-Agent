@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,7 +10,7 @@ from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.context import ContextEngine, ContextItem
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.memory import CandidateExtractor, MemoryRetriever
-from cogito_agent.models import ModelAdapter, ModelResponse
+from cogito_agent.models import ModelAdapter, ModelResponse, StreamGenerator
 from cogito_agent.shared import (
     DecisionType,
     EventType,
@@ -20,6 +21,7 @@ from cogito_agent.shared import (
     TurnStateMachine,
 )
 from cogito_agent.shared.safety import wrap_untrusted
+from cogito_agent.shared.stream_events import StreamEvent, StreamEventType
 from cogito_agent.storage import Database, MessageRepository, SessionRepository
 from cogito_agent.storage.repositories import ApprovalRepository
 from cogito_agent.trace import SourceLineage, Tracer
@@ -228,6 +230,284 @@ class RuntimeKernel:
         self._tracer.end_trace(trace)
         span.output_summary = f"state={result.state.value}, error={result.error}"
         return result
+
+    def _stream_generate_reply(
+        self, event: RuntimeEvent, message: str,
+        trace: object, span: object,
+    ) -> Generator[StreamEvent, None, ModelResponse]:
+        """Yield delta events for each token, return the final ModelResponse."""
+        if not message.strip():
+            yield StreamEvent(
+                type=StreamEventType.delta,
+                data={"delta": "I didn't receive any message."},
+            )
+            return ModelResponse(content="I didn't receive any message.")
+
+        msgs = self._build_model_messages(event, message, trace)
+        call_start = datetime.now(UTC)
+
+        echo = f"You said: {message}" if self._model_adapter is None else ""
+        gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo)
+        for chunk in gen:
+            yield StreamEvent(
+                type=StreamEventType.delta,
+                data={"delta": chunk},
+            )
+
+        latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
+        self._model_call_count += 1
+
+        resp = gen.response or ModelResponse(content="")
+        resp.latency_ms = latency
+        resp.provider = getattr(self._model_adapter, "provider", "") if self._model_adapter else ""
+
+        self._tracer.log_model_call(
+            trace_id=str(getattr(trace, "id", "")),
+            span_id=str(getattr(span, "id", "")),
+            provider=resp.provider,
+            model=resp.model,
+            input_token_count=resp.input_tokens,
+            output_token_count=resp.output_tokens,
+            prompt_summary=message[:200] if message else "",
+            response_summary=resp.content[:200] if resp.content else "",
+            latency_ms=latency,
+            stop_reason=resp.stop_reason,
+            error=None,
+        )
+
+        if not resp.tool_intents and self._cap_reg:
+            tool_intents = self._detect_tool_intents(resp.content)
+            if tool_intents:
+                resp.tool_intents = tool_intents
+
+        return resp
+
+    @staticmethod
+    def _detect_tool_intents(text: str) -> list[dict[str, object]]:
+        """Parse tool intents from model output (simple heuristic)."""
+        import re
+        intents: list[dict[str, object]] = []
+        for match in re.finditer(
+            r'<tool_call>\s*{\s*"name"\s*:\s*"([^"]+)"[^}]*}\s*</tool_call>',
+            text,
+        ):
+            raw = match.group(0)
+            try:
+                import json
+                obj = json.loads(raw.replace("<tool_call>", "").replace("</tool_call>", ""))
+                intents.append({"name": obj.get("name", ""), "arguments": obj.get("arguments", {})})
+            except Exception:
+                intents.append({"name": match.group(1), "arguments": {}})
+        return intents
+
+    def process_stream(
+        self, event: RuntimeEvent, request_id: str = "",
+    ) -> Generator[StreamEvent, None, None]:
+        """Full-turn streaming: yields StreamEvent objects.
+
+        Generates delta events during model inference, tool_call events
+        during capability dispatch, and ends with final or error.
+        """
+        terminal = {TurnState.completed, TurnState.failed, TurnState.denied,
+                    TurnState.cancelled, TurnState.budget_exceeded}
+        if self._sm.state in terminal:
+            self._sm._state = TurnState.received
+
+        trace = self._tracer.create_trace(
+            workspace_id=event.workspace_id,
+            root_event_id=event.id,
+            session_id=event.session_id,
+        )
+        span = self._tracer.create_span(trace.id, "process_stream_turn", SpanKind.runtime)
+        span.input_summary = f"event={event.type.value}, actor={event.actor_id}, stream"
+        self._start_time = datetime.now(UTC)
+
+        # Yield metadata
+        if request_id:
+            yield StreamEvent(
+                type=StreamEventType.metadata,
+                data={"request_id": request_id},
+                request_id=request_id,
+                trace_id=trace.id,
+            )
+        yield StreamEvent(
+            type=StreamEventType.metadata,
+            data={"trace_id": trace.id, "session_id": event.session_id},
+            request_id=request_id,
+            trace_id=trace.id,
+        )
+
+        try:
+            self._sm.transition(TurnState.loading_session)
+            self._transition(TurnState.building_context)
+            ctx = self._build_context(event)
+            self._sources = [
+                {"type": c.source_type, "id": c.source_id, "text": c.text}
+                for c in ctx if isinstance(c, ContextItem) and c.included
+            ]
+
+            self._transition(TurnState.model_calling)
+            self._check_budget_model()
+            self._check_model_policy(event)
+            raw_text = (
+                event.payload.get("text", "")
+                if event.type == EventType.user_message
+                else ""
+            )
+            text = str(raw_text) if raw_text is not None else ""
+
+            # Stream delta events during model inference
+            delta_gen = self._stream_generate_reply(event, text, trace, span)
+            try:
+                while True:
+                    ev = next(delta_gen)
+                    ev.request_id = request_id
+                    ev.trace_id = trace.id
+                    yield ev
+            except StopIteration as e:
+                model_resp = e.value
+
+            self._transition(TurnState.planning_tool)
+
+            # Tool dispatch if intents present
+            if model_resp.tool_intents and self._cap_reg:
+                yield StreamEvent(
+                    type=StreamEventType.tool_call_started,
+                    data={"tool_count": len(model_resp.tool_intents)},
+                    request_id=request_id,
+                    trace_id=trace.id,
+                )
+                try:
+                    model_resp = self._dispatch_tools(event, model_resp, trace, span)
+                    yield StreamEvent(
+                        type=StreamEventType.tool_call_completed,
+                        data={
+                            "tool_results": [
+                                {"tool": r.get("tool", ""),
+                                 "summary": str(r.get("summary", ""))[:100]}
+                                for r in self._tool_results
+                            ],
+                        },
+                        request_id=request_id,
+                        trace_id=trace.id,
+                    )
+                except ApprovalRequiredError as exc:
+                    yield StreamEvent(
+                        type=StreamEventType.approval_required,
+                        data={
+                            "approval_id": exc.approval_id,
+                            "trace_id": trace.id,
+                            "summary": "Approval required",
+                        },
+                        request_id=request_id,
+                        trace_id=trace.id,
+                    )
+                    self._tracer.end_span(span)
+                    self._tracer.end_trace(trace)
+                    span.output_summary = "state=waiting_approval"
+                    self._audit.log(
+                        actor_id=event.actor_id, action="turn_approval_required",
+                        resource="session",
+                        workspace_id=event.workspace_id,
+                        session_id=event.session_id,
+                        trace_id=trace.id,
+                        decision="require_approval",
+                    )
+                    return
+
+            # Compose result
+            model_result = self._compose_result(event, model_resp, trace, span)
+            output_text = model_result.content
+
+            self._transition(TurnState.composing_result)
+            self._transition(TurnState.extracting_memory)
+            self._persist(event, output_text)
+            self._candidate_extract(event, output_text)
+
+            self._audit.log(
+                actor_id=event.actor_id, action="turn_completed",
+                resource="session",
+                workspace_id=event.workspace_id,
+                session_id=event.session_id,
+                trace_id=trace.id,
+                decision="allow",
+            )
+            self._sm.transition(TurnState.completed)
+
+            yield StreamEvent(
+                type=StreamEventType.final,
+                data={
+                    "response": output_text,
+                    "trace_id": trace.id,
+                    "state": TurnState.completed.value,
+                },
+                request_id=request_id,
+                trace_id=trace.id,
+            )
+
+        except BudgetError as exc:
+            try:
+                self._sm.transition(TurnState.failed)
+            except ValueError:
+                pass
+            yield StreamEvent(
+                type=StreamEventType.error,
+                data={
+                    "error": {
+                        "code": "BUDGET_EXCEEDED",
+                        "message": str(exc),
+                        "request_id": request_id,
+                        "trace_id": trace.id,
+                        "retryable": False,
+                    },
+                },
+                request_id=request_id,
+                trace_id=trace.id,
+            )
+
+        except PolicyDeniedError as exc:
+            try:
+                self._sm.transition(TurnState.denied)
+            except ValueError:
+                pass
+            yield StreamEvent(
+                type=StreamEventType.error,
+                data={
+                    "error": {
+                        "code": "POLICY_DENIED",
+                        "message": str(exc),
+                        "request_id": request_id,
+                        "trace_id": trace.id,
+                        "retryable": False,
+                    },
+                },
+                request_id=request_id,
+                trace_id=trace.id,
+            )
+
+        except Exception as exc:
+            try:
+                self._sm.transition(TurnState.failed)
+            except ValueError:
+                pass
+            yield StreamEvent(
+                type=StreamEventType.error,
+                data={
+                    "error": {
+                        "code": "RUNTIME_ERROR",
+                        "message": str(exc),
+                        "request_id": request_id,
+                        "trace_id": trace.id,
+                        "retryable": False,
+                    },
+                },
+                request_id=request_id,
+                trace_id=trace.id,
+            )
+
+        self._tracer.end_span(span)
+        self._tracer.end_trace(trace)
+        span.output_summary = f"state={self._sm.state.value}"
 
     def interrupt(self, event: RuntimeEvent) -> None:
         self._sm.transition(TurnState.interrupted)

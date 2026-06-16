@@ -5,6 +5,7 @@ from .policy import DecisionType, PolicyDecision, PolicyRequest
 from .schedule import JobStatus, ScheduleJob
 from .skill import OnError, SkillManifest, SkillRiskLevel, SkillStep, StepKind
 from .state import TurnBudget, TurnState, TurnStateMachine
+from .stream_events import StreamEvent, StreamEventType
 from .trace import Span, SpanKind, Trace
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "PolicyRequest", "PolicyDecision", "DecisionType",
     "Trace", "Span", "SpanKind",
     "ToolCall", "ModelCall",
+    "StreamEvent", "StreamEventType",
     "SkillManifest", "SkillStep", "SkillRiskLevel", "StepKind", "OnError",
     "ScheduleJob", "JobStatus",
 ]

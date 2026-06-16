@@ -21,7 +21,7 @@ from cogito_agent.cli.export import _redact_dict
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import list_providers
 from cogito_agent.runtime import RuntimeKernel
-from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
+from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest, StreamEventType
 from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
@@ -423,66 +423,25 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
     )
 
     def event_stream() -> Generator[str, None, None]:
-        # Step 1: Send metadata event
-        yield f"event: metadata\ndata: {json.dumps({'request_id': request.state.request_id})}\n\n"
-
+        rid = request.state.request_id
         try:
-            result = kernel.process(event)
-            trace_id = result.trace_id or ""
-
-            if trace_id:
-                yield (
-                    f"event: metadata\n"
-                    f"data: {json.dumps({'trace_id': trace_id, 'session_id': req.session_id})}\n\n"
-                )
-
-            if result.approval_pending and result.approval_id:
-                safe_summary = (
-                    redactor.redact(result.approval_summary)
-                    if hasattr(result, "approval_summary") and result.approval_summary
-                    else "Approval required"
-                )
-                yield (
-                    f"event: approval_required\n"
-                    f"data: {json.dumps({
-                        'approval_id': result.approval_id,
-                        'trace_id': trace_id,
-                        'summary': safe_summary,
-                    })}\n\n"
-                )
-                return
-
-            if result.error:
-                safe_error = redactor.redact(result.error)
-                yield (
-                    f"event: error\n"
-                    f"data: {json.dumps({
-                        'error': {
-                            'code': 'RUNTIME_ERROR',
-                            'message': safe_error,
-                            'request_id': request.state.request_id,
-                            'trace_id': trace_id,
-                            'retryable': False,
-                        },
-                    })}\n\n"
-                )
-                return
-
-            safe_output = redactor.redact(result.output)
-            state_val = (
-                result.state.value
-                if hasattr(result.state, "value")
-                else str(result.state)
-            )
-            yield (
-                f"event: final\n"
-                f"data: {json.dumps({
-                    'response': safe_output,
-                    'trace_id': trace_id,
-                    'state': state_val,
-                })}\n\n"
-            )
-
+            for sev in kernel.process_stream(event, request_id=rid):
+                if sev.type == StreamEventType.delta:
+                    yield sev.to_sse()
+                elif sev.type == StreamEventType.error:
+                    raw_err = sev.data.get("error", {})
+                    err_dict: dict[str, object] = dict(raw_err) if isinstance(raw_err, dict) else {}
+                    err_dict["message"] = redactor.redact(str(err_dict.get("message", "")))
+                    sev.data["error"] = err_dict
+                    yield sev.to_sse()
+                elif sev.type == StreamEventType.approval_required:
+                    safe_summary = redactor.redact(str(sev.data.get("summary", "")))
+                    sev.data["summary"] = safe_summary
+                    yield sev.to_sse()
+                else:
+                    if "response" in sev.data:
+                        sev.data["response"] = redactor.redact(str(sev.data["response"]))
+                    yield sev.to_sse()
         except Exception:
             logger.exception("chat_stream runtime error")
             yield (
@@ -491,7 +450,7 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
                     'error': {
                         'code': 'RUNTIME_ERROR',
                         'message': 'Internal error during processing',
-                        'request_id': request.state.request_id,
+                        'request_id': rid,
                         'retryable': False,
                     },
                 })}\n\n"

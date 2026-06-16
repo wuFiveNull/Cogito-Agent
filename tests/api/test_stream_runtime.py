@@ -64,8 +64,34 @@ def test_chat_stream_metadata_event(client: TestClient) -> None:
     assert "request_id" in body
 
 
+def _get_api_mod():
+    """Get module object despite __init__.py shadowing."""
+    return sys.modules.get("cogito_agent.api.app")
+
+
+def _reset_kernel():
+    """Reset module-level kernel so each test starts fresh."""
+    mod = _get_api_mod()
+    if mod:
+        mod._kernel = None
+
+
+def _sse_parse(text: str) -> list[dict[str, object]]:
+    """Parse SSE text into [{event, data}, ...]."""
+    events: list[dict[str, object]] = []
+    cur_event = ""
+    for line in text.splitlines():
+        if line.startswith("event: "):
+            cur_event = line[7:]
+        elif line.startswith("data: "):
+            events.append({"event": cur_event, "data": json.loads(line[6:])})
+            cur_event = ""
+    return events
+
+
 def test_chat_stream_final_event(client: TestClient) -> None:
     """Stream outputs final event with response."""
+    _reset_kernel()
     _, sid = _setup(client)
     resp = client.post("/chat/stream", json={
         "text": "hello",
@@ -73,21 +99,18 @@ def test_chat_stream_final_event(client: TestClient) -> None:
         "workspace_id": "ws-stream",
     })
     assert resp.status_code == 200
-    body = resp.text
-    assert "event: final" in body
-    lines = body.strip().split("\n")
-    for i, line in enumerate(lines):
-        if line.startswith("data:") and "event: final" in body:
-            data_line = lines[i + 1] if i + 1 < len(lines) else ""
-            if data_line.startswith("data:"):
-                payload = json.loads(data_line[5:].strip())
-                assert "response" in payload
-                assert "state" in payload
-                break
+    events = _sse_parse(resp.text)
+    final = [e for e in events if e["event"] == "final"]
+    assert len(final) == 1, f"Expected 1 final event, got {len(final)}"
+    payload = final[0]["data"]
+    assert "response" in payload
+    assert "state" in payload
+    assert payload["response"], "response should be non-empty"
 
 
 def test_chat_stream_no_session(client: TestClient) -> None:
     """Stream returns 404 for nonexistent session."""
+    _reset_kernel()
     resp = client.post("/chat/stream", json={
         "text": "hello",
         "session_id": "nonexistent",
@@ -98,6 +121,7 @@ def test_chat_stream_no_session(client: TestClient) -> None:
 
 def test_chat_stream_no_experimental_gate(client: TestClient) -> None:
     """Stream no longer requires COGITO_ENABLE_EXPERIMENTAL gate."""
+    _reset_kernel()
     _, sid = _setup(client)
     resp = client.post("/chat/stream", json={
         "text": "hello",
@@ -109,6 +133,7 @@ def test_chat_stream_no_experimental_gate(client: TestClient) -> None:
 
 def test_chat_stream_response_is_redacted(client: TestClient) -> None:
     """Stream output should be redacted (safe)."""
+    _reset_kernel()
     _, sid = _setup(client)
     resp = client.post("/chat/stream", json={
         "text": "hello",
@@ -117,21 +142,17 @@ def test_chat_stream_response_is_redacted(client: TestClient) -> None:
     })
     assert resp.status_code == 200
     body = resp.text
-    # Mock model returns "You said: hello" — not sensitive, but verify
-    # the response is well-formed JSON in the final event
-    assert "event: final" in body
+    events = _sse_parse(body)
+    final = [e for e in events if e["event"] == "final"]
+    assert len(final) >= 1, f"No final event found in: {body[:200]}"
     assert "Bearer" not in body
     assert "Authorization" not in body
-
-
-def _get_api_mod():
-    """Get module object despite __init__.py shadowing."""
-    return sys.modules.get("cogito_agent.api.app")
 
 
 def test_chat_stream_approval_required_event() -> None:
     """Stream outputs approval_required event with approval_id and trace_id."""
     api_mod = _get_api_mod()
+    _reset_kernel()
     original_kernel = getattr(api_mod, "_kernel", None)
 
     # Register a capability that requires approval

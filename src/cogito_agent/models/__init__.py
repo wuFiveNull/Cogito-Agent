@@ -1,4 +1,4 @@
-from .adapter import ModelAdapter, ModelResponse
+from .adapter import ModelAdapter, ModelResponse, StreamGenerator
 from .openai_adapter import OpenAICompatibleAdapter
 from .registry import ProviderConfig, get_adapter, list_providers, register_provider
 
@@ -19,6 +19,7 @@ except ImportError:
 __all__ = [
     "ModelAdapter",
     "ModelResponse",
+    "StreamGenerator",
     "OpenAICompatibleAdapter",
     "ProviderConfig",
     "get_adapter",
