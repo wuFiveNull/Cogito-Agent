@@ -2,7 +2,7 @@
 
 ## State of the Repo
 
-All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–4 (Epics A–J) are complete. Working on Phase 5.
+All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–7 (Epics A–S) are complete.
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -14,12 +14,12 @@ All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–
 - ✅ Phase 5 (Epic L): Storage completeness — hard delete, full export, migration system
 - ✅ Phase 5 (Epics K–L): Capability safety (path sandboxing, JSON Schema), storage completeness (hard delete, export, migration)
 - ✅ Phase 6 (Epics M–P): Skill runtime depth, background security, failure/retry, interrupt/resume
-- ❌ Phase 7 (Epics Q–S): Drift maintenance, CLI/API polish, replay
+- ✅ Phase 7 (Epics Q–S): Drift maintenance, CLI/API polish, replay
 
 ## V2 Status
 
 - ✅ All V2 items except cloud migration adapters (deprioritized)
-- ✅ 251 tests passing, ruff clean, mypy clean
+- ✅ 306 tests passing, ruff clean, mypy clean
 
 ## Project Purpose
 

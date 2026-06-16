@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ from cogito_agent.storage.repositories import (
     WorkspaceRepository,
     WorkspaceSettingsRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -254,6 +257,7 @@ class RunSkillRequest(BaseModel):
 
 @app.post("/chat/stream")
 def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
+    logger.warning("/chat/stream is EXPERIMENTAL — bypasses RuntimeKernel")
     db = get_db()
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
@@ -275,7 +279,10 @@ def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+            "X-Experimental": "bypasses RuntimeKernel",
+        },
     )
 
 

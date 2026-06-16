@@ -329,6 +329,9 @@ def _display_result(
         print(str(result))
         return
 
+    if tr.trace_id:
+        print(f"[trace_id: {tr.trace_id[:16]}]  [state: {tr.state.value}]")
+
     if tr.error:
         print(f"Error: {tr.error}")
 

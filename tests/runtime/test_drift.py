@@ -115,3 +115,125 @@ def test_get_nonexistent_task() -> None:
     engine = DriftRuntime(Database(":memory:"))
     assert engine.get_result("nonexistent") is None
     assert engine.task_status("nonexistent") is None
+
+
+def test_maintenance_consolidate_empty() -> None:
+    from cogito_agent.runtime.drift import DriftMaintenance
+
+    db = Database(":memory:")
+    db.initialize()
+    dm = DriftMaintenance(db)
+    count = dm.consolidate_memories()
+    assert count == 0
+
+
+def test_maintenance_archive_empty() -> None:
+    from cogito_agent.runtime.drift import DriftMaintenance
+
+    db = Database(":memory:")
+    db.initialize()
+    dm = DriftMaintenance(db)
+    count = dm.archive_stale_memories(days=1)
+    assert count == 0
+
+
+def test_maintenance_refresh_fts() -> None:
+    from cogito_agent.runtime.drift import DriftMaintenance
+
+    db = Database(":memory:")
+    db.initialize()
+    dm = DriftMaintenance(db)
+    count = dm.refresh_fts()
+    assert isinstance(count, int)
+
+
+def test_maintenance_cleanup_traces_empty() -> None:
+    from cogito_agent.runtime.drift import DriftMaintenance
+
+    db = Database(":memory:")
+    db.initialize()
+    dm = DriftMaintenance(db)
+    counts = dm.cleanup_traces(days=1)
+    assert counts["traces"] == 0
+
+
+def test_maintenance_usage_report() -> None:
+    from cogito_agent.runtime.drift import DriftMaintenance
+
+    db = Database(":memory:")
+    db.initialize()
+    dm = DriftMaintenance(db)
+    report = dm.usage_report()
+    assert isinstance(report, dict)
+    assert "messages" in report
+    assert "memories" in report
+    assert "traces" in report
+
+
+def test_maintenance_trace_and_audit_logging() -> None:
+    from cogito_agent.governance import AuditLogger
+    from cogito_agent.runtime.drift import DriftMaintenance
+    from cogito_agent.shared import SpanKind
+    from cogito_agent.trace import Tracer
+
+    db = Database(":memory:")
+    db.initialize()
+    dm = DriftMaintenance(db)
+    tracer = Tracer(db)
+    audit = AuditLogger(db)
+
+    trace = tracer.create_trace("ws_test", "maintenance.test")
+    span = tracer.create_span(trace.id, "maintenance.test", SpanKind.runtime)
+
+    count = dm.consolidate_memories("ws_test")
+    assert count == 0
+
+    tracer.end_span(span)
+    tracer.end_trace(trace)
+    audit.log(
+        actor_id="maintenance", action="maintenance.test",
+        resource="database", workspace_id="ws_test",
+        trace_id=trace.id, decision="allow", reason="ok",
+    )
+
+    # verify trace and audit were persisted
+    cur = db.connection.execute(
+        "SELECT COUNT(*) FROM traces WHERE id = ?", (trace.id,)
+    )
+    assert cur.fetchone()[0] > 0
+    cur = db.connection.execute(
+        "SELECT COUNT(*) FROM audit_logs WHERE trace_id = ?", (trace.id,)
+    )
+    assert cur.fetchone()[0] > 0
+
+
+def test_maintenance_policy_allow() -> None:
+    from cogito_agent.governance import PolicyEngine
+    from cogito_agent.shared import DecisionType, PolicyRequest
+
+    policy = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="maintenance",
+        capability_name="maintenance.usage",
+        operation="execute",
+        resource="database",
+        context="background",
+    )
+    dec = policy.evaluate(req)
+    assert dec.decision == DecisionType.allow_with_audit
+
+
+def test_maintenance_policy_deny_shell() -> None:
+    from cogito_agent.governance import PolicyEngine
+    from cogito_agent.shared import DecisionType, PolicyRequest
+
+    policy = PolicyEngine()
+    req = PolicyRequest(
+        actor_id="maintenance",
+        capability_name="shell.execute",
+        operation="execute",
+        resource="shell",
+        context="background",
+    )
+    dec = policy.evaluate(req)
+    assert dec.decision == DecisionType.deny

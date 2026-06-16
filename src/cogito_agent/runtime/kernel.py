@@ -37,6 +37,7 @@ class TurnResult:
         sources: list[dict[str, object]] | None = None,
         approval_pending: bool = False,
         approval_id: str | None = None,
+        trace_id: str | None = None,
     ) -> None:
         self.state = state
         self.output = output
@@ -45,6 +46,7 @@ class TurnResult:
         self.sources = sources or []
         self.approval_pending = approval_pending
         self.approval_id = approval_id
+        self.trace_id = trace_id
 
 
 class BudgetError(Exception):
@@ -172,6 +174,7 @@ class RuntimeKernel:
                 output=output_text,
                 tool_summaries=tool_summaries,
                 sources=self._sources,
+                trace_id=trace.id,
             )
 
         except BudgetError as exc:
@@ -180,7 +183,8 @@ class RuntimeKernel:
             except ValueError:
                 pass
             result = TurnResult(
-                state=TurnState.failed, error=str(exc), output=str(exc)
+                state=TurnState.failed, error=str(exc), output=str(exc),
+                trace_id=trace.id,
             )
 
         except PolicyDeniedError as exc:
@@ -188,7 +192,9 @@ class RuntimeKernel:
                 self._sm.transition(TurnState.denied)
             except ValueError:
                 pass
-            result = TurnResult(state=TurnState.denied, error=str(exc))
+            result = TurnResult(
+                state=TurnState.denied, error=str(exc), trace_id=trace.id,
+            )
 
         except ApprovalRequiredError as exc:
             try:
@@ -200,6 +206,7 @@ class RuntimeKernel:
                 approval_pending=True,
                 approval_id=exc.approval_id,
                 error=str(exc),
+                trace_id=trace.id,
             )
 
         except Exception as exc:
@@ -208,7 +215,9 @@ class RuntimeKernel:
             except ValueError:
                 pass
             error_msg = str(exc)
-            result = TurnResult(state=TurnState.failed, error=error_msg)
+            result = TurnResult(
+                state=TurnState.failed, error=error_msg, trace_id=trace.id,
+            )
 
         self._tracer.end_span(span)
         self._tracer.end_trace(trace)

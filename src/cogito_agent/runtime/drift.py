@@ -219,38 +219,48 @@ class DriftMaintenance:
 
     def usage_report(self, workspace_id: str | None = None) -> dict[str, object]:
         """Return aggregate usage statistics."""
-        ws_filter = "WHERE workspace_id = ?" if workspace_id else ""
-        params = (workspace_id,) if workspace_id else ()
+        def _exec(sql: str, params: tuple[object, ...] = ()) -> int:
+            return int(self._db.connection.execute(sql, params).fetchone()[0])
 
-        msg_count = self._db.connection.execute(
-            f"SELECT COUNT(*) FROM messages {ws_filter}", params
-        ).fetchone()[0]
-        mem_count = self._db.connection.execute(
-            f"SELECT COUNT(*) FROM memories"
-            f" {ws_filter} AND deleted_at IS NULL AND status != 'stale'", params
-        ).fetchone()[0]
-        trace_count = self._db.connection.execute(
-            f"SELECT COUNT(*) FROM traces {ws_filter}", params
-        ).fetchone()[0]
         if workspace_id:
-            tool_count = self._db.connection.execute(
+            msg_count = _exec(
+                "SELECT COUNT(*) FROM messages WHERE workspace_id = ?",
+                (workspace_id,),
+            )
+            mem_count = _exec(
+                "SELECT COUNT(*) FROM memories WHERE workspace_id = ?"
+                " AND deleted_at IS NULL AND status != 'stale'",
+                (workspace_id,),
+            )
+            trace_count = _exec(
+                "SELECT COUNT(*) FROM traces WHERE workspace_id = ?",
+                (workspace_id,),
+            )
+            tool_count = _exec(
                 "SELECT COUNT(*) FROM tool_calls tc"
                 " JOIN traces t ON tc.trace_id = t.id"
-                " WHERE t.workspace_id = ?", (workspace_id,)
-            ).fetchone()[0]
+                " WHERE t.workspace_id = ?",
+                (workspace_id,),
+            )
+            audit_count = _exec(
+                "SELECT COUNT(*) FROM audit_logs WHERE workspace_id = ?",
+                (workspace_id,),
+            )
         else:
-            tool_count = self._db.connection.execute(
-                "SELECT COUNT(*) FROM tool_calls"
-            ).fetchone()[0]
-        audit_count = self._db.connection.execute(
-            f"SELECT COUNT(*) FROM audit_logs {ws_filter}", params
-        ).fetchone()[0]
+            msg_count = _exec("SELECT COUNT(*) FROM messages")
+            mem_count = _exec(
+                "SELECT COUNT(*) FROM memories"
+                " WHERE deleted_at IS NULL AND status != 'stale'",
+            )
+            trace_count = _exec("SELECT COUNT(*) FROM traces")
+            tool_count = _exec("SELECT COUNT(*) FROM tool_calls")
+            audit_count = _exec("SELECT COUNT(*) FROM audit_logs")
 
         return {
             "workspace_id": workspace_id or "*",
-            "messages": int(msg_count),
-            "memories": int(mem_count),
-            "traces": int(trace_count),
-            "tool_calls": int(tool_count),
-            "audit_logs": int(audit_count),
+            "messages": msg_count,
+            "memories": mem_count,
+            "traces": trace_count,
+            "tool_calls": tool_count,
+            "audit_logs": audit_count,
         }

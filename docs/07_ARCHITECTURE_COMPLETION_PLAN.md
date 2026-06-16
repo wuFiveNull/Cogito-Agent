@@ -188,6 +188,8 @@ Rewrite `RuntimeKernel.process()` to implement the actual 9-step turn lifecycle 
 
 ### Epic O — Failure & Retry
 
+Status: ✅ Complete (Phase 6)
+
 1. Retry transient model/provider/tool failures (max 2, exponential backoff)
 2. Check `idempotent` flag on `CapabilityManifest` before retry
 3. Integrate `retrying` state transitions
@@ -197,6 +199,8 @@ Rewrite `RuntimeKernel.process()` to implement the actual 9-step turn lifecycle 
 
 ### Epic P — Interrupt & Resume
 
+Status: ✅ Complete (Phase 6)
+
 1. Persist interrupted turn state
 2. Resume: re-validate policy and budget
 3. Support `interrupted`/`resuming` state transitions
@@ -205,6 +209,8 @@ Rewrite `RuntimeKernel.process()` to implement the actual 9-step turn lifecycle 
 **Tests:** `tests/runtime/test_kernel.py`
 
 ### Epic Q — Drift Maintenance Tasks
+
+Status: ✅ Complete
 
 1. Memory consolidation (deduplicate)
 2. Stale memory detection and archival
@@ -217,21 +223,29 @@ Rewrite `RuntimeKernel.process()` to implement the actual 9-step turn lifecycle 
 
 ### Epic R — CLI & API Polish
 
+Status: ✅ Complete
+
 1. CLI inline tool approval prompt
-2. CLI rich turn display (tool summaries, citations, approval status)
+2. CLI rich turn display (tool summaries, citations, approval status, trace_id, state)
 3. API approval resume endpoint
 4. API chat endpoint with model adapter
+5. Default DB path is ~/.cogito/cogito.db (persistent)
+6. /chat/stream marked experimental with X-Experimental header
 
-**Files:** `cli/chat.py`, `api/app.py`
-**Tests:** `tests/cli/`, `tests/api/test_api.py`
+**Files:** `cli/chat.py`, `cli/__init__.py`, `api/app.py`
+**Tests:** `tests/cli/test_replay_cli.py`, `tests/api/test_api.py`
 
 ### Epic S — Replay
 
+Status: ✅ Complete
+
 1. Read-only trace inspector
 2. Reconstruct state transitions, policy decisions, model/tool summaries, source lineage
+3. CLI commands: `cogito replay list`, `cogito replay show <trace_id>`
+4. Redacted output for sensitive fields
 
-**Files:** `cli/replay.py`, `api/app.py`
-**Tests:** `tests/trace/`
+**Files:** `cli/replay.py`, `cli/__init__.py`
+**Tests:** `tests/cli/test_replay_cli.py`, `tests/trace/test_replay.py`
 
 ---
 
@@ -274,7 +288,7 @@ Phase 7 ────────────────────────
 
 ## Current Test Count
 
-**228 tests** across all modules. Each epic adds its own tests; target is ~350+ tests upon completion.
+**306 tests** across all modules. All epics A–S are complete.
 
 ## Execution Strategy
 

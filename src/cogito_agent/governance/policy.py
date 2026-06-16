@@ -66,6 +66,8 @@ class PolicyEngine:
                    DecisionType.allow_with_audit),
         PolicyRule("*", "read", "background",
                    DecisionType.allow_with_audit, resource="workspace_file"),
+        PolicyRule("maintenance", "execute", "background",
+                   DecisionType.allow_with_audit, resource="database"),
         PolicyRule("*", "call_model", "background",
                    DecisionType.allow_with_audit),
         PolicyRule("*", "call_tool", "background",

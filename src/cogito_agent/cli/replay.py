@@ -12,13 +12,21 @@ class TraceInspector:
     def list_traces(
         self, workspace_id: str, limit: int = 50, offset: int = 0,
     ) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT id, workspace_id, session_id, root_event_id,"
-            " status, started_at, ended_at"
-            " FROM traces WHERE workspace_id = ?"
-            " ORDER BY started_at DESC LIMIT ? OFFSET ?",
-            (workspace_id, limit, offset),
-        )
+        if workspace_id == "*":
+            cur = self._db.connection.execute(
+                "SELECT id, workspace_id, session_id, root_event_id,"
+                " status, started_at, ended_at"
+                " FROM traces ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT id, workspace_id, session_id, root_event_id,"
+                " status, started_at, ended_at"
+                " FROM traces WHERE workspace_id = ?"
+                " ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (workspace_id, limit, offset),
+            )
         return [dict(r) for r in cur.fetchall()]
 
     def get_trace_full(self, trace_id: str) -> dict[str, object] | None:
