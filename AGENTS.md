@@ -19,7 +19,7 @@ All V1 MVP epics (1–14), V2 items, and Architecture Completion Plan Phase 1–
 ## V2 Status
 
 - ✅ All V2 items except cloud migration adapters (deprioritized)
-- ✅ 306 tests passing, ruff clean, mypy clean
+- ✅ 320 tests passing, ruff clean, mypy clean
 
 ## Project Purpose
 
