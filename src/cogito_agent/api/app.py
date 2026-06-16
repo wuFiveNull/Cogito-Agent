@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import get_adapter, list_providers
@@ -36,6 +39,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Cogito-Agent API", version="0.1.0", lifespan=lifespan)
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        api_key = os.environ.get("COGITO_API_KEY", "")
+        if not api_key:
+            return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == api_key:
+            return await call_next(request)
+        from starlette.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+
+app.add_middleware(AuthMiddleware)
+
 
 _db: Database | None = None
 _kernel: RuntimeKernel | None = None

@@ -102,11 +102,16 @@ class SchedulerEngine:
         return _row_to_job(dict(row))
 
     def list_jobs(self, workspace_id: str) -> list[ScheduleJob]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM scheduled_jobs WHERE workspace_id = ?"
-            " ORDER BY created_at DESC",
-            (workspace_id,),
-        )
+        if workspace_id == "*":
+            cur = self._db.connection.execute(
+                "SELECT * FROM scheduled_jobs ORDER BY created_at DESC",
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT * FROM scheduled_jobs WHERE workspace_id = ?"
+                " ORDER BY created_at DESC",
+                (workspace_id,),
+            )
         return [_row_to_job(dict(r)) for r in cur.fetchall()]
 
     def tick(self) -> list[ScheduleJob]:
@@ -142,7 +147,7 @@ class SchedulerEngine:
         req = PolicyRequest(
             actor_id=job.actor,
             capability_name=job.capability_name,
-            resource="*",
+            resource="database" if job.actor == "maintenance" else "*",
             operation="execute",
             context="background",
         )
