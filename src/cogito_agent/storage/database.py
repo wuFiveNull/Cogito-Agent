@@ -29,6 +29,9 @@ register_migration(4, """
     ALTER TABLE scheduled_jobs ADD COLUMN last_error TEXT;
     ALTER TABLE notifications ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
 """)
+register_migration(5, """
+    ALTER TABLE skill_run_logs ADD COLUMN resume_data_json TEXT;
+""")
 
 
 class Database:

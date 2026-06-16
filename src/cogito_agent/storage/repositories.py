@@ -820,6 +820,12 @@ class ApprovalRepository:
         )
         return dict(cur.fetchone())
 
+    def get_by_id(self, aid: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM approval_records WHERE id = ?", (aid,)
+        )
+        return _row_to_dict(cur.fetchone())
+
     def resolve(
         self, aid: str, decision: str, decided_by: str = ""
     ) -> dict[str, object] | None:

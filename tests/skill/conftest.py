@@ -11,6 +11,7 @@ from cogito_agent.storage.repositories import WorkspaceRepository
 def db() -> Database:
     database = Database(":memory:")
     database.initialize()
+    database.migrate()
     return database
 
 

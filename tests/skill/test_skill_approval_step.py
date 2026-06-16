@@ -25,7 +25,7 @@ def test_approval_step_creates_pending_approval_record(db_runner: SkillRunner) -
         risk_level=SkillRiskLevel.low,
     )
     log = db_runner.run(manifest, workspace_id="ws-run")
-    assert log.status == "completed"
+    assert log.status == "pending_approval"
     assert len(log.step_logs) == 1
 
     cur = db_runner._db.connection.execute(
@@ -55,7 +55,7 @@ def test_approval_step_returns_pending_approval_status(db_runner: SkillRunner) -
         risk_level=SkillRiskLevel.low,
     )
     log = db_runner.run(manifest, workspace_id="ws-run")
-    assert log.status == "completed"
+    assert log.status == "pending_approval"
     assert log.step_logs[0]["status"] == "pending_approval"
     assert log.step_logs[0]["output"] != ""
 
@@ -76,7 +76,7 @@ def test_approval_step_logs_audit_entry(db_runner: SkillRunner) -> None:
         risk_level=SkillRiskLevel.low,
     )
     log = db_runner.run(manifest, workspace_id="ws-run")
-    assert log.status == "completed"
+    assert log.status == "pending_approval"
 
     cur = db_runner._db.connection.execute(
         "SELECT * FROM audit_logs WHERE action = ? ORDER BY rowid DESC LIMIT 1",
@@ -104,7 +104,7 @@ def test_approval_step_records_id_in_output(db_runner: SkillRunner) -> None:
         risk_level=SkillRiskLevel.low,
     )
     log = db_runner.run(manifest, workspace_id="ws-run")
-    assert log.status == "completed"
+    assert log.status == "pending_approval"
     approval_id = log.step_logs[0]["output"]
     assert approval_id != ""
 

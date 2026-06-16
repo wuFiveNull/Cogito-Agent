@@ -4,6 +4,7 @@ import json
 import re
 import time as _time
 import uuid
+from typing import Any
 
 from cogito_agent.capability import CapabilityRegistry, _validate_json_schema
 from cogito_agent.governance import AuditLogger, PolicyEngine
@@ -65,7 +66,7 @@ class SkillRunner:
         self._preflight_all(manifest, workspace_id)
         self._check_semver(manifest)
 
-        for step in manifest.steps:
+        for step_idx, step in enumerate(manifest.steps):
             if step.trace_required:
                 span = self._tracer.create_span(
                     trace.id, f"step_{step.id}", SpanKind.runtime
@@ -81,7 +82,6 @@ class SkillRunner:
                 })
                 break
 
-            # Governance: audit each step execution
             decision = "allow"
             reason = f"Executing step {step.name} ({step.kind.value})"
             if manifest.risk_level in (SkillRiskLevel.high, SkillRiskLevel.critical):
@@ -116,6 +116,30 @@ class SkillRunner:
                 if step.kind == StepKind.approval and isinstance(result, dict):
                     step_status = result.get("status", "ok")
                     step_output = str(result.get("approval_id", ""))
+                    if step_status == "pending_approval":
+                        log.status = "pending_approval"
+                        log.step_logs.append({
+                            "step_id": step.id,
+                            "status": "pending_approval",
+                            "output": step_output,
+                            "artifacts": self._extract_artifacts(result),
+                            "lineage": self._extract_lineage(result),
+                        })
+                        resume_data: dict[str, Any] = {
+                            "manifest": manifest.model_dump(),
+                            "step_index": step_idx,
+                            "step_context": step_context,
+                            "total_cost": total_cost,
+                            "executed_steps": [s.model_dump() for s in executed_steps],
+                            "workspace_id": workspace_id,
+                            "session_id": session_id,
+                            "inputs": inputs or {},
+                        }
+                        self._persist_run_log(log, workspace_id, manifest.name, resume_data)
+                        if step.trace_required:
+                            self._tracer.end_span(span)
+                        self._tracer.end_trace(trace)
+                        return log
                 elif step.kind == StepKind.condition:
                     step_status = "ok"
 
@@ -152,6 +176,190 @@ class SkillRunner:
         self._tracer.end_trace(trace)
         self._persist_run_log(log, workspace_id, manifest.name)
         return log
+
+    def resume(self, run_log_id: str, approval_id: str) -> SkillRunLog | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM skill_run_logs WHERE id = ?", (run_log_id,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        row_dict = dict(row)
+        status = str(row_dict["status"])
+        if status != "pending_approval":
+            return None
+        resume_json = row_dict.get("resume_data_json")
+        if not resume_json:
+            return None
+        resume_data: dict[str, Any] = json.loads(str(resume_json))
+        manifest = SkillManifest(**resume_data["manifest"])
+        workspace_id = str(resume_data["workspace_id"])
+        session_id = str(resume_data.get("session_id", ""))
+        inputs: dict[str, str] = resume_data.get("inputs", {})
+        step_context: dict[str, dict[str, str]] = resume_data.get("step_context", {})
+        total_cost: float = float(resume_data.get("total_cost", 0.0))
+        step_index: int = int(resume_data["step_index"])
+        executed_steps: list[SkillStep] = [
+            SkillStep(**s) for s in resume_data.get("executed_steps", [])
+        ]
+
+        from cogito_agent.storage.repositories import ApprovalRepository
+        repo = ApprovalRepository(self._db)
+        resolved = repo.get_by_id(approval_id)
+        if resolved is None:
+            return None
+        decision = str(resolved.get("decision", ""))
+
+        trace_id = str(row_dict["trace_id"])
+        if not trace_id:
+            return None
+        log = SkillRunLog(trace_id, manifest.name, "running")
+        payload = json.loads(str(row_dict["step_logs_json"]))
+        log.step_logs = payload.get("step_logs", []) if isinstance(payload, dict) else []
+        log.outputs = payload.get("outputs", {}) if isinstance(payload, dict) else {}
+        audit = AuditLogger(self._db)
+        trace_obj = self._tracer.create_trace(
+            workspace_id=workspace_id,
+            root_event_id=f"skill_{manifest.name}_resume",
+            session_id=session_id,
+        )
+        log.trace_id = trace_obj.id
+        approval_step = manifest.steps[step_index]
+
+        if decision == "approved":
+            for entry in log.step_logs:
+                if entry.get("step_id") == approval_step.id:
+                    entry["status"] = "approved"
+                    break
+            if approval_step.trace_required:
+                span = self._tracer.create_span(
+                    trace_obj.id, f"step_{approval_step.id}", SpanKind.runtime
+                )
+                self._tracer.end_span(span)
+            audit.log(
+                actor_id="skill",
+                action="skill.resume.approved",
+                resource=f"step:{approval_step.id}",
+                workspace_id=workspace_id,
+                trace_id=trace_obj.id,
+                session_id=session_id or "",
+                decision="allow",
+                reason=f"Approval step '{approval_step.name}' approved, resuming",
+            )
+
+            remaining = manifest.steps[step_index + 1:]
+            for step in remaining:
+                if step.trace_required:
+                    span = self._tracer.create_span(
+                        trace_obj.id, f"step_{step.id}", SpanKind.runtime
+                    )
+
+                cfg = step.execution
+                if cfg.max_budget_cost is not None and total_cost >= cfg.max_budget_cost:
+                    log.status = "failed"
+                    log.step_logs.append({
+                        "step_id": step.id,
+                        "status": "error",
+                        "error": f"Budget exhausted ({total_cost}/{cfg.max_budget_cost})",
+                    })
+                    break
+
+                audit.log(
+                    actor_id="skill",
+                    action=f"skill.step.{step.kind.value}",
+                    resource=f"step:{step.id}",
+                    workspace_id=workspace_id,
+                    trace_id=trace_obj.id,
+                    session_id=session_id or "",
+                    decision="allow",
+                    reason=f"Resumed step {step.name} ({step.kind.value})",
+                )
+
+                try:
+                    result = self._execute_step_with_controls(
+                        step, workspace_id, inputs, step_context
+                    )
+                    executed_steps.append(step)
+                    norm = self._normalize_output(result)
+                    step_context[step.id] = {"_output": norm}
+                    if step.output_mapping:
+                        for out_key, out_val in step.output_mapping.items():
+                            step_context[step.id][out_key] = str(out_val)
+
+                    step_cost = self._estimate_step_cost(step)
+                    total_cost += step_cost
+
+                    step_status = "ok"
+                    step_output = norm[:500]
+                    if step.kind == StepKind.approval and isinstance(result, dict):
+                        step_status = result.get("status", "ok")
+                        step_output = str(result.get("approval_id", ""))
+                    elif step.kind == StepKind.condition:
+                        step_status = "ok"
+
+                    log.step_logs.append({
+                        "step_id": step.id,
+                        "status": step_status,
+                        "output": step_output,
+                        "artifacts": self._extract_artifacts(result),
+                        "lineage": self._extract_lineage(result),
+                    })
+                except Exception as e:
+                    log.step_logs.append({
+                        "step_id": step.id,
+                        "status": "error",
+                        "error": str(e),
+                    })
+                    failure = step.on_error
+                    if failure == OnError.stop:
+                        log.status = "failed"
+                        if step.trace_required:
+                            self._tracer.end_span(span)
+                        break
+                    if failure == OnError.rollback:
+                        log.status = "rolled_back"
+                        self._execute_rollback(manifest, workspace_id, executed_steps)
+                        if step.trace_required:
+                            self._tracer.end_span(span)
+                        break
+                if step.trace_required:
+                    self._tracer.end_span(span)
+
+            if log.status == "running":
+                log.status = "completed"
+            self._tracer.end_trace(trace_obj)
+            audit.log(
+                actor_id="skill",
+                action="skill.resume.completed",
+                resource=f"run:{run_log_id}",
+                workspace_id=workspace_id,
+                trace_id=trace_obj.id,
+                session_id=session_id or "",
+                decision="allow",
+                reason=f"Skill '{manifest.name}' resume completed with status {log.status}",
+            )
+            self._persist_run_log(log, workspace_id, manifest.name)
+            return log
+
+        else:
+            for entry in log.step_logs:
+                if entry.get("step_id") == approval_step.id:
+                    entry["status"] = "rejected"
+                    break
+            log.status = "rejected"
+            self._tracer.end_trace(trace_obj)
+            audit.log(
+                actor_id="skill",
+                action="skill.resume.rejected",
+                resource=f"step:{approval_step.id}",
+                workspace_id=workspace_id,
+                trace_id=trace_obj.id,
+                session_id=session_id or "",
+                decision="deny",
+                reason=f"Approval step '{approval_step.name}' rejected",
+            )
+            self._persist_run_log(log, workspace_id, manifest.name)
+            return log
 
     # ── M.4 Semver enforcement ──────────────────────────────────────────
 
@@ -441,16 +649,21 @@ class SkillRunner:
         return 0.0
 
     def _persist_run_log(
-        self, log: SkillRunLog, workspace_id: str, skill_name: str
+        self,
+        log: SkillRunLog,
+        workspace_id: str,
+        skill_name: str,
+        resume_data: dict[str, Any] | None = None,
     ) -> None:
         payload = {
             "step_logs": log.step_logs,
             "outputs": log.outputs,
         }
+        resume_json = json.dumps(resume_data) if resume_data else None
         self._db.connection.execute(
             "INSERT INTO skill_run_logs"
-            " (id, workspace_id, skill_name, trace_id, status, step_logs_json)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
+            " (id, workspace_id, skill_name, trace_id, status, step_logs_json, resume_data_json)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid.uuid4()),
                 workspace_id,
@@ -458,6 +671,7 @@ class SkillRunner:
                 log.trace_id,
                 log.status,
                 json.dumps(payload),
+                resume_json,
             ),
         )
         self._db.connection.commit()

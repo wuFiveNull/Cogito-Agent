@@ -59,6 +59,7 @@ def test_run_stop_on_error(db_runner: SkillRunner) -> None:
 
     db = Database(":memory:")
     db.initialize()
+    db.migrate()
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-err", "test")
     runner = SkillRunner(db)
@@ -94,6 +95,7 @@ def test_run_skip_on_error(db_runner: SkillRunner) -> None:
 
     db = Database(":memory:")
     db.initialize()
+    db.migrate()
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-skip", "test")
     runner = SkillRunner(db)

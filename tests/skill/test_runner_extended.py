@@ -124,6 +124,7 @@ def test_semver_rejects_major_upgrade() -> None:
 def test_semver_allows_minor_upgrade() -> None:
     db = Database(":memory:")
     db.initialize()
+    db.migrate()
     repo = WorkspaceRepository(db)
     repo.create("ws-semver2", "test")
 

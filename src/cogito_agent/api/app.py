@@ -218,6 +218,7 @@ def get_db() -> Database:
     if _db is None:
         _db = Database()
         _db.initialize()
+        _db.migrate()
     return _db
 
 

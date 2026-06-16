@@ -1,10 +1,13 @@
-# 11 V0.3.0 Core Completion
+# 11 V0.3.0 Core Completion Candidate
+
+> **Status**: Core-complete candidate. Not released. No GitHub tag or release.
+> **Do not use in production until formal release.**
 
 ## Baseline
 
 - **Base commit**: `1272449`
-- **Current commit**: `ea09a05`
-- **Package**: cogito-agent 0.3.0
+- **Current commit**: `1830449` (pending)
+- **Package**: cogito-agent 0.3.0-dev
 
 ## Epic A: Memory V2 — Complete
 
@@ -80,24 +83,30 @@
 ### Completed Capabilities
 - Step types: capability, llm, transform, condition, approval
 - Condition step: expression evaluation with $input.xxx, $step.xxx._output, `contains` keyword, safe globals
-- Approval step: creates `ApprovalRepository` record + audit log entry
+- Approval step: creates `ApprovalRepository` record + audit log entry, **blocks execution** with `pending_approval` status
+- Resume: `SkillRunner.resume(run_log_id, approval_id)` continues execution after approval, or rejects the skill run
 - Execution controls: per-step timeout (default 300s), retry (count + delay), budget tracking, failure_policy (stop/skip/rollback), output schema validation
 - Governance: permission preflight, policy evaluation, risk-level-based auditing
 - CLI: `cogito skill list|show|validate|import|export|run`
-- Replay: skill run IDs, step spans, capability calls, approval interruptions, artifacts/lineage in TraceInspector
+- Replay: skill run IDs, step spans, capability calls, approval interruptions with resume traces, artifacts/lineage in TraceInspector
 - Budget enforcement via `_estimate_step_cost()` and `max_budget_cost` check
 
 ### Gap Items Filled
 - Budget enforcement: `_estimate_step_cost()` method, budget check before each step execution
+- Approval step blocking: approval step now returns `pending_approval` status, execution stops, resume state persisted
+- Resume after approval: `SkillRunner.resume()` continues from interrupted step after approval, or rejects the run
 - Added condition step tests: empty expression, input refs, step refs, contains keyword, false condition, status logging
 - Added approval step tests: pending approval record creation, pending_approval status, audit log entry, approval ID output
+- Added approval blocking tests: pending_approval status, remaining steps blocked, resume data persisted
+- Added resume tests: approved → completes, rejected → rejected, invalid IDs return None
 - Added execution controls tests: timeout, retry, skip, stop, output validation, budget enforcement
-- Added skill run/replay tests: run log creation, step logs persistence, status persistence
+- Added skill run/replay tests: run log creation, step logs persistence, status persistence, approval interruption, resume trace
 
 ### Known Limitations
-- Approval step does not block/interrupt — creates record but continues execution immediately
-- No `cogito approval` CLI subcommand (approvals are resolvable via API)
+- No `cogito approval` CLI subcommand (approvals are resolvable via API or directly via `ApprovalRepository`)
 - `max_budget_cost` uses simple per-step cost estimates (0.002 for LLM, 0.001 for capability), not actual provider costs
+
+## Epic E: Secret Redaction — Complete
 
 ## Epic E: Secret Redaction — Complete
 
@@ -125,9 +134,9 @@
 
 | Suite | Result |
 |-------|--------|
-| pytest | **564 passed**, 0 failed |
-| ruff check src/ | **Clean** (30 pre-existing E501/F401 only, none from v0.3 changes) |
-| mypy src/ | **Clean** (24 pre-existing type errors only, none from v0.3 changes) |
+| pytest | **576 passed**, 0 failed |
+| ruff check src/ | **30 pre-existing issues** (29 E501 line-too-long, 1 F401 unused-import). No new issues from v0.3 changes. |
+| mypy src/ | **24 pre-existing type errors** in 4 files (api/app.py, cli/__init__.py, cli/daemon.py, skill/runner.py). No new issues from v0.3 changes. |
 
 ## Files Modified (code changes)
 
@@ -136,10 +145,17 @@
 | `src/cogito_agent/autonomy/loop.py:39` | Fixed `_update_state()` SQL binding count (5→8) |
 | `src/cogito_agent/autonomy/scheduler.py:92` | `cancel()` sets `status='cancelled'` + enabled=0, returns bool |
 | `src/cogito_agent/shared/schedule.py:14` | Added `JobStatus.cancelled` |
-| `src/cogito_agent/skill/runner.py:48` | Budget tracking (`_estimate_step_cost`, total_cost, max_budget_cost check) |
+| `src/cogito_agent/skill/runner.py` | Approval step blocking + resume; budget tracking (`_estimate_step_cost`, total_cost, max_budget_cost check) |
 | `src/cogito_agent/trace/tracer.py:103` | `log_model_call()` accepts `redactions: list[str] \| None = None` |
+| `src/cogito_agent/storage/database.py` | Added migration 5 (`ALTER TABLE skill_run_logs ADD COLUMN resume_data_json TEXT`) |
+| `src/cogito_agent/storage/repositories.py` | Added `ApprovalRepository.get_by_id()` |
+| `src/cogito_agent/api/app.py` | Added `_db.migrate()` in `get_db()` |
+| `tests/skill/conftest.py` | Added `database.migrate()` to `db` fixture |
+| `tests/skill/test_runner.py` | Added `db.migrate()` |
+| `tests/skill/test_runner_extended.py` | Added `db.migrate()` |
+| `tests/skill/test_skill_approval_step.py` | Updated assertions to expect `pending_approval` status |
 
-## New Test Files (25 files, 144 new tests)
+## New Test Files (27 files, 156 new tests)
 
 | Epic | Test File | Tests |
 |------|-----------|-------|
@@ -156,9 +172,11 @@
 | C | `tests/autonomy/test_notification_gate.py` | 15 |
 | D | `tests/skill/test_skill_condition_step.py` | 6 |
 | D | `tests/skill/test_skill_approval_step.py` | 4 |
+| D | `tests/skill/test_skill_approval_blocking.py` | 5 |
+| D | `tests/skill/test_skill_resume_after_approval.py` | 5 |
 | D | `tests/skill/test_skill_execution_controls.py` | 7 |
 | D | `tests/skill/test_skill_cli.py` | 3 |
-| D | `tests/skill/test_skill_replay.py` | 4 |
+| D | `tests/skill/test_skill_replay.py` | 6 |
 | E | `tests/security/test_redaction.py` | 12 |
 | E | `tests/trace/test_secret_redaction.py` | 11 |
 | E | `tests/export/test_secret_redaction.py` | 5 |
@@ -170,13 +188,13 @@ None added (all CLI commands existed from first round).
 
 ## Database Schema Changes
 
+- `skill_run_logs` table: added `resume_data_json TEXT` column (migration 5)
 - `scheduled_jobs.status` now supports `'cancelled'` value (no schema DDL change — just enum expansion)
 
 ## Next Priorities (v0.4)
 
-1. Approval step blocking/resume — make skill runner wait for approval resolution
-2. `cogito approval list|resolve` CLI subcommand
+1. `cogito approval list|resolve` CLI subcommand
+2. `/chat/stream` full RuntimeKernel integration (remove experimental bypass)
 3. OS keychain integration for `KeychainSecretProvider`
-4. `/chat/stream` full RuntimeKernel integration (remove experimental bypass)
-5. Vector DB integration for semantic memory search
-6. Cross-process daemon control
+4. Vector DB integration for semantic memory search
+5. Cross-process daemon control
