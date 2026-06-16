@@ -34,9 +34,15 @@ def _seed_schedule_job(db: Database) -> str:
     return jid
 
 
-def test_schedule_list_empty() -> None:
+def _db_init() -> Database:
     db = Database()
     db.initialize()
+    db.migrate()
+    return db
+
+
+def test_schedule_list_empty() -> None:
+    db = _db_init()
     sched = SchedulerEngine(db)
     jobs = sched.list_jobs("*")
     assert isinstance(jobs, list)
@@ -44,8 +50,7 @@ def test_schedule_list_empty() -> None:
 
 
 def test_schedule_list_with_job() -> None:
-    db = Database()
-    db.initialize()
+    db = _db_init()
     jid = _seed_schedule_job(db)
     sched = SchedulerEngine(db)
     jobs = sched.list_jobs("*")
@@ -55,8 +60,7 @@ def test_schedule_list_with_job() -> None:
 
 
 def test_daemon_once_no_jobs() -> None:
-    db = Database()
-    db.initialize()
+    db = _db_init()
     sched = SchedulerEngine(db)
     gate = NotificationGate(db)
     engine = ProactiveEngine(sched, gate)
@@ -66,8 +70,7 @@ def test_daemon_once_no_jobs() -> None:
 
 
 def test_daemon_once_with_job() -> None:
-    db = Database()
-    db.initialize()
+    db = _db_init()
     _seed_schedule_job(db)
     sched = SchedulerEngine(db)
     gate = NotificationGate(db)
@@ -77,8 +80,7 @@ def test_daemon_once_with_job() -> None:
 
 
 def test_schedule_maintenance_creates_trace_and_audit() -> None:
-    db = Database()
-    db.initialize()
+    db = _db_init()
     ws_repo = WorkspaceRepository(db)
     ws = ws_repo.create("ws_trace_audit", "TraceAudit")
     ws_id = str(ws["id"])
@@ -123,8 +125,7 @@ def test_schedule_maintenance_creates_trace_and_audit() -> None:
 
 
 def test_schedule_duplicate_prevention() -> None:
-    db = Database()
-    db.initialize()
+    db = _db_init()
     _seed_schedule_job(db)
     sched = SchedulerEngine(db)
     gate = NotificationGate(db)

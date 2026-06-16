@@ -45,6 +45,7 @@ class TraceInspector:
         trace["source_lineage"] = self._get_source_lineage(trace_id)
         trace["context_items"] = self._get_context_items(trace_id)
         trace["state_path"] = self._reconstruct_state_path(trace_id)
+        trace["skill_runs"] = self._get_skill_run_logs(trace_id)
 
         return trace
 
@@ -86,7 +87,11 @@ class TraceInspector:
             "SELECT * FROM audit_logs WHERE trace_id = ? ORDER BY rowid",
             (trace_id,),
         )
-        return [dict(r) for r in cur.fetchall()]
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            if isinstance(r.get("details"), str):
+                r["details"] = self._redactor.redact(r["details"])
+        return rows
 
     def _get_source_lineage(self, trace_id: str) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
@@ -100,7 +105,28 @@ class TraceInspector:
             "SELECT * FROM context_items WHERE trace_id = ? ORDER BY rank",
             (trace_id,),
         )
-        return [dict(r) for r in cur.fetchall()]
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            if isinstance(r.get("text"), str):
+                r["text"] = self._redactor.redact(r["text"])
+        return rows
+
+    def _get_skill_run_logs(self, trace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM skill_run_logs WHERE trace_id = ? ORDER BY rowid",
+            (trace_id,),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            sj = r.get("step_logs_json")
+            if isinstance(sj, str):
+                import json
+                try:
+                    r["steps"] = json.loads(sj)
+                except (json.JSONDecodeError, TypeError):
+                    r["steps"] = []
+            del r["step_logs_json"]
+        return rows
 
     def _reconstruct_state_path(self, trace_id: str) -> list[dict[str, object]]:
         """Reconstruct the state transition path from spans and events."""
@@ -229,6 +255,28 @@ class TraceInspector:
                 lines.append(f"  [{st}] {sid}")
                 if note:
                     lines.append(f"    note: {note}")
+
+        # Skill runs
+        skills = trace.get("skill_runs", [])
+        if isinstance(skills, list) and skills:
+            lines.append("")
+            lines.append(f"-- Skill Runs ({len(skills)}) --")
+            for sk in skills:
+                sname = sk.get("skill_name", "")
+                sstatus = sk.get("status", "")
+                created = str(sk.get("created_at", ""))[:19]
+                lines.append(f"  {sname} [{sstatus}] {created}")
+                steps = sk.get("steps", [])
+                if isinstance(steps, list):
+                    for sl in steps:
+                        sid = sl.get("step_id", "")
+                        st = sl.get("status", "")
+                        out = str(sl.get("output", ""))[:60]
+                        err = sl.get("error", "")
+                        if err:
+                            lines.append(f"    [{st}] {sid}: {err}")
+                        else:
+                            lines.append(f"    [{st}] {sid}: {out}")
 
         lines.append("=" * 60)
         return "\n".join(lines)

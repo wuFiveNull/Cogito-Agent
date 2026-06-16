@@ -29,17 +29,22 @@ def _make_candidate(db: Database, wid: str, text: str) -> dict:
     return repo.create(wid, text)
 
 
-def test_memory_list_empty() -> None:
+def _init_db() -> Database:
     db = Database(":memory:")
     db.initialize()
+    db.migrate()
+    return db
+
+
+def test_memory_list_empty() -> None:
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryRepository(db)
     assert repo.list_by_workspace(wid) == []
 
 
 def test_memory_list_with_data() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     _make_memory(db, wid, "User loves Python")
     _make_memory(db, wid, "Works at Acme Corp")
@@ -49,8 +54,7 @@ def test_memory_list_with_data() -> None:
 
 
 def test_memory_search() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     _make_memory(db, wid, "User loves Python programming")
     _make_memory(db, wid, "Prefers Go for backend")
@@ -61,24 +65,21 @@ def test_memory_search() -> None:
 
 
 def test_memory_search_no_results() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     retriever = MemoryRetriever(db)
     assert retriever.search(wid, "nonexistent") == []
 
 
 def test_memory_review_empty() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryCandidateRepository(db)
     assert repo.list_pending(wid) == []
 
 
 def test_memory_review_with_candidates() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     _make_candidate(db, wid, "Candidate memory 1")
     _make_candidate(db, wid, "Candidate memory 2")
@@ -88,8 +89,7 @@ def test_memory_review_with_candidates() -> None:
 
 
 def test_memory_accept_candidate() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     cand = _make_candidate(db, wid, "Acceptable memory")
     repo = MemoryCandidateRepository(db)
@@ -102,16 +102,14 @@ def test_memory_accept_candidate() -> None:
 
 
 def test_memory_accept_nonexistent() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryCandidateRepository(db)
     assert repo.accept("nonexistent") is None
 
 
 def test_memory_reject_candidate() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     cand = _make_candidate(db, wid, "Rejectable memory")
     repo = MemoryCandidateRepository(db)
@@ -121,15 +119,13 @@ def test_memory_reject_candidate() -> None:
 
 
 def test_memory_reject_nonexistent() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     repo = MemoryCandidateRepository(db)
     assert repo.reject("nonexistent") is None
 
 
 def test_memory_delete() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     mem = _make_memory(db, wid, "Deletable memory")
     from cogito_agent.storage.repositories import MemoryEditRepository
@@ -139,9 +135,7 @@ def test_memory_delete() -> None:
 
 
 def test_memory_pin() -> None:
-    db = Database(":memory:")
-    db.initialize()
-    db.migrate()
+    db = _init_db()
     wid = _make_workspace(db)
     mem = _make_memory(db, wid, "Pinnable memory")
     repo = MemoryRepository(db)
@@ -153,18 +147,14 @@ def test_memory_pin() -> None:
 
 
 def test_memory_pin_nonexistent() -> None:
-    db = Database(":memory:")
-    db.initialize()
-    db.migrate()
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryRepository(db)
     assert repo.pin("nonexistent", wid) is False
 
 
 def test_memory_archive() -> None:
-    db = Database(":memory:")
-    db.initialize()
-    db.migrate()
+    db = _init_db()
     wid = _make_workspace(db)
     mem = _make_memory(db, wid, "Archivable memory")
     repo = MemoryRepository(db)
@@ -176,17 +166,78 @@ def test_memory_archive() -> None:
 
 
 def test_memory_archive_nonexistent() -> None:
-    db = Database(":memory:")
-    db.initialize()
-    db.migrate()
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryRepository(db)
     assert repo.archive("nonexistent", wid) is False
 
 
+def test_memory_merge() -> None:
+    db = _init_db()
+    wid = _make_workspace(db)
+    source = _make_memory(db, wid, "Source text for merge")
+    target = _make_memory(db, wid, "Target text for merge")
+    repo = MemoryRepository(db)
+    assert repo.merge(source["id"], target["id"], wid) is True
+    merged = repo.get_by_id(target["id"], wid)
+    assert merged is not None
+    assert "Target text" in str(merged["text"])
+    assert "Source text" in str(merged["text"])
+    archived_source = repo.get_by_id_including_deleted(source["id"], wid)
+    assert archived_source is not None
+    assert archived_source["archived_at"] is not None
+
+
+def test_memory_edit() -> None:
+    db = _init_db()
+    wid = _make_workspace(db)
+    mem = _make_memory(db, wid, "Original text")
+    repo = MemoryRepository(db)
+    assert repo.edit_text(mem["id"], wid, "Edited text") is True
+    updated = repo.get_by_id(mem["id"], wid)
+    assert updated is not None
+    assert str(updated["text"]) == "Edited text"
+
+
+def test_memory_correct() -> None:
+    db = _init_db()
+    wid = _make_workspace(db)
+    mem = _make_memory(db, wid, "Incorrect text")
+    repo = MemoryRepository(db)
+    assert repo.correct_text(mem["id"], wid, "Corrected text") is True
+    updated = repo.get_by_id(mem["id"], wid)
+    assert updated is not None
+    assert str(updated["text"]) == "Corrected text"
+
+
+def test_memory_unarchive() -> None:
+    db = _init_db()
+    wid = _make_workspace(db)
+    mem = _make_memory(db, wid, "Unarchivable memory")
+    repo = MemoryRepository(db)
+    assert repo.archive(mem["id"], wid) is True
+    assert repo.unarchive(mem["id"], wid) is True
+    updated = db.connection.execute(
+        "SELECT archived_at FROM memories WHERE id = ?", (mem["id"],)
+    ).fetchone()
+    assert updated["archived_at"] is None
+
+
+def test_memory_unpin() -> None:
+    db = _init_db()
+    wid = _make_workspace(db)
+    mem = _make_memory(db, wid, "Unpinnable memory")
+    repo = MemoryRepository(db)
+    assert repo.pin(mem["id"], wid) is True
+    assert repo.unpin(mem["id"], wid) is True
+    updated = db.connection.execute(
+        "SELECT pinned_at FROM memories WHERE id = ?", (mem["id"],)
+    ).fetchone()
+    assert updated["pinned_at"] is None
+
+
 def test_memory_consolidate() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryRepository(db)
     repo.create(str(uuid.uuid4()), wid, "Duplicate text")
@@ -201,8 +252,7 @@ def test_memory_consolidate() -> None:
 
 
 def test_memory_consolidate_no_duplicates() -> None:
-    db = Database(":memory:")
-    db.initialize()
+    db = _init_db()
     wid = _make_workspace(db)
     repo = MemoryRepository(db)
     repo.create(str(uuid.uuid4()), wid, "Text A")

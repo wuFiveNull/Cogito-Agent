@@ -377,6 +377,203 @@ class MemoryRepository:
         )
         self._db.connection.commit()
 
+    def unarchive(self, mid: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "UPDATE memories SET archived_at = NULL"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
+
+    def unpin(self, mid: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "UPDATE memories SET pinned_at = NULL"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
+
+    def merge(self, source_mid: str, target_mid: str, workspace_id: str) -> bool:
+        cur_src = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (source_mid, workspace_id),
+        )
+        source = cur_src.fetchone()
+        if source is None:
+            return False
+        cur_tgt = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (target_mid, workspace_id),
+        )
+        target = cur_tgt.fetchone()
+        if target is None:
+            return False
+        source_text = str(source["text"])
+        target_text = str(target["text"])
+        merged_text = target_text + "\n\n---\n\n" + source_text
+        self._db.connection.execute(
+            "UPDATE memories SET text = ?, updated_at = datetime('now')"
+            " WHERE id = ?",
+            (merged_text, target_mid),
+        )
+        cur_ft = self._db.connection.execute(
+            "SELECT rowid FROM memories WHERE id = ?", (target_mid,)
+        )
+        row_ft = cur_ft.fetchone()
+        if row_ft:
+            rowid = row_ft["rowid"]
+            self._db.connection.execute(
+                "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
+            )
+            self._db.connection.execute(
+                "INSERT INTO memories_fts(rowid, text, summary) VALUES (?, ?, ?)",
+                (rowid, merged_text, str(target["summary"] or "")),
+            )
+        self._db.connection.execute(
+            "UPDATE memories SET archived_at = datetime('now'), source_id = ?, updated_at = datetime('now')"
+            " WHERE id = ?",
+            (target_mid, source_mid),
+        )
+        cur_sf = self._db.connection.execute(
+            "SELECT rowid FROM memories WHERE id = ?", (source_mid,)
+        )
+        row_sf = cur_sf.fetchone()
+        if row_sf:
+            self._db.connection.execute(
+                "DELETE FROM memories_fts WHERE rowid = ?", (row_sf["rowid"],)
+            )
+        self._db.connection.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?", (source_mid,)
+        )
+        log_id1 = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            " VALUES (?, ?, ?, ?, ?, 'merge_source_archived', ?)",
+            (log_id1, source_mid, workspace_id, source_text, merged_text, "cli"),
+        )
+        log_id2 = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            " VALUES (?, ?, ?, ?, ?, 'merge_target_updated', ?)",
+            (log_id2, target_mid, workspace_id, target_text, merged_text, "cli"),
+        )
+        self._db.connection.commit()
+        return True
+
+    def edit_text(self, mid: str, workspace_id: str, new_text: str, actor_id: str = "cli") -> bool:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (mid, workspace_id),
+        )
+        old = cur.fetchone()
+        if old is None:
+            return False
+        old_text = str(old["text"])
+        if old_text == new_text:
+            return True
+        version_id = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO memories"
+            " (id, workspace_id, type, status, text, summary, confidence, sensitivity, source_id, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+            (version_id, workspace_id, str(old["type"]), old_text, str(old["summary"] or ""),
+             float(old["confidence"] or 0.5), str(old["sensitivity"] or "normal"), mid),
+        )
+        self._db.connection.execute(
+            "UPDATE memories SET text = ?, updated_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (new_text, mid, workspace_id),
+        )
+        cur_ft = self._db.connection.execute(
+            "SELECT rowid FROM memories WHERE id = ?", (mid,)
+        )
+        row = cur_ft.fetchone()
+        if row:
+            rowid = row["rowid"]
+            self._db.connection.execute(
+                "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
+            )
+            self._db.connection.execute(
+                "INSERT INTO memories_fts(rowid, text, summary) VALUES (?, ?, ?)",
+                (rowid, new_text, str(old["summary"] or "")),
+            )
+        self._db.connection.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
+        )
+        log_id = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            " VALUES (?, ?, ?, ?, ?, 'edit', ?)",
+            (log_id, mid, workspace_id, old_text, new_text, actor_id),
+        )
+        self._db.connection.commit()
+        return True
+
+    def correct_text(self, mid: str, workspace_id: str, new_text: str, actor_id: str = "cli") -> bool:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (mid, workspace_id),
+        )
+        old = cur.fetchone()
+        if old is None:
+            return False
+        old_text = str(old["text"])
+        if old_text == new_text:
+            return True
+        version_id = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO memories"
+            " (id, workspace_id, type, status, text, summary, confidence, sensitivity, source_id, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+            (version_id, workspace_id, str(old["type"]), old_text, str(old["summary"] or ""),
+             float(old["confidence"] or 0.5), str(old["sensitivity"] or "normal"), mid),
+        )
+        self._db.connection.execute(
+            "UPDATE memories SET text = ?, updated_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (new_text, mid, workspace_id),
+        )
+        cur_ft = self._db.connection.execute(
+            "SELECT rowid FROM memories WHERE id = ?", (mid,)
+        )
+        row = cur_ft.fetchone()
+        if row:
+            rowid = row["rowid"]
+            self._db.connection.execute(
+                "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
+            )
+            self._db.connection.execute(
+                "INSERT INTO memories_fts(rowid, text, summary) VALUES (?, ?, ?)",
+                (rowid, new_text, str(old["summary"] or "")),
+            )
+        self._db.connection.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
+        )
+        log_id = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO memory_edit_log (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
+            " VALUES (?, ?, ?, ?, ?, 'correct', ?)",
+            (log_id, mid, workspace_id, old_text, new_text, actor_id),
+        )
+        self._db.connection.commit()
+        return True
+
+    def get_by_id_including_deleted(self, mid: str, workspace_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def list_all_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memories WHERE workspace_id = ? ORDER BY created_at DESC",
+            (workspace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
 
 class MemoryCandidateRepository:
     def __init__(self, db: Database) -> None:
@@ -441,6 +638,12 @@ class MemoryCandidateRepository:
         )
         result = cur.fetchone()
         return dict(result) if result else None
+
+    def get_by_id(self, cid: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memory_candidates WHERE id = ?", (cid,)
+        )
+        return _row_to_dict(cur.fetchone())
 
     def list_pending(self, workspace_id: str) -> list[dict[str, object]]:
         cur = self._db.connection.execute(

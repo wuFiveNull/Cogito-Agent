@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 
-from cogito_agent.governance import PolicyEngine
+from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.shared import DecisionType, PolicyRequest
 from cogito_agent.storage import Database
 
@@ -14,26 +15,56 @@ class NotificationGate:
         self,
         db: Database,
         policy_engine: PolicyEngine | None = None,
+        audit_logger: AuditLogger | None = None,
     ) -> None:
         self._db = db
         self._policy = policy_engine or PolicyEngine()
+        self._audit = audit_logger or AuditLogger(db)
 
     def should_notify(
         self,
         workspace_id: str,
         title: str,
         body: str,
+        priority: str = "normal",
     ) -> tuple[bool, str]:
         now = datetime.now(UTC)
         event_hash = self._hash_event(title, body)
 
         if self._is_quiet_hours(workspace_id, now):
+            self._audit.log(
+                actor_id="scheduler",
+                action="notification.suppressed",
+                resource="notification",
+                workspace_id=workspace_id,
+                decision="deny",
+                reason="quiet_hours",
+                details=json.dumps({"title": title, "reason": "quiet_hours"}),
+            )
             return False, "quiet_hours"
 
         if self._is_duplicate(workspace_id, event_hash):
+            self._audit.log(
+                actor_id="scheduler",
+                action="notification.suppressed",
+                resource="notification",
+                workspace_id=workspace_id,
+                decision="deny",
+                reason="duplicate",
+                details=json.dumps({"title": title, "reason": "duplicate"}),
+            )
             return False, "duplicate"
 
         if self._exceeded_daily_quota(workspace_id, now):
+            self._audit.log(
+                actor_id="scheduler",
+                action="notification.suppressed",
+                resource="notification",
+                workspace_id=workspace_id,
+                decision="deny",
+                reason="daily_quota_exceeded",
+                details=json.dumps({"title": title, "reason": "daily_quota_exceeded"}),
+            )
             return False, "daily_quota_exceeded"
 
         req = PolicyRequest(
@@ -45,14 +76,24 @@ class NotificationGate:
         )
         decision = self._policy.evaluate(req)
         if decision.decision == DecisionType.deny:
-            return False, f"policy_denied: {decision.reason}"
+            reason = f"policy_denied: {decision.reason}"
+            self._audit.log(
+                actor_id="scheduler",
+                action="notification.suppressed",
+                resource="notification",
+                workspace_id=workspace_id,
+                decision="deny",
+                reason=reason,
+                details=json.dumps({"title": title, "reason": reason}),
+            )
+            return False, reason
 
         nid = str(uuid.uuid4())
         self._db.connection.execute(
             "INSERT INTO notifications"
-            " (id, workspace_id, event_hash, title, body, decision)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (nid, workspace_id, event_hash, title, body, decision.decision.value),
+            " (id, workspace_id, event_hash, title, body, decision, priority)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (nid, workspace_id, event_hash, title, body, decision.decision.value, priority),
         )
         self._db.connection.commit()
         return True, nid
@@ -64,14 +105,15 @@ class NotificationGate:
         title: str,
         body: str,
         decision: str = "sent",
+        priority: str = "normal",
     ) -> str:
         nid = str(uuid.uuid4())
         event_hash = self._hash_event(title, body)
         self._db.connection.execute(
             "INSERT INTO notifications"
-            " (id, workspace_id, job_id, event_hash, title, body, decision)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (nid, workspace_id, job_id, event_hash, title, body, decision),
+            " (id, workspace_id, job_id, event_hash, title, body, decision, priority)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (nid, workspace_id, job_id, event_hash, title, body, decision, priority),
         )
         self._db.connection.commit()
         return nid
@@ -117,6 +159,9 @@ class NotificationGate:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def is_quiet_hours(self, workspace_id: str, now: datetime | None = None) -> bool:
+        return self._is_quiet_hours(workspace_id, now or datetime.now(UTC))
+
     def _is_quiet_hours(self, workspace_id: str, now: datetime) -> bool:
         cur = self._db.connection.execute(
             "SELECT quiet_hours_start, quiet_hours_end FROM workspace_settings"
@@ -161,6 +206,81 @@ class NotificationGate:
         row2 = cur2.fetchone()
         count = row2["cnt"] if row2 else 0
         return count >= max_daily
+
+    def write_inbox(
+        self,
+        workspace_id: str,
+        title: str,
+        body: str,
+        source: str = "system",
+        priority: str = "normal",
+        trace_id: str = "",
+    ) -> str:
+        iid = str(uuid.uuid4())
+        self._db.connection.execute(
+            "INSERT INTO inbox_items"
+            " (id, workspace_id, title, body, source, priority, trace_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (iid, workspace_id, title, body, source, priority, trace_id or None),
+        )
+        self._db.connection.commit()
+        return iid
+
+    def list_inbox(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, object]]:
+        if workspace_id == "*":
+            cur = self._db.connection.execute(
+                "SELECT * FROM inbox_items ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT * FROM inbox_items WHERE workspace_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (workspace_id, limit),
+            )
+        return [dict(r) for r in cur.fetchall()]
+
+    def read_inbox_item(self, item_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def mark_inbox_read(self, item_id: str) -> None:
+        self._db.connection.execute(
+            "UPDATE inbox_items SET read_at = ? WHERE id = ?",
+            (datetime.now(UTC).isoformat(), item_id),
+        )
+        self._db.connection.commit()
+
+    def clear_inbox(self, workspace_id: str = "*") -> None:
+        if workspace_id == "*":
+            self._db.connection.execute("DELETE FROM inbox_items")
+        else:
+            self._db.connection.execute(
+                "DELETE FROM inbox_items WHERE workspace_id = ?", (workspace_id,)
+            )
+        self._db.connection.commit()
+
+    def try_notify_or_inbox(
+        self,
+        workspace_id: str,
+        title: str,
+        body: str,
+        priority: str = "normal",
+        trace_id: str = "",
+    ) -> tuple[str, str]:
+        allowed, result = self.should_notify(
+            workspace_id, title, body, priority=priority,
+        )
+        if allowed:
+            return ("notified", result)
+        iid = self.write_inbox(
+            workspace_id, title, body,
+            source="system", priority=priority, trace_id=trace_id,
+        )
+        return ("inbox", iid)
 
     @staticmethod
     def _hash_event(title: str, body: str) -> str:

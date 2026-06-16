@@ -17,12 +17,21 @@ class StepKind(StrEnum):
     capability = "capability"
     llm = "llm"
     transform = "transform"
+    condition = "condition"
+    approval = "approval"
 
 
 class OnError(StrEnum):
     stop = "stop"
     skip = "skip"
     rollback = "rollback"
+
+
+class StepExecutionConfig(BaseModel):
+    timeout_seconds: float = 300.0
+    retry_count: int = 0
+    retry_delay_seconds: float = 1.0
+    max_budget_cost: float | None = None
 
 
 class SkillStep(BaseModel):
@@ -35,6 +44,10 @@ class SkillStep(BaseModel):
     on_error: OnError = OnError.stop
     trace_required: bool = True
     prompt: str = ""
+    condition_expression: str = ""
+    execution: StepExecutionConfig = Field(default_factory=StepExecutionConfig)
+    failure_policy: OnError = OnError.stop
+    output_schema: dict[str, object] = Field(default_factory=dict)
 
 
 class SkillManifest(BaseModel):

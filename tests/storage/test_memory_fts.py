@@ -8,7 +8,13 @@ def _setup_ws(db: Database) -> None:
     ws_repo.create("ws-1", "test")
 
 
+def _init_db(db: Database) -> None:
+    db.initialize()
+    db.migrate()
+
+
 def test_fts_search(db: Database) -> None:
+    _init_db(db)
     _setup_ws(db)
     repo = MemoryRepository(db)
     repo.create("m1", "ws-1", "User loves Python programming")
@@ -21,6 +27,7 @@ def test_fts_search(db: Database) -> None:
 
 
 def test_fts_fallback_like(db: Database) -> None:
+    _init_db(db)
     _setup_ws(db)
     repo = MemoryRepository(db)
     repo.create("m1", "ws-1", "some special keyword here")

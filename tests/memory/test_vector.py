@@ -58,9 +58,15 @@ def test_pack_embedding() -> None:
     assert packed == expected
 
 
-def test_hybrid_retriever_no_embeddings_falls_back(tmp_path) -> None:
+def _db_init_vector(tmp_path) -> Database:
     db = Database(str(tmp_path / "test.db"))
     db.initialize()
+    db.migrate()
+    return db
+
+
+def test_hybrid_retriever_no_embeddings_falls_back(tmp_path) -> None:
+    db = _db_init_vector(tmp_path)
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-test", "test")
     mem_repo = MemoryRepository(db)
@@ -75,8 +81,7 @@ def test_hybrid_retriever_no_embeddings_falls_back(tmp_path) -> None:
 
 
 def test_hybrid_retriever_with_embeddings(tmp_path) -> None:
-    db = Database(str(tmp_path / "test.db"))
-    db.initialize()
+    db = _db_init_vector(tmp_path)
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-emb", "test")
     mem_repo = MemoryRepository(db)
@@ -102,8 +107,7 @@ def test_hybrid_retriever_with_embeddings(tmp_path) -> None:
 
 
 def test_hybrid_retriever_empty_workspace(tmp_path) -> None:
-    db = Database(str(tmp_path / "test.db"))
-    db.initialize()
+    db = _db_init_vector(tmp_path)
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-empty", "test")
 
@@ -115,8 +119,7 @@ def test_hybrid_retriever_empty_workspace(tmp_path) -> None:
 def test_search_hybrid_on_retriever(tmp_path) -> None:
     from cogito_agent.memory import MemoryRetriever
 
-    db = Database(str(tmp_path / "test.db"))
-    db.initialize()
+    db = _db_init_vector(tmp_path)
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-hy", "test")
     mem_repo = MemoryRepository(db)
@@ -132,8 +135,7 @@ def test_search_hybrid_on_retriever(tmp_path) -> None:
 def test_search_hybrid_fallback_on_error(tmp_path) -> None:
     from cogito_agent.memory import MemoryRetriever
 
-    db = Database(str(tmp_path / "test.db"))
-    db.initialize()
+    db = _db_init_vector(tmp_path)
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-fb", "test")
     mem_repo = MemoryRepository(db)

@@ -24,6 +24,11 @@ def register_migration(version: int, sql: str) -> None:
 
 
 register_migration(2, _load_migration_sql("0002_memory_v2.sql"))
+register_migration(3, _load_migration_sql("0003_memory_v2_complete.sql"))
+register_migration(4, """
+    ALTER TABLE scheduled_jobs ADD COLUMN last_error TEXT;
+    ALTER TABLE notifications ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+""")
 
 
 class Database:
@@ -75,6 +80,8 @@ class Database:
             "context_items", "approval_records", "workspace_settings",
             "scheduled_jobs", "notifications",
             "workspace_skills", "skill_run_logs",
+            "inbox_items", "inbox", "memory_edit_log",
+            "daemon_state",
         ]
         for table in tables:
             try:

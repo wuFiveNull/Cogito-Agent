@@ -43,6 +43,9 @@ def _score_memory(
     if memory.get("status") in ("consolidated", "indexed"):
         score *= 1.2
 
+    if memory.get("pinned_at") is not None:
+        score *= 2.0
+
     return score
 
 
@@ -52,14 +55,18 @@ class MemoryRetriever:
 
     def search(
         self, workspace_id: str, query: str, limit: int = 10,
+        include_archived: bool = False,
     ) -> list[dict[str, object]]:
+        archived_clause = "" if include_archived else " AND m.archived_at IS NULL"
+
         fts_results: list[dict[str, object]] = []
         try:
             cur = self._db.connection.execute(
                 "SELECT m.* FROM memories m"
                 " JOIN memories_fts fts ON m.rowid = fts.rowid"
                 " WHERE m.workspace_id = ? AND m.deleted_at IS NULL"
-                " AND memories_fts MATCH ?"
+                + archived_clause
+                + " AND memories_fts MATCH ?"
                 " ORDER BY rank LIMIT ?",
                 (workspace_id, query, limit),
             )
@@ -72,7 +79,8 @@ class MemoryRetriever:
             cur = self._db.connection.execute(
                 "SELECT * FROM memories WHERE workspace_id = ?"
                 " AND deleted_at IS NULL"
-                " AND (text LIKE ? OR summary LIKE ?)"
+                + archived_clause.replace("m.", "")
+                + " AND (text LIKE ? OR summary LIKE ?)"
                 " ORDER BY confidence DESC, created_at DESC LIMIT ?",
                 (workspace_id, f"%{query}%", f"%{query}%", limit),
             )
@@ -84,6 +92,24 @@ class MemoryRetriever:
         ]
         scored.sort(key=lambda x: -x[1])
         return [m for m, _ in scored[:limit]]
+
+    def search_with_lineage(
+        self, workspace_id: str, query: str, limit: int = 10,
+        include_archived: bool = False,
+    ) -> list[dict[str, object]]:
+        results = self.search(workspace_id, query, limit, include_archived)
+        for m in results:
+            source_id = m.get("source_id")
+            if source_id:
+                cur = self._db.connection.execute(
+                    "SELECT id, text, type FROM memories WHERE id = ?",
+                    (source_id,),
+                )
+                source = cur.fetchone()
+                m["source_lineage"] = dict(source) if source else None
+            else:
+                m["source_lineage"] = None
+        return results
 
     def search_hybrid(
         self,

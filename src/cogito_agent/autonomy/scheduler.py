@@ -33,6 +33,7 @@ def _row_to_job(row: dict[str, Any]) -> ScheduleJob:
         interval_seconds=row.get("interval_seconds"),
         max_retries=row["max_retries"],
         retry_count=row["retry_count"],
+        last_error=row.get("last_error"),
         quiet_hours_start=row.get("quiet_hours_start"),
         quiet_hours_end=row.get("quiet_hours_end"),
         timezone=row["timezone"],
@@ -116,6 +117,25 @@ class SchedulerEngine:
                 (workspace_id,),
             )
         return [_row_to_job(dict(r)) for r in cur.fetchall()]
+
+    def get_job_failures(self, workspace_id: str, since: str) -> int:
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) AS cnt FROM scheduled_jobs"
+            " WHERE workspace_id = ? AND status = 'failed' AND updated_at >= ?",
+            (workspace_id, since),
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def reset_job(self, job_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "UPDATE scheduled_jobs"
+            " SET status = ?, retry_count = 0, last_error = NULL, updated_at = ?"
+            " WHERE id = ? AND status = 'running'",
+            (JobStatus.pending.value, datetime.now(UTC).isoformat(), job_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
 
     def tick(self) -> list[ScheduleJob]:
         now = datetime.now(UTC)
@@ -214,6 +234,7 @@ class SchedulerEngine:
         )
 
         new_status = JobStatus.completed
+        last_error: str | None = None
         if not job.dry_run:
             try:
                 registry = self._cap_reg
@@ -221,10 +242,13 @@ class SchedulerEngine:
                 result = registry.invoke(job.capability_name, **kwargs)
                 if result is None:
                     new_status = JobStatus.failed
+                    last_error = "capability returned None"
                 elif result.status == "error":
                     new_status = JobStatus.failed
-            except Exception:
+                    last_error = result.status
+            except Exception as exc:
                 new_status = JobStatus.failed
+                last_error = str(exc)
 
             self._db.connection.execute(
                 "UPDATE scheduled_jobs SET retry_count = retry_count + 1"
@@ -234,15 +258,14 @@ class SchedulerEngine:
             self._db.connection.commit()
 
             if new_status == JobStatus.failed and job.retry_count < job.max_retries:
-                new_status = JobStatus.failed
                 retry_next = (now + timedelta(seconds=60 * (2 ** job.retry_count))).isoformat()
                 self._db.connection.execute(
                     "UPDATE scheduled_jobs"
                     " SET status = ?, last_run_at = ?, next_run_at = ?,"
-                    " updated_at = ?, retry_count = ?"
+                    " updated_at = ?, retry_count = ?, last_error = ?"
                     " WHERE id = ?",
                     (new_status.value, now.isoformat(), retry_next,
-                     now.isoformat(), job.retry_count + 1, job.id),
+                     now.isoformat(), job.retry_count + 1, last_error, job.id),
                 )
                 self._db.connection.commit()
                 self._tracer.end_span(span)
@@ -255,9 +278,11 @@ class SchedulerEngine:
         final_next = self._compute_next_run(job, now) if new_status == JobStatus.completed else None
         self._db.connection.execute(
             "UPDATE scheduled_jobs"
-            " SET status = ?, last_run_at = ?, next_run_at = ?, updated_at = ?"
+            " SET status = ?, last_run_at = ?, next_run_at = ?,"
+            " updated_at = ?, last_error = ?"
             " WHERE id = ?",
-            (new_status.value, now.isoformat(), final_next, now.isoformat(), job.id),
+            (new_status.value, now.isoformat(), final_next,
+             now.isoformat(), last_error, job.id),
         )
         self._db.connection.commit()
 

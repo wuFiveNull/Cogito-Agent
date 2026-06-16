@@ -8,6 +8,7 @@ from cogito_agent.storage.repositories import WorkspaceRepository
 
 def _setup(db: Database) -> None:
     db.initialize()
+    db.migrate()
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-loop", "loop-test")
 

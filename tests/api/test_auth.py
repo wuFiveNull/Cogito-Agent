@@ -24,7 +24,8 @@ def test_auth_enabled_no_header() -> None:
             "text": "hello", "session_id": "sess", "workspace_id": "ws",
         })
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Unauthorized"
+        data = resp.json()
+        assert data["error"]["code"] == "UNAUTHORIZED"
 
 
 def test_auth_enabled_wrong_key() -> None:

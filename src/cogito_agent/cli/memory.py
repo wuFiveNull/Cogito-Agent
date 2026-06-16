@@ -170,3 +170,129 @@ def _run_memory_consolidate(args: Any) -> None:
             decision="allow", reason=f"removed {count} duplicates",
         )
     db.close()
+
+
+def _run_memory_edit(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    audit = AuditLogger(db)
+    repo = MemoryRepository(db)
+    success = repo.edit_text(ns.memory_id, ns.workspace_id, ns.text)
+    if success:
+        print(f"  Edited memory: {ns.memory_id}")
+        audit.log(
+            actor_id="cli", action="memory.edit",
+            resource=f"memory:{ns.memory_id}",
+            workspace_id=ns.workspace_id,
+            decision="allow", reason="user edited",
+        )
+    else:
+        print("  Memory not found.")
+    db.close()
+
+
+def _run_memory_correct(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    audit = AuditLogger(db)
+    repo = MemoryRepository(db)
+    success = repo.correct_text(ns.memory_id, ns.workspace_id, ns.text)
+    if success:
+        print(f"  Corrected memory: {ns.memory_id}")
+        audit.log(
+            actor_id="cli", action="memory.correct",
+            resource=f"memory:{ns.memory_id}",
+            workspace_id=ns.workspace_id,
+            decision="allow", reason="user corrected",
+        )
+    else:
+        print("  Memory not found.")
+    db.close()
+
+
+def _run_memory_archive(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    audit = AuditLogger(db)
+    repo = MemoryRepository(db)
+    success = repo.archive(ns.memory_id, ns.workspace_id)
+    if success:
+        print(f"  Archived memory: {ns.memory_id}")
+        audit.log(
+            actor_id="cli", action="memory.archive",
+            resource=f"memory:{ns.memory_id}",
+            workspace_id=ns.workspace_id,
+            decision="allow", reason="user archived",
+        )
+    else:
+        print("  Memory not found.")
+    db.close()
+
+
+def _run_memory_unarchive(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    audit = AuditLogger(db)
+    repo = MemoryRepository(db)
+    success = repo.unarchive(ns.memory_id, ns.workspace_id)
+    if success:
+        print(f"  Unarchived memory: {ns.memory_id}")
+        audit.log(
+            actor_id="cli", action="memory.unarchive",
+            resource=f"memory:{ns.memory_id}",
+            workspace_id=ns.workspace_id,
+            decision="allow", reason="user unarchived",
+        )
+    else:
+        print("  Memory not found.")
+    db.close()
+
+
+def _run_memory_unpin(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    audit = AuditLogger(db)
+    repo = MemoryRepository(db)
+    success = repo.unpin(ns.memory_id, ns.workspace_id)
+    if success:
+        print(f"  Unpinned memory: {ns.memory_id}")
+        audit.log(
+            actor_id="cli", action="memory.unpin",
+            resource=f"memory:{ns.memory_id}",
+            workspace_id=ns.workspace_id,
+            decision="allow", reason="user unpinned",
+        )
+    else:
+        print("  Memory not found.")
+    db.close()
+
+
+def _run_memory_merge(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    audit = AuditLogger(db)
+    repo = MemoryRepository(db)
+    success = repo.merge(ns.source_memory_id, ns.target_memory_id, ns.workspace_id)
+    if success:
+        print(f"  Merged {ns.source_memory_id} into {ns.target_memory_id}")
+        audit.log(
+            actor_id="cli", action="memory.merge",
+            resource=f"memory:merge:{ns.source_memory_id}->{ns.target_memory_id}",
+            workspace_id=ns.workspace_id,
+            decision="allow", reason="user merged",
+        )
+    else:
+        print("  One or both memories not found.")
+    db.close()

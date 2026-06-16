@@ -31,6 +31,7 @@ class ScheduleJob(BaseModel):
     enabled: bool = True
     dry_run: bool = True
     status: JobStatus = JobStatus.pending
+    last_error: str | None = None
     last_run_at: str | None = None
     next_run_at: str | None = None
     created_at: str = ""

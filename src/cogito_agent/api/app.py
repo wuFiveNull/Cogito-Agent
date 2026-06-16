@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -30,8 +31,61 @@ from cogito_agent.storage.repositories import (
     WorkspaceRepository,
     WorkspaceSettingsRepository,
 )
+from cogito_agent.trace.redaction import RedactionHelper
 
 logger = logging.getLogger(__name__)
+
+_RATE_LIMITER: dict[str, list[float]] = {}
+
+
+def _error_response(
+    code: str,
+    message: str,
+    request_id: str,
+    trace_id: str | None = None,
+    retryable: bool = False,
+    status_code: int = 400,
+) -> JSONResponse:
+    safe_message = RedactionHelper().redact(message)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": code,
+                "message": safe_message,
+                "request_id": request_id,
+                "trace_id": trace_id,
+                "retryable": retryable,
+            }
+        },
+    )
+
+
+def _check_rate_limit(request: Request) -> bool:
+    enabled = os.environ.get("COGITO_RATE_LIMIT_ENABLED", "0") == "1"
+    if not enabled:
+        return True
+    per_minute = int(os.environ.get("COGITO_RATE_LIMIT_PER_MINUTE", "60"))
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    window = 60.0
+    if client_ip not in _RATE_LIMITER:
+        _RATE_LIMITER[client_ip] = []
+    _RATE_LIMITER[client_ip] = [t for t in _RATE_LIMITER[client_ip] if now - t < window]
+    if len(_RATE_LIMITER[client_ip]) >= per_minute:
+        return False
+    _RATE_LIMITER[client_ip].append(now)
+    return True
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        if not _check_rate_limit(request):
+            return _error_response(
+                "RATE_LIMITED", "Rate limit exceeded", request.state.request_id,
+                retryable=True, status_code=429,
+            )
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -57,18 +111,18 @@ app.add_middleware(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=422,
-        content={"detail": "Validation error", "errors": exc.errors()},
+    rid = getattr(request.state, "request_id", "")
+    return _error_response(
+        "VALIDATION_ERROR", str(exc.errors()), rid, status_code=422,
     )
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
+    rid = getattr(request.state, "request_id", "")
+    return _error_response(
+        "INTERNAL_ERROR", "Internal server error", rid, status_code=500,
     )
 
 
@@ -89,11 +143,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Bearer ") and auth[7:] == api_key:
             return await call_next(request)
-        from starlette.responses import JSONResponse
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        rid = getattr(request.state, "request_id", "")
+        return _error_response("UNAUTHORIZED", "Unauthorized", rid, status_code=401)
 
 
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
 
 
@@ -177,13 +232,13 @@ def get_kernel() -> RuntimeKernel:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(req: ChatRequest, request: Request) -> ChatResponse:
     db = get_db()
     kernel = get_kernel()
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
     if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        return _error_response("NOT_FOUND", "Session not found", request.state.request_id, status_code=404)
 
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
@@ -191,7 +246,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         actor_id="user",
         source=EventSource.api,
         type=EventType.user_message,
-        payload={"text": req.text},
+        payload={"text": req.text, "_request_id": request.state.request_id},
     )
     result = kernel.process(event)
     return ChatResponse(
@@ -203,20 +258,20 @@ def chat(req: ChatRequest) -> ChatResponse:
 
 
 @app.post("/chat/resume", response_model=ChatResponse)
-def resume_chat(req: ResumeRequest) -> ChatResponse:
+def resume_chat(req: ResumeRequest, request: Request) -> ChatResponse:
     db = get_db()
     kernel = get_kernel()
     repo = ApprovalRepository(db)
     approval = repo.resolve(req.approval_id, req.decision, "api")
     if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found or already resolved")
+        return _error_response("NOT_FOUND", "Approval not found or already resolved", request.state.request_id, status_code=404)
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
         session_id=req.session_id,
         actor_id="user",
         source=EventSource.api,
         type=EventType.resume,
-        payload={"approval_id": req.approval_id},
+        payload={"approval_id": req.approval_id, "_request_id": request.state.request_id},
     )
     result = kernel.resume(event) if hasattr(kernel, "resume") else kernel.process(event)
     return ChatResponse(
@@ -256,25 +311,25 @@ def list_traces(workspace_id: str) -> list[dict[str, object]]:
 
 
 @app.get("/traces/{trace_id}/full")
-def get_trace_full(trace_id: str) -> dict[str, object]:
+def get_trace_full(trace_id: str, request: Request) -> dict[str, object]:
     from cogito_agent.cli.replay import TraceInspector
 
     inspector = TraceInspector(get_db())
     trace = inspector.get_trace_full(trace_id)
     if trace is None:
-        raise HTTPException(status_code=404, detail="Trace not found")
+        return _error_response("NOT_FOUND", "Trace not found", request.state.request_id, status_code=404)
     return trace
 
 
 @app.get("/traces/{trace_id}")
-def get_trace(trace_id: str) -> dict[str, object]:
+def get_trace(trace_id: str, request: Request) -> dict[str, object]:
     db = get_db()
     cur = db.connection.execute(
         "SELECT * FROM traces WHERE id = ?", (trace_id,)
     )
     row = cur.fetchone()
     if row is None:
-        raise HTTPException(status_code=404, detail="Trace not found")
+        return _error_response("NOT_FOUND", "Trace not found", request.state.request_id, status_code=404)
     trace = dict(row)
     cur = db.connection.execute(
         "SELECT * FROM spans WHERE trace_id = ?", (trace_id,)
@@ -284,7 +339,7 @@ def get_trace(trace_id: str) -> dict[str, object]:
 
 
 @app.post("/candidates")
-def action_candidate(req: CandidateAction) -> dict[str, object]:
+def action_candidate(req: CandidateAction, request: Request) -> dict[str, object]:
     db = get_db()
     repo = MemoryCandidateRepository(db)
     if req.action == "accept":
@@ -292,9 +347,9 @@ def action_candidate(req: CandidateAction) -> dict[str, object]:
     elif req.action == "reject":
         result = repo.reject(req.candidate_id)
     else:
-        raise HTTPException(status_code=400, detail="Invalid action, use 'accept' or 'reject'")
+        return _error_response("VALIDATION_ERROR", "Invalid action, use 'accept' or 'reject'", request.state.request_id, status_code=400)
     if result is None:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+        return _error_response("NOT_FOUND", "Candidate not found", request.state.request_id, status_code=404)
     return result
 
 
@@ -319,13 +374,13 @@ class RunSkillRequest(BaseModel):
 
 
 @app.post("/chat/stream")
-def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
-    logger.warning("/chat/stream is EXPERIMENTAL — bypasses RuntimeKernel")
+def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
+    logger.warning("/chat/stream is EXPERIMENTAL — bypasses RuntimeKernel. Use /chat for production.")
     db = get_db()
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
     if sess is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        return _error_response("NOT_FOUND", "Session not found", request.state.request_id, status_code=404)
 
     adapter = get_adapter(provider=req.provider)
     messages = [
@@ -333,6 +388,7 @@ def chat_stream(req: ChatStreamRequest) -> StreamingResponse:
     ]
 
     def event_stream() -> Generator[str, None, None]:
+        logger.warning("/chat/stream event_stream: experimental code path — bypasses RuntimeKernel")
         full_content = ""
         for token in adapter.stream_chat(messages):
             full_content += token
@@ -408,22 +464,22 @@ def create_workspace(name: str) -> dict[str, object]:
 
 
 @app.get("/workspaces/{wid}")
-def get_workspace(wid: str) -> dict[str, object]:
+def get_workspace(wid: str, request: Request) -> dict[str, object]:
     db = get_db()
     repo = WorkspaceRepository(db)
     ws = repo.get_by_id(wid)
     if ws is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
+        return _error_response("NOT_FOUND", "Workspace not found", request.state.request_id, status_code=404)
     return ws
 
 
 @app.delete("/workspaces/{wid}")
-def delete_workspace(wid: str) -> dict[str, str]:
+def delete_workspace(wid: str, request: Request) -> dict[str, str]:
     db = get_db()
     repo = WorkspaceRepository(db)
     ws = repo.get_by_id(wid)
     if ws is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
+        return _error_response("NOT_FOUND", "Workspace not found", request.state.request_id, status_code=404)
     repo.soft_delete(wid)
     return {"status": "deleted"}
 
@@ -445,21 +501,21 @@ def list_memories(
 
 
 @app.put("/memories/{mid}")
-def update_memory(mid: str, workspace_id: str, req: MemoryUpdateRequest) -> dict[str, object]:
+def update_memory(mid: str, workspace_id: str, req: MemoryUpdateRequest, request: Request) -> dict[str, object]:
     db = get_db()
     repo = MemoryEditRepository(db)
     result = repo.update_text(mid, workspace_id, req.text)
     if result is None:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        return _error_response("NOT_FOUND", "Memory not found", request.state.request_id, status_code=404)
     return result
 
 
 @app.delete("/memories/{mid}")
-def delete_memory(mid: str, workspace_id: str) -> dict[str, str]:
+def delete_memory(mid: str, workspace_id: str, request: Request) -> dict[str, str]:
     db = get_db()
     repo = MemoryEditRepository(db)
     if not repo.hard_delete(mid, workspace_id):
-        raise HTTPException(status_code=404, detail="Memory not found")
+        return _error_response("NOT_FOUND", "Memory not found", request.state.request_id, status_code=404)
     return {"status": "deleted"}
 
 
@@ -488,12 +544,12 @@ def create_approval(
 
 
 @app.post("/approvals/{aid}/resolve")
-def resolve_approval(aid: str, req: ApprovalResolveRequest) -> dict[str, object]:
+def resolve_approval(aid: str, req: ApprovalResolveRequest, request: Request) -> dict[str, object]:
     db = get_db()
     repo = ApprovalRepository(db)
     result = repo.resolve(aid, req.decision, req.decided_by)
     if result is None:
-        raise HTTPException(status_code=404, detail="Approval not found or already resolved")
+        return _error_response("NOT_FOUND", "Approval not found or already resolved", request.state.request_id, status_code=404)
     return result
 
 
@@ -530,14 +586,14 @@ def update_workspace_settings(
 # --- Export / Cleanup ---
 
 @app.get("/export")
-def export_workspace(workspace_id: str) -> dict[str, object]:
+def export_workspace(workspace_id: str, request: Request) -> dict[str, object]:
     db = get_db()
     cur = db.connection.execute(
         "SELECT * FROM workspaces WHERE id = ?", (workspace_id,)
     )
     ws = cur.fetchone()
     if ws is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
+        return _error_response("NOT_FOUND", "Workspace not found", request.state.request_id, status_code=404)
 
     data: dict[str, object] = {
         "workspace": dict(ws),
@@ -561,8 +617,6 @@ def export_workspace(workspace_id: str) -> dict[str, object]:
         "SELECT * FROM traces WHERE workspace_id = ?", (workspace_id,)
     )
     data["traces"] = [dict(r) for r in cur.fetchall()]
-
-    from cogito_agent.trace.redaction import RedactionHelper
 
     return _redact_dict(data, RedactionHelper())  # type: ignore[return-value]
 
@@ -606,22 +660,22 @@ def list_workspace_skills(wid: str) -> list[dict[str, object]]:
 
 
 @app.post("/workspaces/{wid}/skills")
-def install_to_workspace(wid: str, req: WorkspaceSkillInstall) -> dict[str, object]:
+def install_to_workspace(wid: str, req: WorkspaceSkillInstall, request: Request) -> dict[str, object]:
     ws_skill = WorkspaceSkill(get_db())
     result = ws_skill.copy_from_pool(wid, req.pool_skill_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="Pool skill not found")
+        return _error_response("NOT_FOUND", "Pool skill not found", request.state.request_id, status_code=404)
     return result
 
 
 @app.post("/sessions/{sid}/skills/{skill_name}/run")
-def run_skill(sid: str, skill_name: str, req: RunSkillRequest) -> dict[str, object]:
+def run_skill(sid: str, skill_name: str, req: RunSkillRequest, request: Request) -> dict[str, object]:
     db = get_db()
     ws_skill = WorkspaceSkill(db)
     skills = ws_skill.list_by_workspace(req.workspace_id)
     matches = [s for s in skills if s["name"] == skill_name and s.get("enabled")]
     if not matches:
-        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found or disabled")
+        return _error_response("NOT_FOUND", f"Skill '{skill_name}' not found or disabled", request.state.request_id, status_code=404)
 
     manifest_json = str(matches[0].get("manifest_json", "{}"))
     manifest = SkillManifest(**json.loads(manifest_json))
