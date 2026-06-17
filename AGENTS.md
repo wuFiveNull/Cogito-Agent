@@ -4,26 +4,24 @@
 
 v0.1.0-alpha released.
 v0.2.0-alpha released.
-v0.3.0-dev (stable local core candidate, not released):
-- Approval CLI (`cogito approval list|show|approve|reject|resume`)
-- /chat/stream now uses RuntimeKernel (governance/trace/audit/redaction)
-- SSE format: metadata, final, approval_required, error
-- ruff/mypy clean across all 64 source files
-- E2E approval lifecycle validated
-
-v0.4.0-dev (streaming runtime integration, not released):
-- /chat/stream fully integrated with RuntimeKernel (no experimental gate, no bypass header)
-- SSE events include approval_id + trace_id in approval_required event
-- Middleware ordering fixed: RequestID runs before Auth and RateLimit
-- Dogfood validation passed (70/70 checks)
-- Current limitation: chunked final response, not true per-token streaming
-- No GitHub tag or release
+v0.3.0-dev not released.
+v0.4.0-dev not released.
+v0.5.0-dev (true per-token streaming closure candidate, not released):
+- True per-token streaming via `RuntimeKernel.process_stream()`
+- ModelAdapter Protocol: `supports_streaming`, `stream_chat()`, `StreamGenerator`
+- SSE event types: metadata (combined), delta (per-token), final, error (unified schema), approval_required, tool_call_started, tool_call_completed
+- Delta-level redaction via `RedactionHelper` at the API layer
+- CORS middleware, global exception handler, RequestValidationError handler, RequestIDMiddleware
+- Rate-limit middleware (configurable via `COGITO_RATE_LIMIT_*` env vars)
+- Unified error schema: `{"error": {"code", "message", "request_id", "trace_id", "retryable"}}`
+- MockModel test adapter for true multi-delta streaming tests
+- 631 tests passing, ruff clean, mypy clean (65 files)
 
 ## Verification Status
 
-- **616 tests passing** (`pytest` clean)
+- **631 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 64 files)
+- **mypy clean** (`mypy src/` clean, 65 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 

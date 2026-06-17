@@ -322,17 +322,20 @@ class RuntimeKernel:
         span.input_summary = f"event={event.type.value}, actor={event.actor_id}, stream"
         self._start_time = datetime.now(UTC)
 
-        # Yield metadata
+        # Yield metadata (single event with all fields)
+        meta_data: dict[str, object] = {
+            "trace_id": trace.id,
+            "session_id": event.session_id,
+            "workspace_id": event.workspace_id,
+        }
+        channel = event.payload.get("channel", "") if event.payload else ""
+        if channel:
+            meta_data["channel"] = channel
         if request_id:
-            yield StreamEvent(
-                type=StreamEventType.metadata,
-                data={"request_id": request_id},
-                request_id=request_id,
-                trace_id=trace.id,
-            )
+            meta_data["request_id"] = request_id
         yield StreamEvent(
             type=StreamEventType.metadata,
-            data={"trace_id": trace.id, "session_id": event.session_id},
+            data=meta_data,
             request_id=request_id,
             trace_id=trace.id,
         )

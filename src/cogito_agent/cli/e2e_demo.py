@@ -57,7 +57,7 @@ def run_e2e_demo(db_path: str = "cogito_demo.db") -> None:
         adapter = None
         print("[Model] No API key found — using echo mode")
 
-    kernel = RuntimeKernel(db, model_adapter=adapter)
+    kernel = RuntimeKernel(db, model_adapter=adapter)  # type: ignore[arg-type]
     print("[Kernel] Ready\n")
 
     prompt = "Hello! Please introduce yourself briefly in two sentences."

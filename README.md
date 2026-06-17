@@ -63,11 +63,16 @@ cogito inbox read <id>                                # show inbox item detail
 export COGITO_API_KEY=your-secret-key
 cogito-demo              # start API server with Bearer token auth
 
-# Streaming: /chat/stream (RuntimeKernel-backed)
-# POST /chat/stream — SSE streaming via RuntimeKernel (governance/trace/audit/redaction)
-# Responses use SSE events: metadata, final, approval_required, error
-# Exposes trace_id in metadata and final events for replay
-curl -X POST http://localhost:8000/chat/stream \
+# True per-token streaming: /chat/stream
+# Uses RuntimeKernel.process_stream() with SSE delta events per token
+# Adapter supports_streaming=True → true per-token streaming
+# Adapter supports_streaming=False → full response emitted as single delta
+# SSE events: metadata (trace_id, session_id, workspace_id, channel, request_id),
+#             delta (one per token), final, error, approval_required,
+#             tool_call_started, tool_call_completed
+# Redaction applied per-delta and on final/error/approval events
+# Trace/replay/audit full-chain available from trace_id in metadata
+curl -N -X POST http://localhost:8000/chat/stream \
   -H "Content-Type: application/json" \
   -d '{"text": "hello", "session_id": "...", "workspace_id": "..."}'
 ```
@@ -78,7 +83,8 @@ curl -X POST http://localhost:8000/chat/stream \
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
 - **Limitations:** No Web UI or TUI, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only.
-- **/chat/stream**: Uses chunked final response (not true per-token streaming). RuntimeKernel executes fully before emitting SSE events. Future versions may add true token streaming with tool-interrupt support.
+- **/chat/stream** uses true per-token streaming when the model adapter supports it (`supports_streaming=True` and `stream_chat()`). Falls back to single-delta emission for non-streaming adapters.
+- Streaming tool calls: `stream_chat()` yields content-only deltas. Tool intents from the model response are dispatched after streaming completes (no tool-interrupt during streaming). For real-time tool-in-stream scenarios, a separate tool-call SSE event type is used.
 
 ## Requirements
 
@@ -86,9 +92,9 @@ curl -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.4.0-dev (streaming runtime integration)** — Not released. No GitHub tag or release.
-Verified: **616 tests passing**, `ruff check src/` clean, `mypy src/` clean (64 files).
-/chat/stream fully integrated with RuntimeKernel. Dogfood validation passed (70/70 checks).
+**v0.5.0-dev (true per-token streaming closure)** — Not released. No GitHub tag or release.
+Verified: **631 tests passing**, `ruff check src/` clean, `mypy src/` clean (65 files).
+True per-token streaming via `RuntimeKernel.process_stream()`. ModelAdapter with `supports_streaming=True` and `stream_chat()` produces per-token delta events. SSE format includes metadata/delta/final/error/approval_required/tool_call_started/tool_call_completed. Delta-level redaction, full trace/replay/audit chain, unified error schema, rate limiting, CORS, request ID propagation, and MockModel test adapter for multi-delta testing.
 
 ## Development
 

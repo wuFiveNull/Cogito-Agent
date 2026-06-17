@@ -71,12 +71,13 @@ def build_model_adapter_from_config() -> ModelAdapter | None:
         return None
     api_key_env = cfg.get("model.api_key_env", "MODEL_API_KEY")
     api_key = os.environ.get(api_key_env, "")
-    return get_adapter(
+    result = get_adapter(
         provider=provider,
         model=cfg.get("model.model", ""),
         api_key=api_key,
         base_url=cfg.get("model.base_url", ""),
     )
+    return result  # type: ignore[return-value]
 
 
 def doctor() -> list[dict[str, str]]:

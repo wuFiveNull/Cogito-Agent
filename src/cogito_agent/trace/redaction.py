@@ -54,6 +54,7 @@ class RedactionHelper:
             PatternRule(r"Bearer\s+\S+", "Bearer [REDACTED]"),
             PatternRule(r"sk-[A-Za-z0-9]{20,}", "[REDACTED_API_KEY]"),
             PatternRule(r"sk-[A-Za-z0-9_-]{20,}", "[REDACTED_API_KEY]"),
+            PatternRule(r"sk-\S{8,}", "[REDACTED_API_KEY]"),
             PatternRule(
                 r"(?:api[_-]?key|apikey|secret|token)\s*[:=]\s*['\"]?\S+",
                 "[KEY]=[REDACTED]",

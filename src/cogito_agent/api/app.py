@@ -427,6 +427,8 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
         try:
             for sev in kernel.process_stream(event, request_id=rid):
                 if sev.type == StreamEventType.delta:
+                    if "delta" in sev.data:
+                        sev.data["delta"] = redactor.redact(str(sev.data["delta"]))
                     yield sev.to_sse()
                 elif sev.type == StreamEventType.error:
                     raw_err = sev.data.get("error", {})
