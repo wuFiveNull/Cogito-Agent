@@ -10,8 +10,10 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
+from .memory import memory_router as _memory_router
 from .redaction import redact_html
 from .status import build_status
+from .utils import menu_items as _menu_items
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +24,6 @@ console_router = APIRouter()
 
 CONSOLE_SESSION_ID = "console-default"
 CONSOLE_WORKSPACE_ID = "default"
-
-
-def _menu_items() -> list[dict[str, str | bool]]:
-    return [
-        {"label": "Dashboard", "href": "/console/", "icon": "home"},
-        {"label": "Chat", "href": "/console/chat", "icon": "chat"},
-        {"label": "Memory", "href": "/console/memory", "icon": "memory", "soon": True},
-        {"label": "Approvals", "href": "/console/approval", "icon": "approval", "soon": True},
-        {"label": "Traces", "href": "/console/traces", "icon": "trace", "soon": True},
-        {"label": "Audit", "href": "/console/audit", "icon": "audit", "soon": True},
-        {"label": "Autonomy", "href": "/console/autonomy", "icon": "autonomy", "soon": True},
-        {"label": "Config", "href": "/console/config", "icon": "config", "soon": True},
-        {"label": "Doctor", "href": "/console/doctor", "icon": "doctor", "soon": True},
-    ]
 
 
 def _ensure_console_session() -> str:
@@ -270,16 +258,18 @@ async def chat_stream_route(
     )
 
 
+console_router.include_router(_memory_router, prefix="/memory")
+
+
 # ─── Placeholder Pages ──────────────────────────────────────────────────────
 
 
 PLACEHOLDER_PAGES = [
-    "memory", "approval", "traces", "audit",
+    "approval", "traces", "audit",
     "autonomy", "config", "doctor",
 ]
 
 _PHASE_MAP = {
-    "memory": "4 (Memory & Approval)",
     "approval": "4 (Memory & Approval)",
     "traces": "5 (Trace)",
     "audit": "2 (Read-only pages)",

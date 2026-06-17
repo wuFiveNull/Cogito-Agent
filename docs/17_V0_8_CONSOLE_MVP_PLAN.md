@@ -4,9 +4,10 @@
 
 - **Predecessor**: v0.7.0-rc1 (tagged, 755 tests, ruff/mypy clean)
 - **Branch**: master
-- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ — interactive chat via htmx send + SSE streaming
-- **802 tests**, ruff clean, mypy clean (82 files)
+- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ — interactive chat with send + SSE streaming, memory management page with accept/reject/edit/archive/delete
+- **831 tests**, ruff clean, mypy clean (84 files)
 - Chat page at `/console/chat`, send at `POST /console/chat/send`, stream at `POST /console/chat/stream`
+- Memory page at `/console/memory`, actions at `/console/memory/candidates/{id}/accept|reject|edit`, `/console/memory/{id}/edit|archive|delete`
 
 ## Goal
 
@@ -219,15 +220,16 @@ templates/
 
 ---
 
-## Implementation Order
+## Implementation Order (actual)
 
-1. **Phase 1: Foundation** — FastAPI static file serving + Jinja2 setup, base template, dashboard page, `/api/v1/status` endpoint
-2. **Phase 2: Read-only pages** — Config viewer, Doctor page, Audit log list/detail
-3. **Phase 3: Autonomy pages** — Decisions list/detail, Outbox list, Feedback form
-4. **Phase 4: Memory & Approval** — Memory review list with accept/reject, Approval queue with approve/reject
-5. **Phase 5: Trace** — Trace list/detail with span tree viewer
-6. **Phase 6: Chat** — Chat page with SSE streaming integration
-7. **Phase 7: Polish** — Navigation, responsive layout, loading states, error pages
+1. ✅ **Phase 1: Foundation** — FastAPI static file serving + Jinja2 setup, base template, dashboard page, `/api/v1/status` endpoint
+2. ✅ **Phase 2: Chat** — Chat page with htmx send + SSE streaming integration
+3. ✅ **Phase 3: Memory Review** — Memory review list with accept/reject, edit/archive/delete
+4. 🚧 **Phase 4: Approval** — Approval queue with approve/reject
+5. 🚧 **Phase 5: Trace** — Trace list/detail with span tree viewer
+6. 🚧 **Phase 6: Autonomy** — Decisions list/detail, Outbox list, Feedback form
+7. 🚧 **Phase 7: Config & Doctor** — Config viewer, Doctor page, Audit log list/detail
+8. 🚧 **Phase 8: Polish** — Navigation, responsive layout, loading states, error pages
 
 ---
 
@@ -259,11 +261,14 @@ templates/
 ## v0.8.0 Acceptance Checklist
 
 ```text
-[ ] Dashboard loads with stats
-[ ] Chat page sends message and displays response
-[ ] Memory review shows candidates
-[ ] Memory accept works
-[ ] Memory reject works
+[x] Dashboard loads with stats
+[x] Chat page sends message and displays response
+[x] Memory review shows candidates
+[x] Memory accept works
+[x] Memory reject works
+[x] Memory edit works
+[x] Memory archive works
+[x] Memory delete works
 [ ] Approval queue shows pending items
 [ ] Approval approve works
 [ ] Approval reject works
@@ -277,10 +282,10 @@ templates/
 [ ] Feedback form records feedback
 [ ] Config page shows keys (redacted secrets)
 [ ] Doctor page shows system status
-[ ] All pages respect auth (when COGITO_API_KEY is set)
-[ ] No secret leakage in any HTML output
-[ ] pytest passes
-[ ] ruff check src/ passes
-[ ] mypy src/ passes
-[ ] Existing CLI tests still pass
+[x] All pages respect auth (when COGITO_API_KEY is set)
+[x] No secret leakage in any HTML output
+[x] pytest passes
+[x] ruff check src/ passes
+[x] mypy src/ passes
+[x] Existing CLI tests still pass
 ```

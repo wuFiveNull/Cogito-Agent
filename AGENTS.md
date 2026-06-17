@@ -24,7 +24,7 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
-v0.8.0-dev (Console MVP Phase 1–2, current):
+v0.8.0-dev (Console MVP Phase 1–3, current):
 - **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
 - **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
   - Message area with user/assistant bubbles
@@ -36,12 +36,20 @@ v0.8.0-dev (Console MVP Phase 1–2, current):
   - AuthMiddleware integration (401 without valid key)
   - Console‑default session (`console-default`), auto‑created workspace
   - 802 tests passing, ruff clean, mypy clean (82 source files)
+- **Phase 3 — Memory Review MVP**: Memory management page at `/console/memory` with:
+  - List page with stats (total/pending/active/archived/stale), filter bar (status/search), tabs (All/Candidates/Memories)
+  - Detail page with full content, metadata, edit form, action buttons
+  - Accept/reject candidates (`POST /console/memory/candidates/{id}/accept|reject|edit`)
+  - Edit/archive/delete memories (`POST /console/memory/{id}/edit|archive|delete`)
+  - All mutations write audit logs with redacted details
+  - Shared `utils.py` with `menu_items()` to avoid circular imports
+  - 30 new tests, 831 tests passing, ruff clean, mypy clean (84 source files)
 
 ## Verification Status
 
-- **802 tests passing** (`pytest` clean)
+- **831 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 82 files)
+- **mypy clean** (`mypy src/` clean, 84 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 

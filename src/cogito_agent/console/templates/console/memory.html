@@ -1,0 +1,71 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="mem-header">
+  <div class="mem-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.pending }}</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.accepted }}</div><div class="stat-label">Active</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.archived }}</div><div class="stat-label">Archived</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.stale }}</div><div class="stat-label">Stale</div></div>
+  </div>
+
+  <form class="mem-filters" method="get" action="/console/memory">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <select name="status">
+      <option value="">All Status</option>
+      <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+      <option value="stale" {% if status == 'stale' %}selected{% endif %}>Stale</option>
+      <option value="accepted" {% if status == 'accepted' %}selected{% endif %}>Accepted</option>
+      <option value="rejected" {% if status == 'rejected' %}selected{% endif %}>Rejected</option>
+    </select>
+    <input type="search" name="q" placeholder="Search text..." value="{{ q }}" class="mem-search">
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/memory" class="btn-clear">Clear</a>
+  </form>
+
+  <div class="mem-tabs">
+    <a href="/console/memory?tab=all{% if status %}&status={{ status }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
+       class="mem-tab {% if tab == 'all' %}active{% endif %}">All</a>
+    <a href="/console/memory?tab=candidates{% if status %}&status={{ status }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
+       class="mem-tab {% if tab == 'candidates' %}active{% endif %}">Candidates</a>
+    <a href="/console/memory?tab=memories{% if status %}&status={{ status }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
+       class="mem-tab {% if tab == 'memories' %}active{% endif %}">Memories</a>
+  </div>
+</div>
+
+<div id="memory-list" class="mem-list">
+  {% for item in items %}
+    {% set is_cand = is_candidate.get(item.id, false) %}
+    <div class="mem-card" id="mem-{{ item.id }}">
+      <div class="mem-card-top">
+        <span class="mem-badge mem-badge-{{ item.status | e }}">{{ item.status | e }}</span>
+        <span class="mem-type">{{ item.type | e }}</span>
+        <span class="mem-confidence">{{ "%.2f" | format(item.confidence | float) }}</span>
+        {% if is_cand %}<span class="mem-source-badge">candidate</span>{% endif %}
+        {% if item.archived_at is not none and item.archived_at %}<span class="mem-source-badge">archived</span>{% endif %}
+      </div>
+      <div class="mem-card-text">{{ item.text | e }}</div>
+      <div class="mem-card-meta">
+        <code>{{ item.id | e }}</code>
+        &middot; {{ (item.created_at or "") | e }}
+      </div>
+      <div class="mem-card-actions">
+        {% if is_cand and item.status == 'pending' %}
+          <button class="btn-action btn-accept" hx-post="/console/memory/candidates/{{ item.id }}/accept" hx-target="#mem-{{ item.id }}" hx-swap="outerHTML">Accept</button>
+          <button class="btn-action btn-reject" hx-post="/console/memory/candidates/{{ item.id }}/reject" hx-target="#mem-{{ item.id }}" hx-swap="outerHTML">Reject</button>
+        {% endif %}
+        {% if not is_cand %}
+          {% if item.archived_at is none or not item.archived_at %}
+            <button class="btn-action btn-archive" hx-post="/console/memory/{{ item.id }}/archive" hx-target="#mem-{{ item.id }}" hx-swap="outerHTML">Archive</button>
+          {% endif %}
+          <button class="btn-action btn-delete" hx-post="/console/memory/{{ item.id }}/delete" hx-confirm="Delete this memory?" hx-target="#mem-{{ item.id }}" hx-swap="outerHTML">Delete</button>
+        {% endif %}
+        <a class="btn-action btn-view" href="/console/memory/{{ item.id }}">View</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No memories found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

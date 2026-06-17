@@ -17,6 +17,23 @@
 - **30 new tests**: console routes, status API JSON fields, auth (no-key/wrong-key/valid-key), redaction
 - **82 source files** (+4 new: `console/__init__.py`, `console/router.py`, `console/status.py`, `console/redaction.py`)
 
+### **Console MVP Phase 3 — Memory Review MVP**
+
+- **Memory list page** (`GET /console/memory`) — stat cards (total/pending/active/archived/stale), filter bar (status/search), tabs (All/Candidates/Memories), cards with accept/reject/archive/delete actions
+- **Memory detail page** (`GET /console/memory/{id}`) — shows full content, metadata, editable form, action buttons (accept/reject for candidates, edit/archive/delete for memories)
+- **Accept candidate** (`POST /console/memory/candidates/{id}/accept`) — delegates to `MemoryCandidateRepository.accept()`, writes audit log
+- **Reject candidate** (`POST /console/memory/candidates/{id}/reject`) — delegates to `MemoryCandidateRepository.reject()`, writes audit log
+- **Edit candidate** (`POST /console/memory/candidates/{id}/edit`) — direct SQL update + audit log with before/after text preview
+- **Edit memory** (`POST /console/memory/{id}/edit`) — delegates to `MemoryRepository.edit_text()`, writes audit log
+- **Archive memory** (`POST /console/memory/{id}/archive`) — delegates to `MemoryRepository.archive()`, writes audit log
+- **Delete memory** (`POST /console/memory/{id}/delete`) — delegates to `MemoryRepository.soft_delete()`, writes audit log with text preview
+- **Shared utils**: `menu_items()` extracted to `utils.py` to avoid circular imports between router and memory modules
+- **Templates**: `memory.html` (list + stats + filters + tabs + cards), `memory_detail.html` (detail + edit form), `components/memory_success.html`
+- **Memory CSS**: stat cards, filter bar, tabs, card layout, badges, action buttons, detail view, edit form
+- **Memory route ordering**: `memory_router` registered before `/{page}` catch-all to avoid placeholder conflict
+- **30 new tests**: page rendering (list, stats, filters, tabs, search, 404), action endpoints (accept/reject/edit/archive/delete, idempotency, 404), security (no stack trace, no secret leak, redaction, auth)
+- **831 tests total**, ruff clean, mypy clean (84 source files)
+
 ### **Console MVP Phase 2 — Chat MVP**
 
 - **Chat page** at `/console/chat` — message area with user/assistant bubbles, input form with htmx non-streaming send
