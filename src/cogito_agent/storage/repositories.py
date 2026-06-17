@@ -176,11 +176,15 @@ class SessionRepository:
             (sid, workspace_id),
         )
         self._db.connection.execute(
-            "DELETE FROM traces WHERE session_id = ?", (sid,)
+            "DELETE FROM spans WHERE trace_id IN"
+            " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
         )
         self._db.connection.execute(
             "DELETE FROM source_lineage WHERE trace_id IN"
             " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
+        )
+        self._db.connection.execute(
+            "DELETE FROM traces WHERE session_id = ?", (sid,)
         )
         self._db.connection.execute(
             "DELETE FROM sessions WHERE id = ? AND workspace_id = ?",

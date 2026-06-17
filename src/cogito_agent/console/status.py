@@ -82,7 +82,7 @@ def build_status() -> dict[str, object]:
     secrets = _secrets_info()
 
     return {
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.8.0"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
         "db": db,
         "model": model,
         "secrets": secrets,

@@ -97,7 +97,7 @@ async def autonomy_dashboard(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "stats": stats,
         "menu": _menu_items(),
     }
@@ -140,7 +140,7 @@ async def decisions_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy Decisions",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "stats": stats,
         "action": action,
         "reason_code": reason_code,
@@ -200,7 +200,7 @@ async def decision_detail(request: Request, decision_id: str) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Decision Detail",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "decision": decision,
         "event_metadata_raw": "",
         "outbox_messages": outbox_msgs,
@@ -317,7 +317,7 @@ async def outbox_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy Outbox",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "stats": stats,
         "status": status,
         "q": q,
@@ -355,7 +355,7 @@ async def outbox_detail(request: Request, message_id: str) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Outbox Detail",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "msg": msg,
         "raw_json": raw_json,
         "menu": _menu_items(),
@@ -397,7 +397,7 @@ async def feedback_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy Feedback",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "stats": stats,
         "value": value,
         "decision_id": decision_id,

@@ -1,0 +1,21 @@
+<div class="session-item active" data-session-id="{{ session.id | e }}">
+  <a href="#" class="session-link"
+     hx-get="/console/chat/sessions/{{ session.id | e }}"
+     hx-target="#chat-messages"
+     hx-swap="innerHTML"
+     hx-indicator="#global-spinner"
+     hx-on::after-request="switchSession('{{ session.id | e }}')">
+    <div class="session-title">{{ session.title[:40] | e if session.title else 'Chat' | e }}</div>
+    <div class="session-meta">
+      <span class="session-count">0 msg</span>
+    </div>
+  </a>
+  <div class="session-actions">
+    <button class="btn-icon btn-archive"
+            hx-post="/console/chat/sessions/{{ session.id | e }}/archive"
+            hx-confirm="Archive this session?"
+            hx-target="closest .session-item"
+            hx-swap="outerHTML"
+            title="Archive">X</button>
+  </div>
+</div>

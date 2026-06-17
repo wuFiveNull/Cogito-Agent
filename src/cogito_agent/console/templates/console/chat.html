@@ -1,36 +1,85 @@
 {% extends "console/base.html" %}
 {% block content %}
 <div class="chat-layout">
-  <div id="chat-messages" class="chat-messages" hx-swap-oob="beforeend">
-    <div class="chat-empty" id="chat-empty">
-      <p>Send a message to start chatting.</p>
+  <div class="chat-sidebar" id="chat-sidebar">
+    <div class="sidebar-header">
+      <h3>Sessions</h3>
+      <button class="btn-new-chat"
+              hx-post="/console/chat/sessions"
+              hx-target="#session-list"
+              hx-swap="beforeend"
+              hx-on::after-request="newSession(event)"
+              title="New Chat">+ New Chat</button>
+    </div>
+    <div class="session-list" id="session-list">
+      {% if sessions %}
+      {% for s in sessions %}
+      <div class="session-item{% if s.id == session_id %} active{% endif %}"
+           data-session-id="{{ s.id }}">
+        <a href="#" class="session-link"
+           hx-get="/console/chat/sessions/{{ s.id | e }}"
+           hx-target="#chat-messages"
+           hx-swap="innerHTML"
+           hx-indicator="#global-spinner"
+           hx-on::after-request="switchSession('{{ s.id | e }}')">
+          <div class="session-title">{{ s.title[:40] | e if s.title else 'Chat' | e }}</div>
+          <div class="session-meta">
+            <span class="session-count">{{ s.message_count }} msg</span>
+            {% if s.last_preview %}
+            <span class="session-preview">{{ s.last_preview[:40] | e }}</span>
+            {% endif %}
+          </div>
+        </a>
+        <div class="session-actions">
+          <button class="btn-icon btn-archive"
+                  hx-post="/console/chat/sessions/{{ s.id | e }}/archive"
+                  hx-confirm="Archive this session?"
+                  hx-target="closest .session-item"
+                  hx-swap="outerHTML"
+                  title="Archive">X</button>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="session-empty">No sessions yet.</div>
+      {% endif %}
     </div>
   </div>
 
-  <div class="chat-input-area">
-    <form id="chat-form"
-          hx-post="/console/chat/send"
-          hx-target="#chat-messages"
-          hx-swap="beforeend"
-          hx-indicator="#chat-spinner"
-          hx-on::before-request="document.getElementById('chat-empty')?.remove()"
-          hx-on::after-request="this.reset(); scrollChat()">
-      <input type="hidden" name="session_id" value="{{ session_id }}">
-      <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
-      <textarea name="message"
-                id="chat-input"
-                rows="2"
-                placeholder="Type your message..."
-                required></textarea>
-      <button type="submit" class="btn-send">
-        <span class="btn-label">Send</span>
-        <span id="chat-spinner" class="spinner htmx-indicator"></span>
-      </button>
-    </form>
+  <div class="chat-main">
+    <div id="chat-messages" class="chat-messages"
+         hx-get="/console/chat/sessions/{{ session_id | e }}"
+         hx-trigger="load"
+         hx-swap="innerHTML"
+         hx-indicator="#global-spinner">
+      <div class="chat-empty" id="chat-empty">
+        <p>Loading messages...</p>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <form id="chat-form"
+            hx-post="/console/chat/send"
+            hx-target="#chat-messages"
+            hx-swap="beforeend"
+            hx-indicator="#chat-spinner"
+            hx-on::before-request="document.getElementById('chat-empty')?.remove()"
+            hx-on::after-request="this.reset(); scrollChat(); updateSessionList()">
+        <input type="hidden" name="session_id" value="{{ session_id }}">
+        <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+        <textarea name="message"
+                  id="chat-input"
+                  rows="2"
+                  placeholder="Type your message..."
+                  required></textarea>
+        <button type="submit" class="btn-send">
+          <span class="btn-label">Send</span>
+          <span id="chat-spinner" class="spinner htmx-indicator"></span>
+        </button>
+      </form>
+    </div>
   </div>
 </div>
-
-<div id="stream-container" style="display:none"></div>
 {% endblock %}
 
 {% block scripts %}
@@ -40,16 +89,37 @@ function scrollChat() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
-// Streaming support via EventSource fallback
-(function() {
+function switchSession(sessionId) {
+  // Update hidden form field
   var form = document.getElementById('chat-form');
-  var input = document.getElementById('chat-input');
-  var messages = document.getElementById('chat-messages');
-  var empty = document.getElementById('chat-empty');
-
-  form.addEventListener('htmx:beforeSend', function() {
-    // htmx handles non-streaming; streaming is supplementary
+  if (form) {
+    var input = form.querySelector('input[name="session_id"]');
+    if (input) input.value = sessionId;
+  }
+  // Deactivate all sessions, activate this one
+  document.querySelectorAll('.session-item').forEach(function(el) {
+    el.classList.toggle('active', el.dataset.sessionId === sessionId);
   });
-})();
+  scrollChat();
+}
+
+function newSession(event) {
+  // The new session item is already appended to #session-list
+  // Find the last .session-item and click its link to activate it
+  var items = document.querySelectorAll('#session-list .session-item');
+  var last = items[items.length - 1];
+  if (last) {
+    var link = last.querySelector('.session-link');
+    if (link) link.click();
+  }
+}
+
+function updateSessionList() {
+  // Refresh the session list to update message counts and last preview
+  htmx.ajax('GET', '/console/chat/sessions', {
+    target: '#session-list',
+    swap: 'innerHTML',
+  });
+}
 </script>
 {% endblock %}

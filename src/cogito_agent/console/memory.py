@@ -215,7 +215,7 @@ async def memory_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Memory",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "stats": stats,
         "tab": tab,
         "status": status,
@@ -248,7 +248,7 @@ async def memory_detail(request: Request, id: str) -> HTMLResponse:
     ctx = {
         "request": request,
         "title": "Memory Detail",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "item": item,
         "item_type": item_type,
         "menu": _menu_items(),

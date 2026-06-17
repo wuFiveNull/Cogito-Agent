@@ -1,0 +1,30 @@
+{% for s in sessions %}
+<div class="session-item{% if s.id == session_id %} active{% endif %}"
+     data-session-id="{{ s.id }}">
+  <a href="#" class="session-link"
+     hx-get="/console/chat/sessions/{{ s.id | e }}"
+     hx-target="#chat-messages"
+     hx-swap="innerHTML"
+     hx-indicator="#global-spinner"
+     hx-on::after-request="switchSession('{{ s.id | e }}')">
+    <div class="session-title">{{ s.title[:40] | e if s.title else 'Chat' | e }}</div>
+    <div class="session-meta">
+      <span class="session-count">{{ s.message_count }} msg</span>
+      {% if s.last_preview %}
+      <span class="session-preview">{{ s.last_preview[:40] | e }}</span>
+      {% endif %}
+    </div>
+  </a>
+  <div class="session-actions">
+    <button class="btn-icon btn-archive"
+            hx-post="/console/chat/sessions/{{ s.id | e }}/archive"
+            hx-confirm="Archive this session?"
+            hx-target="closest .session-item"
+            hx-swap="outerHTML"
+            title="Archive">X</button>
+  </div>
+</div>
+{% endfor %}
+{% if not sessions %}
+<div class="session-empty">No sessions yet.</div>
+{% endif %}

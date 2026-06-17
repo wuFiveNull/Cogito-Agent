@@ -161,6 +161,7 @@ class RuntimeKernel:
             self._transition(TurnState.composing_result)
             self._transition(TurnState.extracting_memory)
             output_text = model_result.content
+            self._persist_user_message(event)
             self._persist(event, output_text)
             self._candidate_extract(event, output_text)
 
@@ -455,6 +456,7 @@ class RuntimeKernel:
 
             self._transition(TurnState.composing_result)
             self._transition(TurnState.extracting_memory)
+            self._persist_user_message(event)
             self._persist(event, output_text)
             self._candidate_extract(event, output_text)
 
@@ -611,7 +613,7 @@ class RuntimeKernel:
 
     def _build_context(self, event: RuntimeEvent) -> list[ContextItem]:
         messages_raw = self._msg_repo.list_by_session(
-            event.workspace_id, event.session_id
+            event.session_id, event.workspace_id
         )
         recent_messages: list[dict[str, object]] = [
             dict(m) for m in messages_raw[-6:]
@@ -678,7 +680,7 @@ class RuntimeKernel:
     ) -> list[dict[str, str]]:
         msgs: list[dict[str, str]] = []
         recent = self._msg_repo.list_by_session(
-            event.workspace_id, event.session_id
+            event.session_id, event.workspace_id
         )
         for msg in recent[-6:]:
             role = str(msg.get("role", "user"))
@@ -909,11 +911,32 @@ class RuntimeKernel:
         except Exception:
             pass
 
+    def _persist_user_message(self, event: RuntimeEvent) -> None:
+        raw = event.payload.get("text", "")
+        user_text = str(raw) if raw is not None else ""
+        if user_text.strip():
+            mid = str(uuid.uuid4())
+            self._msg_repo.create(mid, event.workspace_id, event.session_id, "user", user_text)
+            # Auto-set title from first user message
+            self._db.connection.execute(
+                "UPDATE sessions SET title = CASE"
+                " WHEN title IS NULL OR title = '' THEN ? ELSE title END,"
+                " updated_at = datetime('now')"
+                " WHERE id = ? AND workspace_id = ?",
+                (user_text[:80], event.session_id, event.workspace_id),
+            )
+            self._db.connection.commit()
+
     def _persist(self, event: RuntimeEvent, output: str) -> None:
         mid = str(uuid.uuid4())
         self._db.connection.execute(
             "INSERT INTO messages (id, workspace_id, session_id, role, content)"
             " VALUES (?, ?, ?, ?, ?)",
             (mid, event.workspace_id, event.session_id, "assistant", output),
+        )
+        self._db.connection.execute(
+            "UPDATE sessions SET updated_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ?",
+            (event.session_id, event.workspace_id),
         )
         self._db.connection.commit()

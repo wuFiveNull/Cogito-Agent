@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Cogito-Agent API", version="0.8.0", lifespan=lifespan)
+app = FastAPI(title="Cogito-Agent API", version="0.9.0-dev", lifespan=lifespan)
 
 _console_static = Path(__file__).resolve().parent.parent / "console" / "static"
 app.mount("/console/static", StaticFiles(directory=str(_console_static)), name="console_static")
@@ -114,7 +114,7 @@ async def doctor_api_endpoint(live: str = Query("")) -> JSONResponse:
             status_code=501,
             content={
                 "status": "error",
-                "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.8.0"),
+                "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
                 "checks": [{
                     "section": "provider",
                     "name": "live_check",
@@ -129,7 +129,7 @@ async def doctor_api_endpoint(live: str = Query("")) -> JSONResponse:
     overall = _overall_status(checks)
     return JSONResponse({
         "status": overall,
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.8.0"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
         "checks": checks,
         "limitations": [
             "No real Telegram/Feishu delivery for outbox",

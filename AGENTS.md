@@ -87,7 +87,7 @@ v0.8.0 (Console MVP Phases 1–8, released 2026-06-17):
   - Templates: `config.html` (section-grouped tables), `doctor.html` (overall status badge + section check cards with name/status/message)
   - 938 tests passing, ruff clean, mypy clean (90 source files)
   - New API: `GET /api/v1/doctor` returns JSON with status, checks, limitations; `?live=1` returns 501
-- **Phase 8 — Polish & RC Hardening** (current):
+- **Phase 8 — Polish & RC Hardening** (released):
   - Nav active state: sidebar highlights current page
   - Dashboard quick links: no more "coming soon" labels
   - CSS polish: UUID wrapping, raw JSON scroll, empty state, responsive improvements, button styles
@@ -96,11 +96,30 @@ v0.8.0 (Console MVP Phases 1–8, released 2026-06-17):
   - Security regression: 73 new unified tests for auth (all pages), secret leak (sk-/Bearer/password), stack trace leak
   - 1011 tests passing, ruff clean, mypy clean (90 source files)
 
+v0.9.0-dev (Multi-Session Chat + History Recovery, current):
+- Fixed kernel swapped args bug in `_build_context` and `_build_model_messages` (`list_by_session` was called with wrong arg order)
+- User messages are now persisted in the DB (previously only assistant responses were saved)
+- Auto-title for sessions from first user message (first 80 chars)
+- Session sidebar in chat layout with create/list/switch/archive/delete
+- History recovery on page refresh (messages loaded from DB on page load)
+- Chat session routes:
+  - `GET /console/chat/sessions` — list sessions
+  - `POST /console/chat/sessions` — create new session
+  - `GET /console/chat/sessions/{id}` — get session with messages
+  - `POST /console/chat/sessions/{id}/archive` — soft delete (archive)
+  - `POST /console/chat/sessions/{id}/delete` — hard delete
+- Audit logging for all session mutations (created/archived/deleted)
+- Fixed `SessionRepository.hard_delete` to delete spans before traces (FK fix)
+- All content redacted + HTML escaped
+- AuthMiddleware protects all session routes
+- 32 new tests, 1043 tests passing, ruff clean, mypy clean (91 source files)
+- docs/18_V0_9_MULTI_SESSION_CHAT_PLAN.md created
+
 ## Verification Status
 
-- **1011 tests passing** (`pytest` clean)
+- **1043 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 90 files)
+- **mypy clean** (`mypy src/` clean, 91 files)
 
 - ✅ Phase 1 (Epics A–B): Runtime full turn pipeline, context engine with budget shares
 - ✅ Phase 2 (Epics C–E): Tool dispatch, approval flow, budget enforcement
@@ -134,7 +153,13 @@ v0.8.0 (Console MVP Phases 1–8, released 2026-06-17):
 - ✅ HTML escape + redaction on all dynamic content
 - ✅ AuthMiddleware protects chat routes (401 without valid key)
 - ✅ Console‑default session (`console-default`), auto‑created workspace
+- ✅ Session sidebar with create/list/switch/archive/delete
+- ✅ History recovery on page refresh (messages loaded from DB)
+- ✅ User messages persisted in DB (auto-title from first message)
+- ✅ Chat session routes: `GET/POST /console/chat/sessions`, `GET/POST /console/chat/sessions/{id}/archive|delete`
+- ✅ Audit logging for all session mutations
 - ✅ 17 new tests for chat page, API, streaming, XSS, redaction, auth
+- ✅ 32 new tests for multi-session chat
 - ✅ Trace & Audit pages (Phase 5)
 - ✅ Autonomy pages (Phase 6)
 - ✅ Config page & Doctor page (Phase 7)

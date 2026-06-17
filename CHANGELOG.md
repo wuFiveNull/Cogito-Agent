@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.0-dev (2026-06-17)
+
+### **Multi-Session Chat + History Recovery**
+
+- **Fixed kernel swapped args bug**: `_build_context` and `_build_model_messages` called `list_by_session(workspace_id, session_id)` but the method signature is `list_by_session(session_id, workspace_id)` — context building was silently broken
+- **User messages persisted**: previously only assistant responses were saved to the `messages` table; now user messages are also persisted before the assistant reply
+- **Auto-title**: session title auto-set from first user message (first 80 chars)
+- **Session sidebar**: left sidebar in the chat layout showing all sessions with title, message count, and last message preview
+- **Create session**: `POST /console/chat/sessions` — creates a new UUID-based session, appends to sidebar
+- **List sessions**: `GET /console/chat/sessions` — returns full session list HTML partial
+- **Get session with messages**: `GET /console/chat/sessions/{id}` — returns all messages as `chat_history.html` partial
+- **Archive session**: `POST /console/chat/sessions/{id}/archive` — soft delete via `deleted_at`
+- **Delete session**: `POST /console/chat/sessions/{id}/delete` — hard delete (removes messages, spans, traces, and session)
+- **History recovery on page refresh**: `GET /console/chat` loads messages from DB on page load via htmx, no more blank chat area
+- **Audit logging**: session created/archived/deleted all write audit log entries
+- **CSS**: responsive session sidebar with hover actions, active state, overflow scrolling
+- **Bugfix**: `SessionRepository.hard_delete` now deletes spans before traces (foreign key fix)
+- **32 new tests**: session CRUD, persistence, audit logs, auth protection, redaction/XSS, archive/delete, empty state, multi-session isolation
+- **1043 tests passing**, ruff clean, mypy clean (91 source files)
+- **docs/18_V0_9_MULTI_SESSION_CHAT_PLAN.md** created
+
 ## v0.8.0 (2026-06-17)
 
 ### **Console MVP Phase 8 — Polish & RC Hardening**

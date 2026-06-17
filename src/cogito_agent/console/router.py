@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from .approval import approval_router as _approval_router
 from .audit_views import audit_router as _audit_router
 from .autonomy_views import autonomy_router as _autonomy_router
+from .chat_sessions import router as _chat_sessions_router
 from .config_views import config_router as _config_router
 from .doctor_views import doctor_router as _doctor_router
 from .memory import memory_router as _memory_router
@@ -76,13 +77,46 @@ async def dashboard(request: Request) -> HTMLResponse:
 
 @console_router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
 async def chat_page(request: Request) -> HTMLResponse:
+    from cogito_agent.storage import Database
+    from cogito_agent.storage.repositories import (
+        MessageRepository,
+        SessionRepository,
+        WorkspaceRepository,
+    )
+
     _ensure_console_session()
+
+    db = Database()
+    db.initialize()
+    db.migrate()
+    sess_repo = SessionRepository(db)
+    msg_repo = MessageRepository(db)
+    ws_repo = WorkspaceRepository(db)
+    ws_repo.get_by_id(CONSOLE_WORKSPACE_ID)
+
+    sessions_raw = sess_repo.list_by_workspace(CONSOLE_WORKSPACE_ID)
+    session_list = []
+    for s in sessions_raw:
+        sd: dict[str, object] = dict(s)
+        sid = str(sd["id"])
+        msgs = msg_repo.list_by_session(sid, CONSOLE_WORKSPACE_ID)
+        last_msg = msgs[-1] if msgs else None
+        session_list.append({
+            "id": sid,
+            "title": str(sd.get("title", "")),
+            "created_at": str(sd.get("created_at", "")),
+            "updated_at": str(sd.get("updated_at", "")),
+            "message_count": len(msgs),
+            "last_preview": str(last_msg.get("content", ""))[:60] if last_msg else "",
+        })
+
     ctx: dict[str, object] = {
         "request": request,
         "title": "Chat",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "session_id": CONSOLE_SESSION_ID,
         "workspace_id": CONSOLE_WORKSPACE_ID,
+        "sessions": session_list,
         "menu": _menu_items(),
     }
     return templates.TemplateResponse(request, "console/chat.html", ctx)
@@ -266,6 +300,7 @@ async def chat_stream_route(
 
 console_router.include_router(_memory_router, prefix="/memory")
 console_router.include_router(_approval_router, prefix="/approval")
+console_router.include_router(_chat_sessions_router, prefix="")
 console_router.include_router(_trace_router, prefix="/traces")
 console_router.include_router(_audit_router, prefix="/audit")
 console_router.include_router(_autonomy_router, prefix="/autonomy")

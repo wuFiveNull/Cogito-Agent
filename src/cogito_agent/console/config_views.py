@@ -125,7 +125,7 @@ def _env_summary() -> dict[str, str]:
     from cogito_agent.cli.config_manager import CONFIG_PATH
     from cogito_agent.storage import Database
     result: dict[str, str] = {
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.8.0"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
         "python_version": sys.version.split()[0],
         "platform": sys.platform,
         "config_path": CONFIG_PATH,
@@ -169,7 +169,7 @@ async def config_page(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Configuration",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "sections": sections,
         "menu": _menu_items(),
     }

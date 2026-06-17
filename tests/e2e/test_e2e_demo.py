@@ -67,8 +67,9 @@ def test_e2e_full_turn(mock_urlopen: MagicMock) -> None:
         (sess_id,),
     )
     msgs = cur.fetchall()
-    assert len(msgs) >= 1
-    assert msgs[0]["role"] == "assistant"
+    assert len(msgs) >= 2
+    assert msgs[0]["role"] == "user"
+    assert msgs[1]["role"] == "assistant"
 
     cur_t = db.connection.execute(
         "SELECT id, status FROM traces WHERE workspace_id = ?", (ws_id,)

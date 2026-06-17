@@ -1,0 +1,23 @@
+{% for m in messages %}
+{% if m.role == "user" %}
+<div class="message message-user" id="msg-{{ m.id | e }}">
+  <div class="msg-bubble">
+    <div class="msg-meta">You</div>
+    <div class="msg-text">{{ m.content | e }}</div>
+    <div class="msg-timestamp">{{ m.created_at[:19] | e }}</div>
+  </div>
+</div>
+{% elif m.role == "assistant" %}
+<div class="message message-assistant" id="msg-{{ m.id | e }}">
+  <div class="msg-bubble">
+    <div class="msg-meta">Assistant</div>
+    <div class="msg-text">{{ m.content | e }}</div>
+    <div class="msg-timestamp">{{ m.created_at[:19] | e }}</div>
+  </div>
+</div>
+{% endif %}
+{% else %}
+<div class="chat-empty" id="chat-empty">
+  <p>Send a message to start chatting.</p>
+</div>
+{% endfor %}

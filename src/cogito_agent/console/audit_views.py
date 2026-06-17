@@ -138,7 +138,7 @@ async def audit_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Audit",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "stats": stats,
         "actor": actor,
         "operation": operation,
@@ -188,7 +188,7 @@ async def audit_detail(request: Request, audit_id: str) -> HTMLResponse:
     detail_ctx: dict[str, object] = {
         "request": request,
         "title": "Audit Detail",
-        "version": "0.8.0",
+        "version": "0.9.0-dev",
         "item": item,
         "details_redacted": details_redacted,
         "menu": _menu_items(),
