@@ -7,7 +7,7 @@ v0.2.0-alpha released.
 v0.3.0-dev not released.
 v0.4.0-dev not released.
 v0.5.0-dev not released.
-v0.6.0-dev (secret/provider hardening candidate, not released):
+v0.6.1-dev (provider hardening closure candidate, not released):
 - SecretProvider protocol with EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider placeholder
 - SecretValue wrapper: str/repr always show [REDACTED], raw value via .value
 - LocalSecretsProvider: SQLite-based storage with metadata tracking (created/updated/last_used), NOT encrypted
@@ -20,14 +20,14 @@ v0.6.0-dev (secret/provider hardening candidate, not released):
 - `model.streaming_enabled` enforced: false forces chat() fallback, true uses stream_chat()
 - `model.max_retries` wired to RuntimeKernel._retry_with_backoff() for model calls
 - Real secret availability checks in provider doctor/test
-- 652 tests passing, ruff clean, mypy clean (69 files)
+- 663 tests passing, ruff clean, mypy clean (70 files)
 - docs/15_V0_6_SECRET_PROVIDER_PLAN.md updated
 
 ## Verification Status
 
-- **652 tests passing** (`pytest` clean)
+- **663 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 68 files)
+- **mypy clean** (`mypy src/` clean, 70 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 

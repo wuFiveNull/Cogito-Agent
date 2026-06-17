@@ -106,8 +106,8 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.6.0-dev (secret/provider hardening candidate)** — Not released. No GitHub tag or release.
-Verified: **652 tests passing**, `ruff check src/` clean, `mypy src/` clean (68 files).
+**v0.6.1-dev (provider hardening closure candidate)** — Not released. No GitHub tag or release.
+Verified: **663 tests passing**, `ruff check src/` clean, `mypy src/` clean (70 files).
 SecretProvider protocol (EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider placeholder). SecretValue wrapper with automatic [REDACTED] repr/str. LocalSecretsProvider with SQLite storage and metadata tracking. `cogito secrets` CLI for set/list/show/delete/rotate/test with audit logging.
 
 ## Development

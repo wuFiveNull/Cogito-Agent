@@ -237,7 +237,12 @@ class RuntimeKernel:
         streaming_enabled: bool = True,
         max_retries: int = 2,
     ) -> Generator[StreamEvent, None, ModelResponse]:
-        """Yield delta events for each token, return the final ModelResponse."""
+        """Yield delta events for each token, return the final ModelResponse.
+
+        Retry strategy: retry up to max_retries times if the stream fails
+        BEFORE the first token. Once a token has been yielded, do NOT retry
+        —  emit an error event instead (no token replay).
+        """
         if not message.strip():
             yield StreamEvent(
                 type=StreamEventType.delta,
@@ -251,11 +256,28 @@ class RuntimeKernel:
         echo = f"You said: {message}" if self._model_adapter is None else ""
         gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
                               streaming_enabled=streaming_enabled)
-        for chunk in gen:
-            yield StreamEvent(
-                type=StreamEventType.delta,
-                data={"delta": chunk},
-            )
+
+        attempt = 0
+        first_delta_yielded = False
+        while attempt <= max_retries:
+            try:
+                for chunk in gen:
+                    first_delta_yielded = True
+                    yield StreamEvent(
+                        type=StreamEventType.delta,
+                        data={"delta": chunk},
+                    )
+                break  # completed successfully
+            except Exception:
+                if first_delta_yielded:
+                    # After first delta: do not retry, let error propagate
+                    raise
+                attempt += 1
+                if attempt > max_retries:
+                    raise  # all retries exhausted
+                # Re-create generator for retry
+                gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
+                                      streaming_enabled=streaming_enabled)
 
         latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
         self._model_call_count += 1
@@ -502,15 +524,17 @@ class RuntimeKernel:
                 self._sm.transition(TurnState.failed)
             except ValueError:
                 pass
+            from cogito_agent.models.provider_errors import normalize_provider_error
+            perr = normalize_provider_error(exc)
             yield StreamEvent(
                 type=StreamEventType.error,
                 data={
                     "error": {
-                        "code": "RUNTIME_ERROR",
-                        "message": str(exc),
+                        "code": perr.code.value,
+                        "message": perr.safe_message,
                         "request_id": request_id,
                         "trace_id": trace.id,
-                        "retryable": False,
+                        "retryable": perr.retryable,
                     },
                 },
                 request_id=request_id,

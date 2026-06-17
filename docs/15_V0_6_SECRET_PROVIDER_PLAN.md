@@ -90,6 +90,20 @@ The flag is read per-request in the API `chat_stream` endpoint and passed throug
 - Exponential backoff (2^attempt * 0.5s base).
 - The existing `RuntimeKernel._retry_with_backoff()` is used for both model calls and tool dispatch.
 
+## Streaming Retry Strategy
+
+When streaming is active, the retry logic in `_stream_generate_reply()` follows this strategy:
+
+| Phase | Failure | Behavior |
+|---|---|---|
+| Before first delta | `stream_chat()` raises | Retry up to `max_retries` times, re-create `StreamGenerator` each attempt |
+| After first delta | Iterator fails mid-stream | **No retry** — emit SSE error event. No token replay. |
+| All retries exhausted | All attempts failed | Emit normalized `PROVIDER_*` error via SSE error event |
+
+- If the adapter's `supports_streaming` is `False` and `streaming_enabled` is `False`, the non-stream `chat()` path is used, which has its own retry via `_retry_with_backoff()`.
+- After-first-delta failures produce an error event with the unified `ProviderError` schema.
+- Errors are normalized via `normalize_provider_error()` which classifies exceptions into `PROVIDER_*` codes without leaking raw secret or traceback.
+
 ## Provider CLI
 
 ### `cogito provider list`
@@ -155,6 +169,20 @@ The existing `RedactionHelper` (in `trace/redaction.py`) handles:
 - Dynamic env-based secrets: matched from `EnvSecretProvider` at runtime
 
 The `SecretValue` class adds a **second layer** of protection: if any code path accidentally calls `str()` or `repr()` on a secret value, it shows `[REDACTED]` instead of the raw string.
+
+## ProviderError Normalization
+
+The `cogito_agent.models.provider_errors` module provides:
+
+- `ProviderErrorCode` (StrEnum): `NOT_CONFIGURED`, `SECRET_MISSING`, `UNREACHABLE`, `TIMEOUT`, `RATE_LIMITED`, `AUTH_FAILED`, `MODEL_UNAVAILABLE`, `UNKNOWN_ERROR`
+- `ProviderError(Exception)`: with `.code`, `.provider`, `.retryable`, `.safe_message`, `.to_dict()`
+- `normalize_provider_error(exc, provider)`: classifies any exception into a `ProviderError` with safe message
+- `safe_provider_error_message(code, provider, detail)`: returns redacted error message
+
+All provider errors in `process_stream()`, `_generate_reply()`, and the retry logic pass through `normalize_provider_error()`, ensuring:
+- No raw Python traceback in user-facing output
+- No API key, Bearer token, or URL credential in error messages (via `RedactionHelper`)
+- Consistent `PROVIDER_*` codes across CLI, API, SSE, trace, and audit
 
 ## Known Limitations
 
