@@ -49,12 +49,18 @@ class TestConsoleDashboard:
 
 
 class TestConsolePlaceholders:
-    @pytest.mark.parametrize("page", ["autonomy", "config", "doctor"])
+    @pytest.mark.parametrize("page", ["config", "doctor"])
     def test_placeholder_pages(self, page: str) -> None:
         resp = client.get(f"/console/{page}")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "Coming soon" in resp.text
+
+    def test_placeholder_autonomy_no_longer_placeholder(self) -> None:
+        resp = client.get("/console/autonomy")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Coming soon" not in resp.text
 
     def test_unknown_page_returns_404(self) -> None:
         resp = client.get("/console/foobar")

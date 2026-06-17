@@ -17,6 +17,23 @@
 - **30 new tests**: console routes, status API JSON fields, auth (no-key/wrong-key/valid-key), redaction
 - **82 source files** (+4 new: `console/__init__.py`, `console/router.py`, `console/status.py`, `console/redaction.py`)
 
+### **Console MVP Phase 6 — Autonomy Console MVP**
+
+- **Autonomy dashboard** (`GET /console/autonomy`) — stat cards (decisions total/24h, push/skip/defer/require_approval, outbox pending/sent/failed, feedback useful/too_many/wrong_time), quick links
+- **Decisions list** (`GET /console/autonomy/decisions`) — stat cards (total/push/skip/defer/require_approval), filter bar (action, search, time range), cards with action badge, cost/priority scores, tags (dedup/quiet/quota/needs_approval), trace_id link
+- **Decision detail** (`GET /console/autonomy/decisions/{id}`) — full decision metadata table, related outbox messages table, related feedback table, feedback submission form (5 FeedbackValue options), trace_id link, redacted raw JSON
+- **Feedback submission** (`POST /console/autonomy/decisions/{id}/feedback`) — validates against FeedbackValue enum (422 on invalid), checks decision exists (404 if not), writes to FeedbackStore, writes audit log, redirects back to decision detail
+- **Outbox list** (`GET /console/autonomy/outbox`) — stat cards (total/pending/sent/failed), filter bar (status, search, time range), cards with status badge, title preview, decision_id link
+- **Outbox detail** (`GET /console/autonomy/outbox/{id}`) — full metadata table with decision_id/trace_id links, redacted body in pre block, redacted raw JSON
+- **Feedback list** (`GET /console/autonomy/feedback`) — stat cards (total/useful/not_useful/too_many/wrong_time/irrelevant), filter bar (value, decision_id, time range), cards with value badge and decision_id link
+- **Store extensions**: `DecisionStore.count_by_action()`, `DecisionStore.list_decisions_filtered()`, `Outbox.list_messages_filtered()`, `Outbox.count_by_status()`, `FeedbackStore.list_feedback()`, `FeedbackStore.count_by_value()`
+- **CSS namespace `aut-`**: stat cards, filter bars, card layout, badges (push/skip/defer/require_approval/pending/sent/failed/skipped/useful/not_useful/too_many/wrong_time/irrelevant), tags, raw JSON block, feedback form styling
+- **Route registration**: autonomy router mounted before placeholder catch-all, "autonomy" removed from placeholder list
+- **Menu**: "soon" badge and "coming soon" removed from Autonomy in sidebar and dashboard quick links
+- **Updated limitations**: status.py now shows "No real Telegram/Feishu delivery for outbox" and "Config and Doctor pages are still placeholders"
+- **49 new tests**: dashboard stat cards/quick-links, decisions list (filters/search), decision detail (trace/outbox/feedback links/404/XSS), feedback post (all values/invalid/404), outbox list (filters/search), outbox detail (decision/trace links/404/XSS), security (redaction of API keys/Bearer tokens/raw JSON), auth (blocks without token/allows with valid key on all endpoints)
+- **935 tests total**, ruff clean, mypy clean (88 source files)
+
 ### **Console MVP Phase 5 — Trace & Audit MVP**
 
 - **Trace list** (`GET /console/traces`) — stat cards (total/completed/errors), filter bar (status, time range, search), cards with span count, duration, trace ID

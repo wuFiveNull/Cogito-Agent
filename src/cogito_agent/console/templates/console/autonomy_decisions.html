@@ -1,0 +1,62 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aut-header">
+  <p><a href="/console/autonomy">&larr; Back to Autonomy</a></p>
+  <div class="aut-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.push }}</div><div class="stat-label">Push</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.skip }}</div><div class="stat-label">Skip</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.defer }}</div><div class="stat-label">Defer</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.require_approval }}</div><div class="stat-label">Req. Approval</div></div>
+  </div>
+
+  <form class="aut-filters" method="get" action="/console/autonomy/decisions">
+    <select name="action">
+      <option value="">All Actions</option>
+      <option value="push"{% if action == "push" %} selected{% endif %}>Push</option>
+      <option value="skip"{% if action == "skip" %} selected{% endif %}>Skip</option>
+      <option value="defer"{% if action == "defer" %} selected{% endif %}>Defer</option>
+      <option value="require_approval"{% if action == "require_approval" %} selected{% endif %}>Require Approval</option>
+    </select>
+    <input type="search" name="q" placeholder="Search decision/event/reason..." value="{{ q | e }}" class="aut-search">
+    <select name="time_range">
+      <option value="all"{% if time_range == "all" %} selected{% endif %}>All Time</option>
+      <option value="1h"{% if time_range == "1h" %} selected{% endif %}>Last 1h</option>
+      <option value="24h"{% if time_range == "24h" %} selected{% endif %}>Last 24h</option>
+      <option value="7d"{% if time_range == "7d" %} selected{% endif %}>Last 7d</option>
+    </select>
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/autonomy/decisions" class="btn-clear">Clear</a>
+  </form>
+</div>
+
+<div id="decision-list" class="aut-list">
+  {% for item in items %}
+    <div class="aut-card" id="dec-{{ item.id }}">
+      <div class="aut-card-top">
+        <span class="aut-badge aut-badge-{{ item.action | e }}">{{ item.action | e }}</span>
+        <span class="aut-cost">{{ item.cost_score }} cost</span>
+        <span class="aut-priority">{{ item.priority_score }} priority</span>
+        {% if item.dedup_hit %}<span class="aut-tag">dedup</span>{% endif %}
+        {% if item.quiet_hours_hit %}<span class="aut-tag">quiet</span>{% endif %}
+        {% if item.quota_hit %}<span class="aut-tag">quota</span>{% endif %}
+        {% if item.requires_approval %}<span class="aut-tag">needs_approval</span>{% endif %}
+      </div>
+      <div class="aut-card-reason"><strong>{{ item.reason_code | e }}</strong>: {{ (item.reason or "") | e }}</div>
+      <div class="aut-card-meta">
+        <code>{{ (item.id or "") | e }}</code> &middot;
+        event <code>{{ (item.event_id or "") | e }}</code> &middot;
+        {{ (item.created_at or "") | e }}
+        {% if item.trace_id %}
+          &middot; trace <a href="/console/traces/{{ item.trace_id | e }}"><code>{{ (item.trace_id or "") | e }}</code></a>
+        {% endif %}
+      </div>
+      <div class="aut-card-actions">
+        <a class="btn-action btn-view" href="/console/autonomy/decisions/{{ item.id }}">View</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No decisions found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -102,8 +102,8 @@ def build_status() -> dict[str, object]:
             "traces_24h": _count_since("traces"),
         },
         "limitations": [
-            "Console MVP Phase 1 only",
-            "Most pages are placeholders",
+            "No real Telegram/Feishu delivery for outbox",
+            "Config and Doctor pages are still placeholders",
         ],
     }
 

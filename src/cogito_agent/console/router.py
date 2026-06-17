@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from .approval import approval_router as _approval_router
 from .audit_views import audit_router as _audit_router
+from .autonomy_views import autonomy_router as _autonomy_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
 from .status import build_status
@@ -265,17 +266,17 @@ console_router.include_router(_memory_router, prefix="/memory")
 console_router.include_router(_approval_router, prefix="/approval")
 console_router.include_router(_trace_router, prefix="/traces")
 console_router.include_router(_audit_router, prefix="/audit")
+console_router.include_router(_autonomy_router, prefix="/autonomy")
 
 
 # ─── Placeholder Pages ──────────────────────────────────────────────────────
 
 
 PLACEHOLDER_PAGES = [
-    "autonomy", "config", "doctor",
+    "config", "doctor",
 ]
 
 _PHASE_MAP = {
-    "autonomy": "6 (Autonomy pages)",
     "config": "7 (Config & Doctor)",
     "doctor": "7 (Config & Doctor)",
 }

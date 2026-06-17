@@ -24,7 +24,7 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
-v0.8.0-dev (Console MVP Phase 1–5, current):
+v0.8.0-dev (Console MVP Phase 1–6, current):
 - **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
 - **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
   - Message area with user/assistant bubbles
@@ -62,12 +62,26 @@ v0.8.0-dev (Console MVP Phase 1–5, current):
   - All content redacted + HTML escaped; AuthMiddleware protects all routes
   - Shared modules: `trace_views.py`, `audit_views.py` keep router.py clean
   - 29 new tests, 886 tests passing, ruff clean, mypy clean (87 source files)
+- **Phase 6 — Autonomy Console MVP**: Autonomy management pages at `/console/autonomy` with:
+  - Autonomy dashboard with stat cards (decisions total/24h, push/skip/defer/require_approval counts, outbox pending/sent/failed, feedback counts)
+  - Quick links to decisions, outbox, feedback, traces, audit
+  - Decisions list with action/reason_code/search/time_range filters, stat cards, decision_id/event_id/reason/trace_id display
+  - Decision detail with full metadata, trace_id link, related outbox messages, related feedback, feedback submission form, redacted raw JSON
+  - Feedback submission (`POST /console/autonomy/decisions/{id}/feedback`) with value validation (FeedbackValue enum), audit logging, decision existence check
+  - Outbox list with status/search/time_range filters, stat cards, decision_id link
+  - Outbox detail with title/body/status/decision_id/trace_id display, redacted raw JSON
+  - Feedback list with value/decision_id/time_range filters, stat cards, decision_id link
+  - DecisionStore extended: `list_decisions_filtered()`, `count_by_action()`
+  - Outbox extended: `list_messages_filtered()`, `count_by_status()`
+  - FeedbackStore extended: `list_feedback()`, `count_by_value()`
+  - All content redacted + HTML escaped; AuthMiddleware protects all routes
+  - 49 new tests, 935 tests passing, ruff clean, mypy clean (88 source files)
 
 ## Verification Status
 
-- **886 tests passing** (`pytest` clean)
+- **935 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 87 files)
+- **mypy clean** (`mypy src/` clean, 88 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -105,7 +119,7 @@ v0.8.0-dev (Console MVP Phase 1–5, current):
 - ✅ Console‑default session (`console-default`), auto‑created workspace
 - ✅ 17 new tests for chat page, API, streaming, XSS, redaction, auth
 - ✅ Trace & Audit pages (Phase 5)
-- 🚧 Autonomy pages (Phase 6)
+- ✅ Autonomy pages (Phase 6)
 - 🚧 Config page (Phase 7)
 
 ## V2 Status

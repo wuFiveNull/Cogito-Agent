@@ -4,13 +4,14 @@
 
 - **Predecessor**: v0.7.0-rc1 (tagged, 755 tests, ruff/mypy clean)
 - **Branch**: master
-- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ + Phase 4 (Approval Queue MVP) ✅ + Phase 5 (Trace & Audit MVP) ✅ — interactive chat, memory management, approval queue, trace/audit viewers
-- **886 tests**, ruff clean, mypy clean (87 files)
+- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ + Phase 4 (Approval Queue MVP) ✅ + Phase 5 (Trace & Audit MVP) ✅ + Phase 6 (Autonomy Console MVP) ✅ — interactive chat, memory management, approval queue, trace/audit viewers, autonomy decision/outbox/feedback management
+- **935 tests**, ruff clean, mypy clean (88 files)
 - Chat page at `/console/chat`, send at `POST /console/chat/send`, stream at `POST /console/chat/stream`
 - Memory page at `/console/memory`, actions at `/console/memory/candidates/{id}/accept|reject|edit`, `/console/memory/{id}/edit|archive|delete`
 - Approval page at `/console/approval`, actions at `/console/approval/{id}/approve|reject`
 - Trace page at `/console/traces`, detail at `/console/traces/{id}`
 - Audit page at `/console/audit`, detail at `/console/audit/{id}`
+- Autonomy dashboard at `/console/autonomy`, decisions at `/console/autonomy/decisions`, outbox at `/console/autonomy/outbox`, feedback at `/console/autonomy/feedback`
 
 ## Goal
 
@@ -230,7 +231,7 @@ templates/
 3. ✅ **Phase 3: Memory Review** — Memory review list with accept/reject, edit/archive/delete
 4. ✅ **Phase 4: Approval** — Approval queue with approve/reject
 5. ✅ **Phase 5: Trace & Audit** — Trace list/detail with span tree viewer + Audit list/detail with filters and redacted details
-6. 🚧 **Phase 6: Autonomy** — Decisions list/detail, Outbox list, Feedback form
+6. ✅ **Phase 6: Autonomy** — Decisions list/detail, Outbox list, Feedback form, dashboard, filters
 7. 🚧 **Phase 7: Config & Doctor** — Config viewer, Doctor page
 8. 🚧 **Phase 8: Polish** — Navigation, responsive layout, loading states, error pages
 
@@ -279,10 +280,14 @@ templates/
 [x] Trace detail shows span tree
 [x] Audit list shows entries
 [x] Audit detail shows redacted details
-[ ] Autonomy decisions list works
-[ ] Autonomy decisions shows cost breakdown
-[ ] Autonomy outbox list works
-[ ] Feedback form records feedback
+[x] Autonomy dashboard shows stats
+[x] Autonomy decisions list works
+[x] Autonomy decisions shows cost breakdown
+[x] Autonomy outbox list works
+[x] Feedback form records feedback
+[x] Feedback filters work
+[x] Decision/outbox/feedback detail pages work
+[x] All autonomy pages respect auth
 [ ] Config page shows keys (redacted secrets)
 [ ] Doctor page shows system status
 [x] All pages respect auth (when COGITO_API_KEY is set)

@@ -90,3 +90,62 @@ class Outbox:
         )
         row = cur.fetchone()
         return dict(row) if row else None
+
+    def list_messages_filtered(
+        self,
+        workspace_id: str = "*",
+        status: str = "",
+        time_range: str = "all",
+        q: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where_clauses: list[str] = []
+
+        if workspace_id != "*":
+            where_clauses.append("workspace_id=?")
+            params.append(workspace_id)
+
+        if status and status != "all":
+            where_clauses.append("status=?")
+            params.append(status)
+
+        if q:
+            where_clauses.append(
+                "(title LIKE ? OR body LIKE ? OR id LIKE ? OR decision_id LIKE ?)"
+            )
+            like = f"%{q}%"
+            params.extend([like, like, like, like])
+
+        if time_range and time_range != "all":
+            from datetime import timedelta
+            days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
+            days = days_map.get(time_range, 0)
+            if days:
+                cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+                where_clauses.append("created_at >= ?")
+                params.append(cutoff)
+
+        where = ""
+        if where_clauses:
+            where = "WHERE " + " AND ".join(where_clauses)
+
+        cur = self._db.connection.execute(
+            "SELECT * FROM outbox_messages"
+            f" {where} ORDER BY created_at DESC LIMIT ?",
+            (*params, limit),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def count_by_status(self, workspace_id: str = "*") -> dict[str, int]:
+        where = "WHERE workspace_id=?" if workspace_id != "*" else ""
+        params = (workspace_id,) if workspace_id != "*" else ()
+        cur = self._db.connection.execute(
+            "SELECT status, COUNT(*) AS cnt FROM outbox_messages"
+            f" {where} GROUP BY status",
+            params,
+        )
+        result: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0, "skipped": 0}
+        for r in cur.fetchall():
+            result[str(r["status"])] = r["cnt"]
+        return result

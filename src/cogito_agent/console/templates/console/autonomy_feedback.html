@@ -1,0 +1,51 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aut-header">
+  <p><a href="/console/autonomy">&larr; Back to Autonomy</a></p>
+  <div class="aut-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.useful }}</div><div class="stat-label">Useful</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.not_useful }}</div><div class="stat-label">Not Useful</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.too_many }}</div><div class="stat-label">Too Many</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.wrong_time }}</div><div class="stat-label">Wrong Time</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.irrelevant }}</div><div class="stat-label">Irrelevant</div></div>
+  </div>
+
+  <form class="aut-filters" method="get" action="/console/autonomy/feedback">
+    <select name="value">
+      <option value="">All Values</option>
+      <option value="useful"{% if value == "useful" %} selected{% endif %}>Useful</option>
+      <option value="not_useful"{% if value == "not_useful" %} selected{% endif %}>Not Useful</option>
+      <option value="too_many"{% if value == "too_many" %} selected{% endif %}>Too Many</option>
+      <option value="wrong_time"{% if value == "wrong_time" %} selected{% endif %}>Wrong Time</option>
+      <option value="irrelevant"{% if value == "irrelevant" %} selected{% endif %}>Irrelevant</option>
+    </select>
+    <input type="search" name="decision_id" placeholder="Filter by decision ID..." value="{{ decision_id | e }}" class="aut-search">
+    <select name="time_range">
+      <option value="all"{% if time_range == "all" %} selected{% endif %}>All Time</option>
+      <option value="1h"{% if time_range == "1h" %} selected{% endif %}>Last 1h</option>
+      <option value="24h"{% if time_range == "24h" %} selected{% endif %}>Last 24h</option>
+      <option value="7d"{% if time_range == "7d" %} selected{% endif %}>Last 7d</option>
+    </select>
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/autonomy/feedback" class="btn-clear">Clear</a>
+  </form>
+</div>
+
+<div id="feedback-list" class="aut-list">
+  {% for item in items %}
+    <div class="aut-card" id="fb-{{ item.id }}">
+      <div class="aut-card-top">
+        <span class="aut-badge aut-badge-{{ (item.value or "") | e }}">{{ (item.value or "") | e }}</span>
+        {% if item.comment %}<span class="aut-comment-preview">{{ (item.comment or "") | e }}</span>{% endif %}
+      </div>
+      <div class="aut-card-meta">
+        decision <a href="/console/autonomy/decisions/{{ item.decision_id | e }}"><code>{{ (item.decision_id or "") | e }}</code></a>
+        &middot; {{ (item.created_at or "") | e }}
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No feedback entries found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

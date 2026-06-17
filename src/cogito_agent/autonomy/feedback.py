@@ -73,3 +73,62 @@ class FeedbackStore:
             (workspace_id, limit),
         )
         return [r["value"] for r in cur.fetchall() if r["value"]]
+
+    def list_feedback(
+        self,
+        workspace_id: str = "*",
+        value: str = "",
+        time_range: str = "all",
+        decision_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where_clauses: list[str] = []
+
+        if workspace_id != "*":
+            where_clauses.append("workspace_id=?")
+            params.append(workspace_id)
+
+        if value and value != "all":
+            where_clauses.append("value=?")
+            params.append(value)
+
+        if decision_id:
+            where_clauses.append("decision_id=?")
+            params.append(decision_id)
+
+        if time_range and time_range != "all":
+            from datetime import timedelta
+            days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
+            days = days_map.get(time_range, 0)
+            if days:
+                cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+                where_clauses.append("created_at >= ?")
+                params.append(cutoff)
+
+        where = ""
+        if where_clauses:
+            where = "WHERE " + " AND ".join(where_clauses)
+
+        cur = self._db.connection.execute(
+            "SELECT * FROM feedback_entries"
+            f" {where} ORDER BY created_at DESC LIMIT ?",
+            (*params, limit),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def count_by_value(self, workspace_id: str = "*") -> dict[str, int]:
+        where = "WHERE workspace_id=?" if workspace_id != "*" else ""
+        params = (workspace_id,) if workspace_id != "*" else ()
+        cur = self._db.connection.execute(
+            "SELECT value, COUNT(*) AS cnt FROM feedback_entries"
+            f" {where} GROUP BY value",
+            params,
+        )
+        result: dict[str, int] = {
+            "useful": 0, "not_useful": 0, "too_many": 0,
+            "wrong_time": 0, "irrelevant": 0,
+        }
+        for r in cur.fetchall():
+            result[str(r["value"])] = r["cnt"]
+        return result

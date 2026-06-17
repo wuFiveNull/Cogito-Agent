@@ -1,0 +1,79 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aut-detail">
+  <p><a href="/console/autonomy/decisions">&larr; Back to Decisions</a></p>
+  <h3>Decision Detail</h3>
+
+  <table class="info-table">
+    <tr><td>Decision ID</td><td><code>{{ (decision.id or "") | e }}</code></td></tr>
+    <tr><td>Event ID</td><td><code>{{ (event_id or "") | e }}</code></td></tr>
+    <tr><td>Action</td><td><span class="aut-badge aut-badge-{{ (decision.action or "") | e }}">{{ (decision.action or "") | e }}</span></td></tr>
+    <tr><td>Reason Code</td><td>{{ (decision.reason_code or "") | e }}</td></tr>
+    <tr><td>Reason</td><td>{{ (decision.reason or "") | e }}</td></tr>
+    <tr><td>Cost Score</td><td>{{ decision.cost_score }}</td></tr>
+    <tr><td>Priority Score</td><td>{{ decision.priority_score }}</td></tr>
+    <tr><td>Dedup Hit</td><td>{{ decision.dedup_hit }}</td></tr>
+    <tr><td>Quiet Hours Hit</td><td>{{ decision.quiet_hours_hit }}</td></tr>
+    <tr><td>Quota Hit</td><td>{{ decision.quota_hit }}</td></tr>
+    <tr><td>Requires Approval</td><td>{{ decision.requires_approval }}</td></tr>
+    <tr><td>Workspace ID</td><td><code>{{ (decision.workspace_id or "") | e }}</code></td></tr>
+    <tr><td>User ID</td><td><code>{{ (decision.user_id or "") | e }}</code></td></tr>
+    <tr><td>Created At</td><td>{{ (decision.created_at or "") | e }}</td></tr>
+    <tr><td>Trace</td><td>{% if trace_id %}<a href="/console/traces/{{ trace_id | e }}"><code>{{ trace_id | e }}</code></a>{% else %}-{% endif %}</td></tr>
+  </table>
+
+  <h4>Related Outbox Messages ({{ outbox_messages | length }})</h4>
+  {% if outbox_messages %}
+    <table class="info-table">
+      <tr><th>ID</th><th>Status</th><th>Title</th><th>Action</th></tr>
+      {% for m in outbox_messages %}
+      <tr>
+        <td><code>{{ (m.id or "") | e }}</code></td>
+        <td><span class="aut-badge aut-badge-{{ m.status | e }}">{{ (m.status or "") | e }}</span></td>
+        <td>{{ (m.title or "") | e }}</td>
+        <td><a class="btn-action btn-view" href="/console/autonomy/outbox/{{ m.id | e }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty-state">No outbox messages for this decision.</p>
+  {% endif %}
+
+  <h4>Related Feedback ({{ feedback_entries | length }})</h4>
+  {% if feedback_entries %}
+    <table class="info-table">
+      <tr><th>Value</th><th>Comment</th><th>Created</th></tr>
+      {% for f in feedback_entries %}
+      <tr>
+        <td><span class="aut-badge aut-badge-{{ f.value | e }}">{{ (f.value or "") | e }}</span></td>
+        <td>{{ (f.comment or "") | e }}</td>
+        <td>{{ (f.created_at or "") | e }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty-state">No feedback for this decision.</p>
+  {% endif %}
+
+  <h4>Submit Feedback</h4>
+  <div class="aut-feedback-form">
+    <form method="post" action="/console/autonomy/decisions/{{ decision.id }}/feedback">
+      <select name="value" required>
+        <option value="">-- Select feedback --</option>
+        <option value="useful">Useful</option>
+        <option value="not_useful">Not Useful</option>
+        <option value="too_many">Too Many</option>
+        <option value="wrong_time">Wrong Time</option>
+        <option value="irrelevant">Irrelevant</option>
+      </select>
+      <textarea name="comment" placeholder="Optional comment..." rows="2" class="aut-input"></textarea>
+      <button type="submit" class="btn-filter">Submit Feedback</button>
+    </form>
+  </div>
+
+  <details>
+    <summary>Raw JSON (redacted)</summary>
+    <pre class="aut-raw">{{ raw_json | e }}</pre>
+  </details>
+</div>
+{% endblock %}

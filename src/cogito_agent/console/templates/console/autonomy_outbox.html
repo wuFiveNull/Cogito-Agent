@@ -1,0 +1,55 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aut-header">
+  <p><a href="/console/autonomy">&larr; Back to Autonomy</a></p>
+  <div class="aut-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.pending }}</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.sent }}</div><div class="stat-label">Sent</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.failed }}</div><div class="stat-label">Failed</div></div>
+  </div>
+
+  <form class="aut-filters" method="get" action="/console/autonomy/outbox">
+    <select name="status">
+      <option value="">All Statuses</option>
+      <option value="pending"{% if status == "pending" %} selected{% endif %}>Pending</option>
+      <option value="sent"{% if status == "sent" %} selected{% endif %}>Sent</option>
+      <option value="failed"{% if status == "failed" %} selected{% endif %}>Failed</option>
+      <option value="skipped"{% if status == "skipped" %} selected{% endif %}>Skipped</option>
+    </select>
+    <input type="search" name="q" placeholder="Search title/body/ID..." value="{{ q | e }}" class="aut-search">
+    <select name="time_range">
+      <option value="all"{% if time_range == "all" %} selected{% endif %}>All Time</option>
+      <option value="1h"{% if time_range == "1h" %} selected{% endif %}>Last 1h</option>
+      <option value="24h"{% if time_range == "24h" %} selected{% endif %}>Last 24h</option>
+      <option value="7d"{% if time_range == "7d" %} selected{% endif %}>Last 7d</option>
+    </select>
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/autonomy/outbox" class="btn-clear">Clear</a>
+  </form>
+</div>
+
+<div id="outbox-list" class="aut-list">
+  {% for item in items %}
+    <div class="aut-card" id="obx-{{ item.id }}">
+      <div class="aut-card-top">
+        <span class="aut-badge aut-badge-{{ (item.status or "") | e }}">{{ (item.status or "") | e }}</span>
+        <span class="aut-title-preview">{{ (item.title or "") | e }}</span>
+        {% if item.priority %}<span class="aut-priority-tag">{{ (item.priority or "") | e }}</span>{% endif %}
+      </div>
+      <div class="aut-card-meta">
+        <code>{{ (item.id or "") | e }}</code>
+        {% if item.decision_id %}
+          &middot; decision <a href="/console/autonomy/decisions/{{ item.decision_id | e }}"><code>{{ (item.decision_id or "") | e }}</code></a>
+        {% endif %}
+        &middot; {{ (item.created_at or "") | e }}
+      </div>
+      <div class="aut-card-actions">
+        <a class="btn-action btn-view" href="/console/autonomy/outbox/{{ item.id | e }}">View</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No outbox messages found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

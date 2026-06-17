@@ -1,0 +1,29 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aut-header">
+  <div class="aut-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.decisions_total }}</div><div class="stat-label">Total Decisions</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.decisions_24h }}</div><div class="stat-label">Decisions (24h)</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.push }}</div><div class="stat-label">Push</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.skip }}</div><div class="stat-label">Skip</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.defer }}</div><div class="stat-label">Defer</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.require_approval }}</div><div class="stat-label">Req. Approval</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.outbox_pending }}</div><div class="stat-label">Outbox Pending</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.outbox_sent }}</div><div class="stat-label">Outbox Sent</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.outbox_failed }}</div><div class="stat-label">Outbox Failed</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.feedback_total }}</div><div class="stat-label">Feedback Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.feedback_useful }}</div><div class="stat-label">Useful</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.feedback_too_many }}</div><div class="stat-label">Too Many</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.feedback_wrong_time }}</div><div class="stat-label">Wrong Time</div></div>
+  </div>
+
+  <h3>Quick Links</h3>
+  <div class="quick-links">
+    <a href="/console/autonomy/decisions" class="quick-link">Decisions</a>
+    <a href="/console/autonomy/outbox" class="quick-link">Outbox</a>
+    <a href="/console/autonomy/feedback" class="quick-link">Feedback</a>
+    <a href="/console/traces" class="quick-link">Related Traces</a>
+    <a href="/console/audit" class="quick-link">Related Audit</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aut-detail">
+  <p><a href="/console/autonomy/outbox">&larr; Back to Outbox</a></p>
+  <h3>Outbox Detail</h3>
+
+  <table class="info-table">
+    <tr><td>Message ID</td><td><code>{{ (msg.id or "") | e }}</code></td></tr>
+    <tr><td>Status</td><td><span class="aut-badge aut-badge-{{ (msg.status or "") | e }}">{{ (msg.status or "") | e }}</span></td></tr>
+    <tr><td>Title</td><td>{{ (msg.title or "") | e }}</td></tr>
+    <tr><td>Body</td><td><pre class="aut-detail-body">{{ (msg.body or "") | e }}</pre></td></tr>
+    <tr><td>Event ID</td><td><code>{{ (msg.event_id or "") | e }}</code></td></tr>
+    <tr><td>Decision</td><td>{% if msg.decision_id %}<a href="/console/autonomy/decisions/{{ msg.decision_id | e }}"><code>{{ (msg.decision_id or "") | e }}</code></a>{% else %}-{% endif %}</td></tr>
+    <tr><td>Priority</td><td>{{ (msg.priority or "") | e }}</td></tr>
+    <tr><td>Source</td><td>{{ (msg.source or "") | e }}</td></tr>
+    <tr><td>Workspace ID</td><td><code>{{ (msg.workspace_id or "") | e }}</code></td></tr>
+    <tr><td>User ID</td><td><code>{{ (msg.user_id or "") | e }}</code></td></tr>
+    <tr><td>Trace</td><td>{% if msg.trace_id %}<a href="/console/traces/{{ msg.trace_id | e }}"><code>{{ (msg.trace_id or "") | e }}</code></a>{% else %}-{% endif %}</td></tr>
+    <tr><td>Created At</td><td>{{ (msg.created_at or "") | e }}</td></tr>
+    <tr><td>Sent At</td><td>{{ (msg.sent_at or "-") | e }}</td></tr>
+  </table>
+
+  <details>
+    <summary>Raw JSON (redacted)</summary>
+    <pre class="aut-raw">{{ raw_json | e }}</pre>
+  </details>
+</div>
+{% endblock %}
