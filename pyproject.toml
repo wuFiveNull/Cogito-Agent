@@ -1,12 +1,14 @@
 [project]
 name = "cogito-agent"
-version = "0.7.0-rc1"
+version = "0.8.0-dev"
 description = "A local-first personal Agent runtime with memory, governed capabilities, traceable execution, reusable skills, and constrained proactive behavior."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "fastapi>=0.110",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
     "uvicorn>=0.27",
 ]
 
@@ -41,6 +43,12 @@ disallow_any_unimported = false
 cogito = "cogito_agent.cli:run_cli"
 cogito-demo = "cogito_agent.cli.e2e_demo:run_e2e_demo"
 cogito-daemon = "cogito_agent.cli.daemon:run_daemon"
+
+[tool.setuptools.package-data]
+cogito_agent = [
+    "console/templates/**/*.html",
+    "console/static/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

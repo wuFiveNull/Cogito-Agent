@@ -8,16 +8,19 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from cogito_agent.cli.export import _redact_dict
+from cogito_agent.console import console_router, status_router
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import list_providers
 from cogito_agent.runtime import RuntimeKernel
@@ -96,7 +99,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Cogito-Agent API", version="0.5.0-dev", lifespan=lifespan)
+app = FastAPI(title="Cogito-Agent API", version="0.8.0-dev", lifespan=lifespan)
+
+_console_static = Path(__file__).resolve().parent.parent / "console" / "static"
+app.mount("/console/static", StaticFiles(directory=str(_console_static)), name="console_static")
+app.include_router(console_router, prefix="/console")
+app.include_router(status_router, prefix="/api/v1/status")
 
 
 app.add_middleware(

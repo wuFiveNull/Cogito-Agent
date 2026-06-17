@@ -4,7 +4,9 @@
 
 - **Predecessor**: v0.7.0-rc1 (tagged, 755 tests, ruff/mypy clean)
 - **Branch**: master
-- **Nature**: Plan only — no implementation yet
+- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ — interactive chat via htmx send + SSE streaming
+- **802 tests**, ruff clean, mypy clean (82 files)
+- Chat page at `/console/chat`, send at `POST /console/chat/send`, stream at `POST /console/chat/stream`
 
 ## Goal
 
@@ -45,12 +47,15 @@ Deliver a local Console (Web UI) for visibility and management of core Agent cap
 - Last N audit events
 - System status (DB health, provider config)
 
-### 2. Chat (`GET /console/chat`)
+### 2. Chat (`GET /console/chat`) ✅
 
-- Input box with send button
-- Conversation display (streaming SSE from `/chat/stream`)
-- Session selector
-- Workspace selector
+- Input box with send button (htmx non-streaming)
+- SSE streaming endpoint (`POST /console/chat/stream`)
+- Session auto-created (`console-default`), workspace auto-created (`default`)
+- Trace ID / request ID / state displayed after each turn
+- Error banners with redacted messages
+- No session selector (single console session)
+- No workspace selector (single default workspace)
 
 ### 3. Memory Review (`GET /console/memory`)
 

@@ -22,14 +22,26 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - migration v6 for new tables
 - SpanKind.autonomous for autonomy trace spans
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
-- 755 tests passing, ruff clean, mypy clean (78 files)
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
+
+v0.8.0-dev (Console MVP Phase 1–2, current):
+- **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
+- **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
+  - Message area with user/assistant bubbles
+  - Input form with htmx non‑streaming send (`POST /console/chat/send`)
+  - SSE streaming endpoint (`POST /console/chat/stream`)
+  - Trace ID, request ID, state metadata after each turn
+  - HTML escape + redaction on all dynamic content
+  - Error banners (redacted, no stack traces)
+  - AuthMiddleware integration (401 without valid key)
+  - Console‑default session (`console-default`), auto‑created workspace
+  - 802 tests passing, ruff clean, mypy clean (82 source files)
 
 ## Verification Status
 
-- **755 tests passing** (`pytest` clean)
+- **802 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 78 files)
+- **mypy clean** (`mypy src/` clean, 82 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -43,6 +55,33 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - ✅ Phase 6 (Epics M–P): Skill runtime depth, background security, failure/retry, interrupt/resume
 - ✅ Phase 7 (Epics Q–S): Drift maintenance, CLI/API polish, replay
 - ✅ Phase 8 (Autonomy Plane MVP): Notification Gate, Decision Log, Outbox, Proactive Loop, Feedback, CLI, trace/audit integration
+
+## Console Status (v0.8 Phase 1–2)
+
+- ✅ Console module structure (`src/cogito_agent/console/`)
+- ✅ Dashboard at `/console/` with stat cards, system info, quick links
+- ✅ Status API at `/api/v1/status` with counts, DB health, provider info, secrets info
+- ✅ 8 placeholder pages (chat, memory, approval, traces, audit, autonomy, config, doctor)
+- ✅ 404 error page
+- ✅ Auth integration (reuses existing `AuthMiddleware`)
+- ✅ Redaction (reuses `RedactionHelper` from `trace/redaction.py`)
+- ✅ Base layout with sidebar navigation (Jinja2 + htmx)
+- ✅ Minimal CSS (responsive, mobile-aware)
+- ✅ Local `htmx.min.js` (2.0.4, no CDN dependency)
+- ✅ Jinja2 dependency in pyproject.toml
+- ✅ `[tool.setuptools.package-data]` for templates/static files in wheel
+- ✅ 30 new tests for console routes, status API, auth, redaction
+- ✅ Chat page at `/console/chat` — message area, input form, htmx send, SSE streaming endpoint
+- ✅ Chat send (`POST /console/chat/send`) reuses RuntimeKernel, returns HTML partial with user/assistant bubbles + trace metadata
+- ✅ Chat stream (`POST /console/chat/stream`) returns SSE events (metadata/delta/final/error)
+- ✅ HTML escape + redaction on all dynamic content
+- ✅ AuthMiddleware protects chat routes (401 without valid key)
+- ✅ Console‑default session (`console-default`), auto‑created workspace
+- ✅ 17 new tests for chat page, API, streaming, XSS, redaction, auth
+- 🚧 Memory & Approval pages (Phase 3)
+- 🚧 Trace & Audit pages (Phase 4)
+- 🚧 Autonomy pages (Phase 5)
+- 🚧 Config page (Phase 6)
 
 ## V2 Status
 

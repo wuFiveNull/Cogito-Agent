@@ -1,0 +1,25 @@
+<div class="error-banner" id="error-{{ request_id }}">
+  <div class="error-icon">&#9888;</div>
+  <div class="error-body">
+    <div class="error-text">{{ error | e }}</div>
+  </div>
+  <button class="error-close" onclick="this.parentElement.remove()">&times;</button>
+</div>
+
+<form hx-swap-oob="true" id="chat-form"
+      hx-post="/console/chat/send"
+      hx-target="#chat-messages"
+      hx-swap="beforeend"
+      hx-indicator="#chat-spinner"
+      hx-on::before-request="document.getElementById('chat-empty')?.remove()"
+      hx-on::after-request="this.reset(); scrollChat()">
+  <input type="hidden" name="session_id" value="{{ session_id }}">
+  <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+  <textarea name="message" id="chat-input" rows="2" placeholder="Type your message..." required></textarea>
+  <button type="submit" class="btn-send">
+    <span class="btn-label">Send</span>
+    <span id="chat-spinner" class="spinner htmx-indicator"></span>
+  </button>
+</form>
+
+<script>scrollChat();</script>

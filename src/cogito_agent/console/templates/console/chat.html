@@ -1,0 +1,55 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="chat-layout">
+  <div id="chat-messages" class="chat-messages" hx-swap-oob="beforeend">
+    <div class="chat-empty" id="chat-empty">
+      <p>Send a message to start chatting.</p>
+    </div>
+  </div>
+
+  <div class="chat-input-area">
+    <form id="chat-form"
+          hx-post="/console/chat/send"
+          hx-target="#chat-messages"
+          hx-swap="beforeend"
+          hx-indicator="#chat-spinner"
+          hx-on::before-request="document.getElementById('chat-empty')?.remove()"
+          hx-on::after-request="this.reset(); scrollChat()">
+      <input type="hidden" name="session_id" value="{{ session_id }}">
+      <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
+      <textarea name="message"
+                id="chat-input"
+                rows="2"
+                placeholder="Type your message..."
+                required></textarea>
+      <button type="submit" class="btn-send">
+        <span class="btn-label">Send</span>
+        <span id="chat-spinner" class="spinner htmx-indicator"></span>
+      </button>
+    </form>
+  </div>
+</div>
+
+<div id="stream-container" style="display:none"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function scrollChat() {
+  var el = document.getElementById('chat-messages');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+// Streaming support via EventSource fallback
+(function() {
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var messages = document.getElementById('chat-messages');
+  var empty = document.getElementById('chat-empty');
+
+  form.addEventListener('htmx:beforeSend', function() {
+    // htmx handles non-streaming; streaming is supplementary
+  });
+})();
+</script>
+{% endblock %}

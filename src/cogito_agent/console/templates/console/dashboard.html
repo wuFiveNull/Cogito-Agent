@@ -1,0 +1,60 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.memories }}</div>
+    <div class="stat-label">Memories</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.memory_candidates_pending }}</div>
+    <div class="stat-label">Pending Candidates</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.approvals_pending }}</div>
+    <div class="stat-label">Pending Approvals</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.autonomy_outbox_pending }}</div>
+    <div class="stat-label">Outbox Pending</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.autonomy_decisions_24h }}</div>
+    <div class="stat-label">Decisions (24h)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.audit_events_24h }}</div>
+    <div class="stat-label">Audit Events (24h)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.traces_24h }}</div>
+    <div class="stat-label">Traces (24h)</div>
+  </div>
+</div>
+
+<h3>System</h3>
+<table class="info-table">
+  <tr><td>DB</td><td>{% if status.db.ok %}<span class="badge-ok">OK</span>{% else %}<span class="badge-err">ERR</span>{% endif %} v{{ status.db.migration_version }}</td></tr>
+  <tr><td>Provider</td><td>{{ status.model.provider }}</td></tr>
+  <tr><td>Streaming</td><td>{% if status.model.streaming_enabled %}enabled{% else %}disabled{% endif %}</td></tr>
+  <tr><td>Timeout</td><td>{{ status.model.timeout_seconds }}s</td></tr>
+  <tr><td>Secrets Backend</td><td>{{ status.secrets.backend }}{% if status.secrets.available %}&nbsp;<span class="badge-ok">available</span>{% endif %}</td></tr>
+</table>
+
+<h3>Quick Links</h3>
+<div class="quick-links">
+  {% for item in menu %}
+  <a href="{{ item.href }}" class="quick-link{% if item.soon %} soon{% endif %}">
+    {{ item.label }}{% if item.soon %} (coming soon){% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{% if limitations %}
+<h3>Limitations</h3>
+<ul class="limitations">
+  {% for lim in limitations %}
+  <li>{{ lim }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

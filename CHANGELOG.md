@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.8.0-dev (2026-06-17)
+
+### Added
+
+- **Console MVP Phase 1**: FastAPI+Jinja2+htmx Web Console at `/console/`
+- **Dashboard**: stat cards (memories, pending approvals, outbox, decisions/audit/traces 24h), system info (DB, provider, secrets), quick links
+- **Status API**: `/api/v1/status` returns JSON with version, DB health, model config, secrets backend, counts, limitations
+- **8 placeholder pages**: Memory, Approvals, Traces, Audit, Autonomy, Config, Doctor — all with "coming soon" message
+- **404 error page**: rendered via Jinja2 template
+- **Auth integration**: `COGITO_API_KEY` Bearer auth protects console routes automatically via existing `AuthMiddleware`
+- **Redaction**: `console/redaction.py` reuses `RedactionHelper` from `trace/redaction.py`
+- **Templates**: base layout with sidebar nav, dashboard, error, placeholder, component partials (`stat_card.html`, `status_badge.html`, `flash_message.html`)
+- **Static files**: `console.css` (responsive, mobile-aware), local `htmx.min.js` (2.0.4, no CDN)
+- **Packaging**: Jinja2 >= 3.1 and python-multipart dependencies, `[tool.setuptools.package-data]` for templates/static in wheel
+- **30 new tests**: console routes, status API JSON fields, auth (no-key/wrong-key/valid-key), redaction
+- **82 source files** (+4 new: `console/__init__.py`, `console/router.py`, `console/status.py`, `console/redaction.py`)
+
+### **Console MVP Phase 2 — Chat MVP**
+
+- **Chat page** at `/console/chat` — message area with user/assistant bubbles, input form with htmx non-streaming send
+- **Chat send API** (`POST /console/chat/send`) — reuses `RuntimeKernel.process()`, returns HTML partial with user message + assistant reply + trace metadata (trace_id, request_id, state)
+- **Chat stream endpoint** (`POST /console/chat/stream`) — SSE streaming via `RuntimeKernel.process_stream()`, consumes `model.streaming_enabled` and `model.max_retries` config
+- **Chat templates**: `chat.html`, `components/chat_message.html`, `components/error_banner.html`
+- **Chat CSS**: message bubbles (user right-aligned blue, assistant left-aligned white), scrollable message area, loading spinner, error banner
+- **Session handling**: auto-creates `console-default` session and `default` workspace on first access; supports custom `session_id` / `workspace_id` via form fields
+- **Error handling**: all errors redacted before display; error banners show without stack traces; 422 on empty messages
+- **Security**: HTML escape via Jinja2 `| e` filter on all user/assistant content, `RedactionHelper` on all dynamic text, AuthMiddleware protects all chat routes
+- **17 new tests**: chat page render, send API, SSE streaming, XSS prevention (script injection), secret redaction, auth enforcement
+
+### Changed
+
+- Agent version to `0.8.0-dev`
+- FastAPI app now mounts console router at `/console/` and status router at `/api/v1/status`
+- Chat menu item no longer shows "soon" badge
+- Removed "chat" from placeholder pages list (now real route)
+
 ## v0.7.0-rc1 (2026-06-17)
 
 ### Added

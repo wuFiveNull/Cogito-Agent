@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cogito-Agent — {{ title }}</title>
+  <link rel="stylesheet" href="/console/static/console.css">
+  <script src="/console/static/htmx.min.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar">
+      <div class="sidebar-header">
+        <h1>Cogito</h1>
+        <span class="version">{{ version }}</span>
+      </div>
+      <ul class="nav-list">
+        {% for item in menu %}
+        <li class="nav-item{% if item.soon %} soon{% endif %}">
+          <a href="{{ item.href }}">
+            <span class="nav-icon">{{ item.icon[:2] }}</span>
+            {{ item.label }}
+            {% if item.soon %}<span class="badge-soon">soon</span>{% endif %}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="sidebar-footer">
+        <span>local-first console</span>
+      </div>
+    </nav>
+    <main class="content">
+      <div class="page-header">
+        <h2>{{ title }}</h2>
+      </div>
+      <div id="flash-container">
+        {% if flash %}
+        {% for msg in flash %}
+        <div class="flash flash-{{ msg.level }}">{{ msg.message }}</div>
+        {% endfor %}
+        {% endif %}
+      </div>
+      <div class="page-body">
+        {% block content %}{% endblock %}
+      </div>
+      <footer class="page-footer">
+        <span>Cogito-Agent {{ version }} &mdash; local-first personal Agent runtime</span>
+      </footer>
+    </main>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
