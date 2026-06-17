@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.0-dev (2026-06-17)
+## v0.8.0 (2026-06-17)
 
 ### **Console MVP Phase 8 — Polish & RC Hardening**
 

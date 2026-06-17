@@ -168,7 +168,7 @@ async def approval_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Approvals",
-        "version": "0.8.0-dev",
+        "version": "0.8.0",
         "stats": stats,
         "status": status,
         "risk": risk,
@@ -203,7 +203,7 @@ async def approval_detail(request: Request, approval_id: str) -> HTMLResponse:
     ctx = {
         "request": request,
         "title": "Approval Detail",
-        "version": "0.8.0-dev",
+        "version": "0.8.0",
         "item": item,
         "menu": _menu_items(),
     }

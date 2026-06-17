@@ -1,6 +1,6 @@
 [project]
 name = "cogito-agent"
-version = "0.8.0-dev"
+version = "0.8.0"
 description = "A local-first personal Agent runtime with memory, governed capabilities, traceable execution, reusable skills, and constrained proactive behavior."
 requires-python = ">=3.12"
 dependencies = [

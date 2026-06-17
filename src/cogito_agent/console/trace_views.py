@@ -178,7 +178,7 @@ async def traces_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Traces",
-        "version": "0.8.0-dev",
+        "version": "0.8.0",
         "stats": stats,
         "status": status,
         "kind": kind,
@@ -242,7 +242,7 @@ async def trace_detail(request: Request, trace_id: str) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Trace Detail",
-        "version": "0.8.0-dev",
+        "version": "0.8.0",
         "trace": trace,
         "tree": tree,
         "spans": raw_spans,

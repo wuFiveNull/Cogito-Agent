@@ -80,7 +80,7 @@ async def chat_page(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Chat",
-        "version": "0.8.0-dev",
+        "version": "0.8.0",
         "session_id": CONSOLE_SESSION_ID,
         "workspace_id": CONSOLE_WORKSPACE_ID,
         "menu": _menu_items(),
