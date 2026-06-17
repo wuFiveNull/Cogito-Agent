@@ -24,7 +24,7 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
-v0.8.0-dev (Console MVP Phase 1–4, current):
+v0.8.0-dev (Console MVP Phase 1–5, current):
 - **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
 - **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
   - Message area with user/assistant bubbles
@@ -52,12 +52,22 @@ v0.8.0-dev (Console MVP Phase 1–4, current):
   - All mutations write audit logs with redacted details
   - Reuses `utils.py` for shared menu items
   - 29 new tests, 859 tests passing, ruff clean, mypy clean (85 source files)
+- **Phase 5 — Trace & Audit MVP**: Trace and Audit management pages at `/console/traces` and `/console/audit` with:
+  - Trace list with status/time/search filters, span counts, durations
+  - Trace detail with span tree (parent/child hierarchy via `parent_span_id`), model/tool calls, related audit events, redacted raw JSON
+  - Audit list with actor/operation/search/time filters, trace_id links
+  - Audit detail with full metadata and redacted details
+  - Chat trace link now points to real trace detail (`/console/traces/{trace_id}`)
+  - Span tree built from `parent_span_id` with expandable/collapsible nodes
+  - All content redacted + HTML escaped; AuthMiddleware protects all routes
+  - Shared modules: `trace_views.py`, `audit_views.py` keep router.py clean
+  - 29 new tests, 886 tests passing, ruff clean, mypy clean (87 source files)
 
 ## Verification Status
 
-- **859 tests passing** (`pytest` clean)
+- **886 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 85 files)
+- **mypy clean** (`mypy src/` clean, 87 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -94,7 +104,7 @@ v0.8.0-dev (Console MVP Phase 1–4, current):
 - ✅ AuthMiddleware protects chat routes (401 without valid key)
 - ✅ Console‑default session (`console-default`), auto‑created workspace
 - ✅ 17 new tests for chat page, API, streaming, XSS, redaction, auth
-- 🚧 Trace & Audit pages (Phase 5)
+- ✅ Trace & Audit pages (Phase 5)
 - 🚧 Autonomy pages (Phase 6)
 - 🚧 Config page (Phase 7)
 

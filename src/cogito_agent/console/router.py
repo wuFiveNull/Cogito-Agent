@@ -11,9 +11,11 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from .approval import approval_router as _approval_router
+from .audit_views import audit_router as _audit_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
 from .status import build_status
+from .trace_views import trace_router as _trace_router
 from .utils import menu_items as _menu_items
 
 logger = logging.getLogger(__name__)
@@ -261,22 +263,21 @@ async def chat_stream_route(
 
 console_router.include_router(_memory_router, prefix="/memory")
 console_router.include_router(_approval_router, prefix="/approval")
+console_router.include_router(_trace_router, prefix="/traces")
+console_router.include_router(_audit_router, prefix="/audit")
 
 
 # ─── Placeholder Pages ──────────────────────────────────────────────────────
 
 
 PLACEHOLDER_PAGES = [
-    "traces", "audit",
     "autonomy", "config", "doctor",
 ]
 
 _PHASE_MAP = {
-    "traces": "5 (Trace)",
-    "audit": "2 (Read-only pages)",
-    "autonomy": "3 (Autonomy pages)",
-    "config": "2 (Read-only pages)",
-    "doctor": "2 (Read-only pages)",
+    "autonomy": "6 (Autonomy pages)",
+    "config": "7 (Config & Doctor)",
+    "doctor": "7 (Config & Doctor)",
 }
 
 

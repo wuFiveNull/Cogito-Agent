@@ -1,0 +1,32 @@
+<li class="trc-tree-node">
+  <div class="trc-node-header" onclick="this.nextElementSibling?.classList.toggle('trc-collapsed')">
+    <span class="trc-node-toggle">{{ "&#9660;" if node.children else "&#9654;" }}</span>
+    <span class="trc-badge trc-badge-{{ (node.status or 'unknown') | e }}">{{ (node.status or "?") | e }}</span>
+    <span class="trc-node-name">{{ (node.name or "") | e }}</span>
+    <span class="trc-node-kind">{{ (node.kind or "") | e }}</span>
+    {% if node._duration_ms is not none %}
+      <span class="trc-node-duration">{{ node._duration_ms }}ms</span>
+    {% endif %}
+  </div>
+  <div class="trc-node-details">
+    <code>{{ (node.id or "") | e }}</code>
+    {% if node.parent_span_id %}
+      &middot; parent: <code>{{ node.parent_span_id | e }}</code>
+    {% endif %}
+    <br>
+    {{ (node.started_at or "") | e }}
+    {% if node.ended_at %} &rarr; {{ node.ended_at | e }}{% endif %}
+    {% if node.error %}
+    <div class="trc-error">{{ node.error | e }}</div>
+    {% endif %}
+  </div>
+  {% if node.children %}
+    <ul class="trc-tree-children trc-collapsed">
+    {% for child in node.children %}
+      {% with node = child %}
+        {% include "console/components/span_node.html" %}
+      {% endwith %}
+    {% endfor %}
+    </ul>
+  {% endif %}
+</li>

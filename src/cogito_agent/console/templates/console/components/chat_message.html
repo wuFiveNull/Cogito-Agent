@@ -13,7 +13,7 @@
       {% if trace_id %}
       <div class="msg-trace">
         Trace: <code>{{ trace_id | e }}</code>
-        &middot; <a href="/console/traces?trace_id={{ trace_id | e }}">View Trace</a>
+        &middot; <a href="/console/traces/{{ trace_id | e }}">View Trace</a>
         &middot; State: {{ state | e }}
       </div>
       {% endif %}

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+{% extends "console/base.html" %}
+{% block content %}
+<div class="trc-header">
+  <div class="trc-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.completed }}</div><div class="stat-label">Completed</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.error }}</div><div class="stat-label">Errors</div></div>
+  </div>
+
+  <form class="trc-filters" method="get" action="/console/traces">
+    <select name="status">
+      <option value="">All Status</option>
+      <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+      <option value="error" {% if status == 'error' %}selected{% endif %}>Error</option>
+      <option value="running" {% if status == 'running' %}selected{% endif %}>Running</option>
+    </select>
+    <select name="time_range">
+      <option value="1h" {% if time_range == '1h' %}selected{% endif %}>Last 1h</option>
+      <option value="24h" {% if time_range == '24h' %}selected{% endif %}>Last 24h</option>
+      <option value="7d" {% if time_range == '7d' %}selected{% endif %}>Last 7d</option>
+      <option value="" {% if time_range == '' %}selected{% endif %}>All time</option>
+    </select>
+    <input type="search" name="q" placeholder="Search trace ID, event ID..." value="{{ q | e }}" class="trc-search">
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/traces" class="btn-clear">Clear</a>
+  </form>
+</div>
+
+<div id="trace-list" class="trc-list">
+  {% for item in items %}
+    <div class="trc-card" id="trc-{{ item.id }}">
+      <div class="trc-card-top">
+        <span class="trc-badge trc-badge-{{ item.status | e }}">{{ item.status | e }}</span>
+        <span class="trc-span-count">{{ item.span_count }} spans</span>
+        {% if item._duration_ms is not none %}
+          <span class="trc-duration">{{ item._duration_ms }}ms</span>
+        {% endif %}
+      </div>
+      <div class="trc-card-meta">
+        <code>{{ item.id | e }}</code>
+        &middot; {{ (item.root_event_id or "") | e }}
+        &middot; {{ (item.started_at or "") | e }}
+      </div>
+      {% if item.ended_at %}
+      <div class="trc-card-meta">Ended {{ (item.ended_at or "") | e }}</div>
+      {% endif %}
+      <div class="trc-card-actions">
+        <a class="btn-action btn-view" href="/console/traces/{{ item.id }}">View</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No traces found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

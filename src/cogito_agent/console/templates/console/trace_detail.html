@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+{% extends "console/base.html" %}
+{% block content %}
+<div class="trc-detail">
+  <p><a href="/console/traces">&larr; Back to Traces</a></p>
+  <h3>Trace Detail</h3>
+
+  <table class="info-table">
+    <tr><td>Trace ID</td><td><code>{{ (trace.id or "") | e }}</code></td></tr>
+    <tr><td>Status</td><td><span class="trc-badge trc-badge-{{ (trace.status or 'unknown') | e }}">{{ (trace.status or "unknown") | e }}</span></td></tr>
+    <tr><td>Workspace</td><td>{{ (trace.workspace_id or "") | e }}</td></tr>
+    <tr><td>Session</td><td>{{ (trace.session_id or "") | e }}</td></tr>
+    <tr><td>Root Event</td><td><code>{{ (trace.root_event_id or "") | e }}</code></td></tr>
+    <tr><td>Started</td><td>{{ (trace.started_at or "") | e }}</td></tr>
+    {% if trace.ended_at %}
+    <tr><td>Ended</td><td>{{ trace.ended_at | e }}</td></tr>
+    {% endif %}
+    <tr><td>Spans</td><td>{{ spans | length }}</td></tr>
+  </table>
+
+  <h4>Span Tree</h4>
+  <div class="trc-tree">
+    {% if tree %}
+      {% include "console/components/span_tree.html" %}
+    {% else %}
+      <p class="empty-state">No spans recorded.</p>
+    {% endif %}
+  </div>
+
+  <h4>Model Calls ({{ model_calls | length }})</h4>
+  {% if model_calls %}
+    <table class="info-table">
+      <tr><th>Provider</th><th>Model</th><th>Tokens</th><th>Latency</th></tr>
+      {% for mc in model_calls %}
+      <tr>
+        <td>{{ (mc.provider or "") | e }}</td>
+        <td>{{ (mc.model or "") | e }}</td>
+        <td>{{ mc.input_token_count }}/{{ mc.output_token_count }}</td>
+        <td>{{ mc.latency_ms }}ms</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty-state">No model calls.</p>
+  {% endif %}
+
+  <h4>Tool Calls ({{ tool_calls | length }})</h4>
+  {% if tool_calls %}
+    <table class="info-table">
+      <tr><th>Capability</th><th>Status</th><th>Latency</th><th>Error</th></tr>
+      {% for tc in tool_calls %}
+      <tr>
+        <td>{{ (tc.capability_name or "") | e }}</td>
+        <td>{{ (tc.status or "") | e }}</td>
+        <td>{{ tc.latency_ms }}ms</td>
+        <td>{% if tc.error %}<span class="trc-error">{{ tc.error | e }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty-state">No tool calls.</p>
+  {% endif %}
+
+  <h4>Related Audit Events ({{ audit_logs | length }})</h4>
+  {% if audit_logs %}
+    <table class="info-table">
+      <tr><th>ID</th><th>Actor</th><th>Action</th><th>Resource</th></tr>
+      {% for al in audit_logs %}
+      <tr>
+        <td><code>{{ (al.id or "") | e }}</code></td>
+        <td>{{ (al.actor_id or "") | e }}</td>
+        <td>{{ (al.action or "") | e }}</td>
+        <td>{{ (al.resource or "") | e }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="empty-state">No audit events.</p>
+  {% endif %}
+
+  <details>
+    <summary style="cursor:pointer;margin-top:1rem;font-weight:600">Raw JSON (redacted)</summary>
+    <pre class="trc-raw">{{ raw_json | e }}</pre>
+  </details>
+</div>
+{% endblock %}

@@ -49,7 +49,7 @@ class TestConsoleDashboard:
 
 
 class TestConsolePlaceholders:
-    @pytest.mark.parametrize("page", ["traces", "audit", "autonomy", "config", "doctor"])
+    @pytest.mark.parametrize("page", ["autonomy", "config", "doctor"])
     def test_placeholder_pages(self, page: str) -> None:
         resp = client.get(f"/console/{page}")
         assert resp.status_code == 200

@@ -1,0 +1,25 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aud-detail">
+  <p><a href="/console/audit">&larr; Back to Audit</a></p>
+  <h3>Audit Detail</h3>
+
+  <table class="info-table">
+    <tr><td>ID</td><td><code>{{ (item.id or "") | e }}</code></td></tr>
+    <tr><td>Actor</td><td>{{ (item.actor_id or "") | e }}</td></tr>
+    <tr><td>Action</td><td>{{ (item.action or "") | e }}</td></tr>
+    <tr><td>Resource</td><td>{{ (item.resource or "") | e }}</td></tr>
+    <tr><td>Workspace</td><td>{{ (item.workspace_id or "") | e }}</td></tr>
+    <tr><td>Session</td><td>{{ (item.session_id or "") | e }}</td></tr>
+    {% if item.trace_id %}
+    <tr><td>Trace</td><td><a href="/console/traces/{{ item.trace_id | e }}"><code>{{ item.trace_id | e }}</code></a></td></tr>
+    {% endif %}
+    <tr><td>Decision</td><td>{{ (item.decision or "") | e }}</td></tr>
+    <tr><td>Reason</td><td>{{ (item.reason or "") | e }}</td></tr>
+    <tr><td>Created</td><td>{{ (item.created_at or "") | e }}</td></tr>
+  </table>
+
+  <h4>Details</h4>
+  <pre class="aud-details-box">{{ details_redacted | e }}</pre>
+</div>
+{% endblock %}

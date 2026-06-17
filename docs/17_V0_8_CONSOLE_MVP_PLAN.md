@@ -4,11 +4,13 @@
 
 - **Predecessor**: v0.7.0-rc1 (tagged, 755 tests, ruff/mypy clean)
 - **Branch**: master
-- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ + Phase 4 (Approval Queue MVP) ✅ — interactive chat, memory management, approval queue with approve/reject
-- **859 tests**, ruff clean, mypy clean (85 files)
+- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ + Phase 4 (Approval Queue MVP) ✅ + Phase 5 (Trace & Audit MVP) ✅ — interactive chat, memory management, approval queue, trace/audit viewers
+- **886 tests**, ruff clean, mypy clean (87 files)
 - Chat page at `/console/chat`, send at `POST /console/chat/send`, stream at `POST /console/chat/stream`
 - Memory page at `/console/memory`, actions at `/console/memory/candidates/{id}/accept|reject|edit`, `/console/memory/{id}/edit|archive|delete`
 - Approval page at `/console/approval`, actions at `/console/approval/{id}/approve|reject`
+- Trace page at `/console/traces`, detail at `/console/traces/{id}`
+- Audit page at `/console/audit`, detail at `/console/audit/{id}`
 
 ## Goal
 
@@ -227,9 +229,9 @@ templates/
 2. ✅ **Phase 2: Chat** — Chat page with htmx send + SSE streaming integration
 3. ✅ **Phase 3: Memory Review** — Memory review list with accept/reject, edit/archive/delete
 4. ✅ **Phase 4: Approval** — Approval queue with approve/reject
-5. 🚧 **Phase 5: Trace** — Trace list/detail with span tree viewer
+5. ✅ **Phase 5: Trace & Audit** — Trace list/detail with span tree viewer + Audit list/detail with filters and redacted details
 6. 🚧 **Phase 6: Autonomy** — Decisions list/detail, Outbox list, Feedback form
-7. 🚧 **Phase 7: Config & Doctor** — Config viewer, Doctor page, Audit log list/detail
+7. 🚧 **Phase 7: Config & Doctor** — Config viewer, Doctor page
 8. 🚧 **Phase 8: Polish** — Navigation, responsive layout, loading states, error pages
 
 ---
@@ -273,10 +275,10 @@ templates/
 [x] Approval queue shows pending items
 [x] Approval approve works
 [x] Approval reject works
-[ ] Trace list shows traces
-[ ] Trace detail shows span tree
-[ ] Audit list shows entries
-[ ] Audit detail shows redacted details
+[x] Trace list shows traces
+[x] Trace detail shows span tree
+[x] Audit list shows entries
+[x] Audit detail shows redacted details
 [ ] Autonomy decisions list works
 [ ] Autonomy decisions shows cost breakdown
 [ ] Autonomy outbox list works

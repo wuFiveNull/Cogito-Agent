@@ -1,0 +1,46 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="aud-header">
+  <div class="aud-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+  </div>
+
+  <form class="aud-filters" method="get" action="/console/audit">
+    <input type="text" name="actor" placeholder="Actor" value="{{ actor | e }}" class="aud-input">
+    <input type="text" name="operation" placeholder="Operation" value="{{ operation | e }}" class="aud-input">
+    <input type="search" name="q" placeholder="Search actor, action, resource, trace..." value="{{ q | e }}" class="aud-search">
+    <select name="time_range">
+      <option value="">All time</option>
+      <option value="1h" {% if time_range == '1h' %}selected{% endif %}>Last 1h</option>
+      <option value="24h" {% if time_range == '24h' %}selected{% endif %}>Last 24h</option>
+      <option value="7d" {% if time_range == '7d' %}selected{% endif %}>Last 7d</option>
+    </select>
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/audit" class="btn-clear">Clear</a>
+  </form>
+</div>
+
+<div id="audit-list" class="aud-list">
+  {% for item in items %}
+    <div class="aud-card">
+      <div class="aud-card-top">
+        <span class="aud-actor">{{ (item.actor_id or "") | e }}</span>
+        <span class="aud-action">{{ (item.action or "") | e }}</span>
+      </div>
+      <div class="aud-card-resource">{{ (item.resource or "") | e }}</div>
+      <div class="aud-card-meta">
+        <code>{{ (item.id or "") | e }}</code>
+        &middot; {{ (item.created_at or "") | e }}
+        {% if item.trace_id %}
+        &middot; trace: <a href="/console/traces/{{ item.trace_id | e }}">{{ item.trace_id[:16] | e }}...</a>
+        {% endif %}
+      </div>
+      <div class="aud-card-actions">
+        <a class="btn-action btn-view" href="/console/audit/{{ item.id }}">View</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No audit events found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

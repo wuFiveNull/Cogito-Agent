@@ -17,6 +17,22 @@
 - **30 new tests**: console routes, status API JSON fields, auth (no-key/wrong-key/valid-key), redaction
 - **82 source files** (+4 new: `console/__init__.py`, `console/router.py`, `console/status.py`, `console/redaction.py`)
 
+### **Console MVP Phase 5 — Trace & Audit MVP**
+
+- **Trace list** (`GET /console/traces`) — stat cards (total/completed/errors), filter bar (status, time range, search), cards with span count, duration, trace ID
+- **Trace detail** (`GET /console/traces/{id}`) — full metadata table, span tree with expandable/collapsible nodes (parent/child via `parent_span_id`), model calls table, tool calls table, related audit events, redacted raw JSON in collapsible section
+- **Audit list** (`GET /console/audit`) — stat card (total), filter bar (actor, operation, search, time range), cards with actor, action, resource, trace_id link
+- **Audit detail** (`GET /console/audit/{id}`) — full metadata table with trace_id link to trace detail, redacted details JSON
+- **Shared modules**: `trace_views.py`, `audit_views.py` keep `router.py` clean — imports, mounts, and delegates all trace/audit logic
+- **Span tree**: built from `parent_span_id` with recursive tree builder in `_build_span_tree()`, rendered via `span_tree.html` + `span_node.html` recursive templates
+- **Chat trace link**: updated from `/console/traces?trace_id=` to `/console/traces/{trace_id}` — points to real trace detail page
+- **Templates**: `traces.html`, `trace_detail.html`, `span_tree.html`, `span_node.html`, `audit.html`, `audit_detail.html`
+- **Trace/Audit CSS**: stat cards, filter bar, card layout, span tree with expand/collapse, raw JSON dark theme, detail views
+- **Route registration**: both routers mounted before `/{page}` catch-all, "traces" and "audit" removed from placeholder list
+- **Menu items**: "soon" badge removed from Traces and Audit
+- **29 new tests**: trace list (filters, display), trace detail (span tree, 404), trace security (XSS, no stack trace), audit list (filters, display), audit detail (redaction, 404), audit security (XSS, no stack trace), auth (traces + audit), integration (chat trace link)
+- **886 tests total**, ruff clean, mypy clean (87 source files)
+
 ### **Console MVP Phase 4 — Approval Queue MVP**
 
 - **Approval list page** (`GET /console/approval`) — stat cards (total/pending/approved/rejected), filter bar (status/search), cards with approve/reject/view actions

@@ -174,6 +174,88 @@ h3 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
 .mem-success-text { font-size: 0.9rem; margin: 0.3rem 0; }
 .btn-back { display: inline-block; margin-top: 0.5rem; font-size: 0.85rem; }
 
+/* ─── Trace Panel ────────────────────────────────────────────────────── */
+.trc-header { margin-bottom: 1rem; }
+.trc-stats { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.trc-stats .stat-card { flex: 1; min-width: 80px; padding: 0.5rem; }
+.trc-stats .stat-value { font-size: 1.3rem; }
+.trc-stats .stat-label { font-size: 0.65rem; }
+
+.trc-filters { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.trc-filters select, .trc-search { padding: 0.3rem 0.5rem; border: 1px solid #d0d5dd; border-radius: 4px; font-size: 0.8rem; }
+.trc-search { flex: 1; min-width: 120px; }
+
+.trc-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.trc-card {
+  background: #fff; border: 1px solid #e0e4ea; border-radius: 6px;
+  padding: 0.7rem 0.9rem; font-size: 0.85rem;
+}
+.trc-card-top { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.3rem; flex-wrap: wrap; }
+.trc-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; }
+.trc-badge-completed { background: #d1fae5; color: #065f46; }
+.trc-badge-error { background: #fee2e2; color: #991b1b; }
+.trc-badge-running { background: #dbeafe; color: #1e40af; }
+.trc-badge-success { background: #d1fae5; color: #065f46; }
+.trc-badge-unknown { background: #f3f4f6; color: #6b7280; }
+.trc-span-count { font-size: 0.7rem; color: #6b7280; }
+.trc-duration { font-size: 0.7rem; color: #6b7280; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+.trc-card-meta { font-size: 0.7rem; color: #9ca3af; margin-bottom: 0.3rem; }
+.trc-card-meta code { font-size: 0.65rem; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.trc-card-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+.trc-detail { max-width: 900px; }
+.trc-detail h3 { margin-top: 0.5rem; }
+.trc-detail h4 { margin-top: 1.5rem; margin-bottom: 0.3rem; }
+
+.trc-tree { margin: 0.5rem 0; }
+.trc-tree-root { list-style: none; padding-left: 0; }
+.trc-tree-node { margin: 0.2rem 0; }
+.trc-tree-children { list-style: none; padding-left: 1.5rem; border-left: 1px solid #e0e4ea; margin-left: 0.5rem; }
+.trc-collapsed { display: none; }
+.trc-node-header {
+  display: flex; gap: 0.4rem; align-items: center; padding: 0.3rem 0.5rem;
+  border-radius: 4px; cursor: pointer; font-size: 0.85rem;
+}
+.trc-node-header:hover { background: #f0f2f5; }
+.trc-node-toggle { font-size: 0.6rem; color: #9ca3af; width: 10px; }
+.trc-node-name { font-weight: 600; flex: 1; }
+.trc-node-kind { font-size: 0.7rem; color: #6b7280; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+.trc-node-duration { font-size: 0.7rem; color: #6b7280; }
+.trc-node-details { font-size: 0.75rem; color: #9ca3af; padding: 0.2rem 0.5rem 0.3rem; }
+.trc-node-details code { font-size: 0.65rem; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.trc-error { color: #dc2626; font-size: 0.8rem; margin-top: 0.2rem; }
+.trc-raw { background: #1a1a2e; color: #e0e0e0; padding: 0.8rem; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+
+/* ─── Audit Panel ──────────────────────────────────────────────────── */
+.aud-header { margin-bottom: 1rem; }
+.aud-stats { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.aud-stats .stat-card { flex: 1; min-width: 80px; padding: 0.5rem; }
+.aud-stats .stat-value { font-size: 1.3rem; }
+.aud-stats .stat-label { font-size: 0.65rem; }
+
+.aud-filters { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.aud-input, .aud-search, .aud-filters select { padding: 0.3rem 0.5rem; border: 1px solid #d0d5dd; border-radius: 4px; font-size: 0.8rem; }
+.aud-search { flex: 1; min-width: 120px; }
+.aud-input { width: 100px; }
+
+.aud-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.aud-card {
+  background: #fff; border: 1px solid #e0e4ea; border-radius: 6px;
+  padding: 0.7rem 0.9rem; font-size: 0.85rem;
+}
+.aud-card-top { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.2rem; flex-wrap: wrap; }
+.aud-actor { font-weight: 600; font-size: 0.85rem; }
+.aud-action { font-size: 0.7rem; color: #6b7280; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+.aud-card-resource { font-family: monospace; font-size: 0.8rem; color: #1a1a2e; word-break: break-word; margin-bottom: 0.2rem; }
+.aud-card-meta { font-size: 0.7rem; color: #9ca3af; margin-bottom: 0.2rem; }
+.aud-card-meta code { font-size: 0.65rem; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.aud-card-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+.aud-detail { max-width: 900px; }
+.aud-detail h3 { margin-top: 0.5rem; }
+.aud-detail h4 { margin-top: 1.5rem; margin-bottom: 0.3rem; }
+.aud-details-box { background: #f9fafb; border: 1px solid #e0e4ea; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; max-height: 400px; overflow-y: auto; }
+
 /* ─── Approval Panel ──────────────────────────────────────────────────── */
 .apv-header { margin-bottom: 1rem; }
 .apv-stats { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
