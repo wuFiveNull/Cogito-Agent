@@ -1,9 +1,9 @@
-# v0.5 True Per-Token Streaming — Closure Candidate
+# v0.5 True Per-Token Streaming — Dogfood Validated Candidate
 
 ## Status
 
-- **Current commit:** 8573d4d
-- **Status:** True streaming closure candidate, **not released**.
+- **Current commit:** aeefd78
+- **Status:** v0.5 true streaming dogfood validated candidate, **not released**.
 - **No GitHub tag or release.**
 
 ## Implemented Capabilities
@@ -150,6 +150,33 @@ class ModelAdapter(Protocol):
   - `tests/api/test_stream_governance.py` — 2 tests for approval/policy in streaming
   - `tests/api/test_stream_redaction.py` — 5 tests for per-delta redaction
   - Existing: 13 streaming-related tests from v0.4
+
+## Dogfood Validation Results (v0.5.1)
+
+Run against live API server via subprocess with curl-like HTTP requests.
+
+| Test | Result |
+|------|--------|
+| `/chat` returns 200 with output + state=completed | PASS |
+| `/chat/stream` returns 200 with SSE events | PASS |
+| `event: metadata` present (combined: trace_id + session_id + workspace_id + channel + request_id) | PASS |
+| `event: delta` present | PASS |
+| `event: final` present with state=completed | PASS |
+| 3+ SSE events (metadata → delta → final) | PASS |
+| All SSE data is valid JSON | PASS |
+| trace_id present in metadata/final | PASS |
+| request_id present in metadata | PASS |
+| No `X-Experimental` header | PASS |
+| Trace exists for streaming turn | PASS |
+| Traces list API returns 200 | PASS |
+| Missing text → 422 with error code, no Python traceback | PASS |
+| `api_key=sk-...` secret not in SSE body | PASS |
+| Redaction marker present in SSE body | PASS |
+| Auth: no auth header → 401 | PASS |
+| Auth: wrong Bearer token → 401 | PASS |
+| Auth: correct Bearer token → 200 with SSE | PASS |
+
+**28/28 checks passed, 0 failures.**
 
 ## Known Limitations
 

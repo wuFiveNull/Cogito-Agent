@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="Cogito-Agent API", version="0.2.0-alpha", lifespan=lifespan)
+app = FastAPI(title="Cogito-Agent API", version="0.5.0-dev", lifespan=lifespan)
 
 
 app.add_middleware(

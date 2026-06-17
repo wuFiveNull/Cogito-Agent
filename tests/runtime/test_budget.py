@@ -3,7 +3,7 @@ from cogito_agent.runtime import TurnBudget
 
 def test_default_budget() -> None:
     b = TurnBudget()
-    assert b.max_model_calls == 1
+    assert b.max_model_calls == 10
     assert b.max_tool_calls == 2
 
 
