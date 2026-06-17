@@ -1,10 +1,10 @@
 # Release Checklist
 
-## v0.7.x Release Candidate
+## v0.7.0-rc1 Release Candidate
 
 ### Code Quality
 - [x] fresh clone install ok (`pip install -e ".[dev]"`)
-- [x] pytest passes (745 tests)
+- [x] pytest passes (755 tests)
 - [x] ruff check src/ passes
 - [x] mypy src/ passes (78 files)
 
@@ -64,18 +64,20 @@
 
 ### Documentation
 - [x] README.md updated with autonomy CLI commands
-- [x] AGENTS.md updated with v0.7.1-dev state
+- [x] AGENTS.md updated with v0.7.0-rc1 state
 - [x] docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md created
+- [x] CHANGELOG.md created
 - [x] Known limitations documented
 
 ### Release Steps
-- [ ] Update version to v0.7.x in pyproject.toml
-- [ ] Tag commit as v0.7.x
+- [x] pyproject.toml version set to 0.7.0-rc1
+- [x] All checkboxes verified
+- [ ] Tag commit as v0.7.0-rc1
 - [ ] Push tag to origin
 - [ ] Create GitHub Release with changelog
 - [ ] Publish to PyPI (optional)
 
-## Known Limitations (v0.7.x)
+## Known Limitations (v0.7.0-rc1)
 
 - No Web UI / TUI — autonomy only via CLI
 - No Telegram / Feishu real push — outbox is local SQLite queue

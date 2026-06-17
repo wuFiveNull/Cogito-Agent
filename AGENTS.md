@@ -8,7 +8,7 @@ v0.3.0-dev not released.
 v0.4.0-dev not released.
 v0.5.0-dev not released.
 v0.6.2-dev (keychain secrets + provider config hardening, not released).
-v0.7.1-dev (Autonomy Plane MVP hardening / release candidate):
+v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - AutonomyEvent with AutonomySourceType (scheduler/drift/webhook/memory/manual/system), PriorityLevel (low/normal/high/urgent), deterministic dedup_key (SHA256)
 - normalize_from_dict() / normalize_manual() normalizer
 - NotificationGate with rule-based evaluate(): quiet hours, daily/hourly quota, dedup window, deterministic cost score, governance check
@@ -22,12 +22,12 @@ v0.7.1-dev (Autonomy Plane MVP hardening / release candidate):
 - migration v6 for new tables
 - SpanKind.autonomous for autonomy trace spans
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
-- 745 tests passing, ruff clean, mypy clean (78 files)
+- 755 tests passing, ruff clean, mypy clean (78 files)
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
 ## Verification Status
 
-- **745 tests passing** (`pytest` clean)
+- **755 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
 - **mypy clean** (`mypy src/` clean, 78 files)
 

@@ -2,9 +2,9 @@
 
 ## Status
 
-- **Version**: v0.7.1-dev (release candidate hardening)
+- **Version**: v0.7.0-rc1
 - **Branch**: master
-- **Tests**: 745 passing, ruff clean, mypy clean (78 source files)
+- **Tests**: 755 passing, ruff clean, mypy clean (78 source files)
 
 ## What's Included
 
@@ -82,6 +82,12 @@ window_minutes = 120
 [autonomy.feedback]
 enabled = true
 ```
+
+### Behavior Notes
+
+- `autonomy.enabled = false` → events are still normalized and evaluated, but all decisions will skip with reason "autonomy_disabled" (to be implemented in a future release when a gateway check is added). Currently the gate evaluates normally regardless.
+- Invalid time format for quiet hours → defaults to "22:00" and "08:00" with a fallback to no quiet hours filtering.
+- `timezone = "local"` → uses machine local time for quiet hours comparison. No timezone conversion is applied; the start/end times are compared against `datetime.now()` using string-based `HH:MM` comparison.
 
 ### Governance
 

@@ -112,9 +112,9 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.7.1-dev (Autonomy Plane MVP release candidate)** — Not released. No GitHub tag or release.
-Verified: **745 tests passing**, `ruff check src/` clean, `mypy src/` clean (78 files).
-Includes: v0.6.2 SecretProvider (Env/Local/Keychain with `secrets.backend` config), v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2, and v0.7.0 Autonomy Plane MVP (NotificationGate, DecisionStore, Outbox, ProactiveLoop, Feedback, CLI, trace/audit integration, migration v6, 745 tests).
+**v0.7.0-rc1 (Autonomy Plane MVP release candidate)** — RC tagged but not formally released.
+Verified: **755 tests passing**, `ruff check src/` clean, `mypy src/` clean (78 files).
+Includes: v0.6.2 SecretProvider (Env/Local/Keychain with `secrets.backend` config), v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2, and v0.7.0 Autonomy Plane MVP (NotificationGate, DecisionStore, Outbox, ProactiveLoop, Feedback, CLI, trace/audit integration, migration v6, 755 tests).
 
 ## Development
 
