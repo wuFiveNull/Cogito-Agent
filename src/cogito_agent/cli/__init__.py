@@ -555,6 +555,49 @@ def run_cli() -> None:
     provider_test_cmd.add_argument("--live", dest="live", action="store_true",
                                    help="Execute real network request (may incur cost)")
 
+    autonomy_parser = sub.add_parser("autonomy", help="Manage autonomous notifications")
+    autonomy_parser.set_defaults(db_path=None)
+    autonomy_parser.add_argument(
+        "--db", dest="db_path",
+        help="SQLite database path (default: ~/.cogito/cogito.db)",
+    )
+    autonomy_sub = autonomy_parser.add_subparsers(
+        dest="autonomy_action", help="Autonomy command"
+    )
+    autonomy_emit = autonomy_sub.add_parser("emit", help="Emit an autonomy event")
+    autonomy_emit.add_argument("--title", dest="title", required=True, help="Event title")
+    autonomy_emit.add_argument("--body", dest="body", default="", help="Event body")
+    autonomy_emit.add_argument("--source", dest="source", default="cli", help="Source name")
+    autonomy_emit.add_argument("--priority", dest="priority", default="normal",
+                               choices=["low", "normal", "high", "urgent"], help="Priority")
+    autonomy_emit.add_argument("--workspace-id", dest="workspace_id", default="*",
+                               help="Workspace ID")
+    autonomy_emit.add_argument("--category", dest="category", default="", help="Category")
+
+    autonomy_decisions = autonomy_sub.add_parser(
+        "decisions", help="List notification decisions"
+    )
+    autonomy_decisions.add_argument("--workspace-id", dest="workspace_id", default="*",
+                                    help="Workspace ID filter")
+    autonomy_decisions.add_argument("--limit", dest="limit", type=int, default=50,
+                                    help="Max results")
+
+    autonomy_outbox = autonomy_sub.add_parser("outbox", help="List outbox messages")
+    autonomy_outbox.add_argument("--workspace-id", dest="workspace_id", default="*",
+                                 help="Workspace ID filter")
+    autonomy_outbox.add_argument("--limit", dest="limit", type=int, default=50,
+                                 help="Max results")
+
+    autonomy_feedback = autonomy_sub.add_parser("feedback", help="Record feedback")
+    autonomy_feedback.add_argument("decision_id", help="Decision ID")
+    autonomy_feedback.add_argument("--value", dest="value", required=True,
+                                   choices=["useful", "not_useful", "too_many",
+                                            "wrong_time", "irrelevant"],
+                                   help="Feedback value")
+    autonomy_feedback.add_argument("--comment", dest="comment", default="", help="Comment")
+    autonomy_feedback.add_argument("--workspace-id", dest="workspace_id", default="*",
+                                   help="Workspace ID")
+
     args = parser.parse_args()
 
     db_path = getattr(args, "db_path", None) or _default_db_path()
@@ -615,26 +658,51 @@ def run_cli() -> None:
             print(output)
         db.close()
     elif args.command == "daemon":
-        from cogito_agent.autonomy import NotificationGate, ProactiveEngine, SchedulerEngine
+        from cogito_agent.autonomy import (
+            DecisionStore,
+            FeedbackStore,
+            NotificationGate,
+            Outbox,
+            ProactiveLoop,
+            SchedulerEngine,
+        )
+        from cogito_agent.governance import AuditLogger, PolicyEngine
         from cogito_agent.storage import Database as _Db
+        from cogito_agent.trace import Tracer
 
         _db_instance = _Db(db_path)
         _db_instance.initialize()
-        sched = SchedulerEngine(_db_instance)
-        gate = NotificationGate(_db_instance)
-        engine = ProactiveEngine(sched, gate, tick_interval=30.0)
+        _db_instance.migrate()
+        _tracer = Tracer(_db_instance)
+        _audit = AuditLogger(_db_instance)
+        _policy = PolicyEngine()
+        _gate = NotificationGate(_db_instance, policy_engine=_policy, audit_logger=_audit)
+        _sched = SchedulerEngine(
+            _db_instance, tracer=_tracer, audit_logger=_audit,
+            policy_engine=_policy, notification_gate=_gate,
+        )
+        _dstore = DecisionStore(_db_instance)
+        _outbox = Outbox(_db_instance)
+        _fb_store = FeedbackStore(_db_instance, audit_logger=_audit)
+        _loop = ProactiveLoop(
+            scheduler=_sched, notification_gate=_gate,
+            decision_store=_dstore, outbox=_outbox,
+            feedback_store=_fb_store, tracer=_tracer,
+            audit_logger=_audit, policy_engine=_policy,
+            db=_db_instance, tick_interval=30.0,
+        )
 
         if args.daemon_action == "once":
-            results = engine.run_once()
+            results = _loop.run_once()
             if results:
                 for r in results:
                     print(f"  {r}")
             else:
                 print("  No jobs to process.")
         elif args.daemon_action == "run":
-            engine.run()
+            _loop.run()
         elif args.daemon_action == "status":
-            state = ProactiveEngine.load_status(_db_instance)
+            state = ProactiveLoop.load_status(_db_instance)
             print(f"  Daemon state: {state.get('status', 'unknown')}")
             if state.get("started_at"):
                 print(f"  Started: {str(state['started_at'])[:19]}")
@@ -642,7 +710,7 @@ def run_cli() -> None:
                 print(f"  Last heartbeat: {str(state['last_heartbeat'])[:19]}")
             if state.get("crash_marker"):
                 print(f"  Crash marker: {state['crash_marker']}")
-            jobs = sched.list_jobs("*")
+            jobs = _sched.list_jobs("*")
             if not jobs:
                 print("  No scheduled jobs.")
             else:
@@ -1005,6 +1073,36 @@ def run_cli() -> None:
             handler(pv_ns)
         else:
             print("Usage: cogito provider list|show|doctor|test <name>")
+    elif args.command == "autonomy":
+        from .autonomy_cli import (
+            run_autonomy_decisions,
+            run_autonomy_emit,
+            run_autonomy_feedback,
+            run_autonomy_outbox,
+        )
+        auto_ns = argparse.Namespace(
+            db_path=db_path,
+            title=getattr(args, "title", ""),
+            body=getattr(args, "body", ""),
+            source=getattr(args, "source", "cli"),
+            priority=getattr(args, "priority", "normal"),
+            workspace_id=getattr(args, "workspace_id", "*"),
+            category=getattr(args, "category", ""),
+            limit=getattr(args, "limit", 50),
+            decision_id=getattr(args, "decision_id", ""),
+            value=getattr(args, "value", ""),
+            comment=getattr(args, "comment", ""),
+        )
+        if args.autonomy_action == "emit":
+            run_autonomy_emit(auto_ns)
+        elif args.autonomy_action == "decisions":
+            run_autonomy_decisions(auto_ns)
+        elif args.autonomy_action == "outbox":
+            run_autonomy_outbox(auto_ns)
+        elif args.autonomy_action == "feedback":
+            run_autonomy_feedback(auto_ns)
+        else:
+            print("Usage: cogito autonomy emit|decisions|outbox|feedback")
     elif args.command == "skill":
         _run_skill(argparse.Namespace(
             db_path=db_path,

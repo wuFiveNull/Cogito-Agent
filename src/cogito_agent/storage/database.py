@@ -32,6 +32,58 @@ register_migration(4, """
 register_migration(5, """
     ALTER TABLE skill_run_logs ADD COLUMN resume_data_json TEXT;
 """)
+register_migration(6, """
+    CREATE TABLE IF NOT EXISTS notification_decisions (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL DEFAULT '*',
+        user_id TEXT NOT NULL DEFAULT '',
+        action TEXT NOT NULL,
+        reason_code TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        cost_score REAL NOT NULL DEFAULT 0.0,
+        priority_score REAL NOT NULL DEFAULT 0.0,
+        dedup_hit INTEGER NOT NULL DEFAULT 0,
+        quiet_hours_hit INTEGER NOT NULL DEFAULT 0,
+        quota_hit INTEGER NOT NULL DEFAULT 0,
+        requires_approval INTEGER NOT NULL DEFAULT 0,
+        trace_id TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_nd_workspace ON notification_decisions(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_nd_created ON notification_decisions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_nd_event ON notification_decisions(event_id);
+    CREATE TABLE IF NOT EXISTS outbox_messages (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        decision_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL DEFAULT '*',
+        user_id TEXT NOT NULL DEFAULT '',
+        title TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        priority TEXT NOT NULL DEFAULT 'normal',
+        source TEXT NOT NULL DEFAULT 'system',
+        trace_id TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        sent_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_om_workspace ON outbox_messages(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_om_status ON outbox_messages(status);
+    CREATE TABLE IF NOT EXISTS feedback_entries (
+        id TEXT PRIMARY KEY,
+        decision_id TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL DEFAULT '*',
+        user_id TEXT NOT NULL DEFAULT '',
+        value TEXT NOT NULL,
+        comment TEXT NOT NULL DEFAULT '',
+        trace_id TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fe_decision ON feedback_entries(decision_id);
+    CREATE INDEX IF NOT EXISTS idx_fe_workspace ON feedback_entries(workspace_id);
+""")
 
 
 class Database:

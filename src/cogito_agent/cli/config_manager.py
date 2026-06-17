@@ -28,6 +28,17 @@ DEFAULT_CONFIG: dict[str, str] = {
     "secrets.backend": "local",
     "secrets.service_name": "cogito-agent",
     "secrets.local_path": "",
+    "autonomy.enabled": "true",
+    "autonomy.quiet_hours.enabled": "true",
+    "autonomy.quiet_hours.start": "22:00",
+    "autonomy.quiet_hours.end": "08:00",
+    "autonomy.quiet_hours.timezone": "local",
+    "autonomy.notification.daily_quota": "5",
+    "autonomy.notification.hourly_quota": "2",
+    "autonomy.notification.urgent_bypass_quiet_hours": "true",
+    "autonomy.notification.urgent_bypass_quota": "true",
+    "autonomy.dedup.window_minutes": "120",
+    "autonomy.feedback.enabled": "true",
 }
 
 KEYS = tuple(DEFAULT_CONFIG.keys())
