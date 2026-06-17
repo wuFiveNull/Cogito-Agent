@@ -6,22 +6,21 @@ v0.1.0-alpha released.
 v0.2.0-alpha released.
 v0.3.0-dev not released.
 v0.4.0-dev not released.
-v0.5.0-dev (true per-token streaming closure candidate, not released):
-- True per-token streaming via `RuntimeKernel.process_stream()`
-- ModelAdapter Protocol: `supports_streaming`, `stream_chat()`, `StreamGenerator`
-- SSE event types: metadata (combined), delta (per-token), final, error (unified schema), approval_required, tool_call_started, tool_call_completed
-- Delta-level redaction via `RedactionHelper` at the API layer
-- CORS middleware, global exception handler, RequestValidationError handler, RequestIDMiddleware
-- Rate-limit middleware (configurable via `COGITO_RATE_LIMIT_*` env vars)
-- Unified error schema: `{"error": {"code", "message", "request_id", "trace_id", "retryable"}}`
-- MockModel test adapter for true multi-delta streaming tests
-- 631 tests passing, ruff clean, mypy clean (65 files)
+v0.5.0-dev not released.
+v0.6.0-dev (secret/provider hardening candidate, not released):
+- SecretProvider protocol with EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider placeholder
+- SecretValue wrapper: str/repr always show [REDACTED], raw value via .value
+- LocalSecretsProvider: SQLite-based storage with metadata tracking (created/updated/last_used), NOT encrypted
+- `cogito secrets` CLI: list, show, set, delete, rotate, test
+- All secrets CLI mutations write audit logs
+- 652 tests passing, ruff clean, mypy clean (68 files)
+- docs/15_V0_6_SECRET_PROVIDER_PLAN.md created
 
 ## Verification Status
 
-- **631 tests passing** (`pytest` clean)
+- **652 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 65 files)
+- **mypy clean** (`mypy src/` clean, 68 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 

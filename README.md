@@ -59,6 +59,14 @@ cogito schedule maintenance consolidate --daily 03:00 # schedule a task
 cogito inbox list                                     # list inbox items
 cogito inbox read <id>                                # show inbox item detail
 
+# Secrets management (v0.6)
+cogito secrets list                                   # list secrets (metadata only)
+cogito secrets show <name>                            # show secret metadata (never value)
+cogito secrets set <name>                             # set secret (from prompt or --value)
+cogito secrets delete <name>                          # delete a secret (writes audit)
+cogito secrets rotate <name>                          # rotate secret value (writes audit)
+cogito secrets test <name>                            # test secret availability
+
 # API authentication (single-key, optional)
 export COGITO_API_KEY=your-secret-key
 cogito-demo              # start API server with Bearer token auth
@@ -92,9 +100,9 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.5.0-dev (true per-token streaming closure)** — Not released. No GitHub tag or release.
-Verified: **631 tests passing**, `ruff check src/` clean, `mypy src/` clean (65 files).
-True per-token streaming via `RuntimeKernel.process_stream()`. ModelAdapter with `supports_streaming=True` and `stream_chat()` produces per-token delta events. SSE format includes metadata/delta/final/error/approval_required/tool_call_started/tool_call_completed. Delta-level redaction, full trace/replay/audit chain, unified error schema, rate limiting, CORS, request ID propagation, and MockModel test adapter for multi-delta testing.
+**v0.6.0-dev (secret/provider hardening candidate)** — Not released. No GitHub tag or release.
+Verified: **652 tests passing**, `ruff check src/` clean, `mypy src/` clean (68 files).
+SecretProvider protocol (EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider placeholder). SecretValue wrapper with automatic [REDACTED] repr/str. LocalSecretsProvider with SQLite storage and metadata tracking. `cogito secrets` CLI for set/list/show/delete/rotate/test with audit logging.
 
 ## Development
 

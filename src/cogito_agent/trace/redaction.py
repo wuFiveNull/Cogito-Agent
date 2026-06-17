@@ -3,6 +3,13 @@ from __future__ import annotations
 import re
 from typing import Protocol
 
+from cogito_agent.security.secrets import (
+    EnvSecretProvider,
+    KeychainSecretProvider,
+    SecretProvider,
+    SecretValue,
+)
+
 
 class RedactionRule(Protocol):
     def apply(self, text: str) -> str: ...
@@ -17,31 +24,13 @@ class PatternRule:
         return self._pattern.sub(self._replacement, text)
 
 
-class SecretProvider(Protocol):
-    def get_secret(self, key: str) -> str | None: ...
-    def list_keys(self) -> list[str]: ...
-
-
-class EnvSecretProvider:
-    def __init__(self, prefix: str = "COGITO_") -> None:
-        self._prefix = prefix
-
-    def get_secret(self, key: str) -> str | None:
-        import os
-        return os.environ.get(f"{self._prefix}{key}")
-
-    def list_keys(self) -> list[str]:
-        import os
-        return [k for k in os.environ if k.startswith(self._prefix)]
-
-
-class KeychainSecretProvider:
-    """Placeholder for future OS keychain integration."""
-    def get_secret(self, key: str) -> str | None:
-        return None
-
-    def list_keys(self) -> list[str]:
-        return []
+# Re-export for backward compatibility
+__all__ = [
+    "RedactionRule", "PatternRule",
+    "SecretProvider", "SecretValue",
+    "EnvSecretProvider", "KeychainSecretProvider",
+    "RedactionHelper",
+]
 
 
 class RedactionHelper:
@@ -75,9 +64,9 @@ class RedactionHelper:
         """Dynamically add rules from known secrets in environment."""
         for provider in self._secret_providers:
             for key in provider.list_keys():
-                val = provider.get_secret(key)
-                if val and len(val) > 4:
-                    self._rules.append(PatternRule(re.escape(val), "[REDACTED_ENV]"))
+                sv = provider.get_secret(key)
+                if sv is not None and len(sv) > 4:
+                    self._rules.append(PatternRule(re.escape(sv.value), "[REDACTED_ENV]"))
 
     def redact(self, text: str) -> str:
         if not isinstance(text, str):

@@ -515,6 +515,31 @@ def run_cli() -> None:
     mem_merge.add_argument("target_memory_id", help="Target memory ID (receives merged text)")
     mem_sub.add_parser("consolidate", help="Deduplicate memories")
 
+    secrets_parser = sub.add_parser("secrets", help="Manage secrets")
+    secrets_parser.set_defaults(db_path=None)
+    secrets_parser.add_argument(
+        "--db", dest="db_path",
+        help="SQLite database path (default: ~/.cogito/cogito.db)",
+    )
+    secrets_sub = secrets_parser.add_subparsers(dest="secret_action", help="Secret command")
+    secrets_sub.add_parser("list", help="List secrets")
+    secrets_show = secrets_sub.add_parser("show", help="Show secret metadata")
+    secrets_show.add_argument("secret_name", help="Secret name")
+    secrets_show.add_argument("--metadata", dest="show_metadata", action="store_true",
+                              help="Show metadata (created/updated/last_used)")
+    secrets_set = secrets_sub.add_parser("set", help="Set a secret value")
+    secrets_set.add_argument("secret_name", help="Secret name")
+    secrets_set.add_argument("--value", dest="value", default="",
+                             help="Secret value (omit for secure prompt)")
+    secrets_delete = secrets_sub.add_parser("delete", help="Delete a secret")
+    secrets_delete.add_argument("secret_name", help="Secret name")
+    secrets_rotate = secrets_sub.add_parser("rotate", help="Rotate a secret value")
+    secrets_rotate.add_argument("secret_name", help="Secret name")
+    secrets_rotate.add_argument("--value", dest="value", default="",
+                                help="New secret value (omit for secure prompt)")
+    secrets_test = secrets_sub.add_parser("test", help="Test a secret is available")
+    secrets_test.add_argument("secret_name", help="Secret name")
+
     args = parser.parse_args()
 
     db_path = getattr(args, "db_path", None) or _default_db_path()
@@ -919,6 +944,34 @@ def run_cli() -> None:
                 " list|search|review|accept|reject|delete|pin|edit|correct"
                 "|archive|unarchive|unpin|merge|consolidate"
             )
+    elif args.command == "secrets":
+        from .secrets import (
+            _delete_secret,
+            _list_providers,
+            _rotate_secret,
+            _set_secret,
+            _show_secret,
+            _test_secret,
+        )
+        sec_ns = argparse.Namespace(
+            db_path=db_path,
+            secret_name=getattr(args, "secret_name", ""),
+            value=getattr(args, "value", ""),
+            show_metadata=getattr(args, "show_metadata", False),
+        )
+        sec_dispatch = {
+            "list": _list_providers,
+            "show": _show_secret,
+            "set": _set_secret,
+            "delete": _delete_secret,
+            "rotate": _rotate_secret,
+            "test": _test_secret,
+        }
+        handler = sec_dispatch.get(args.secret_action)
+        if handler:
+            handler(sec_ns)
+        else:
+            print("Usage: cogito secrets list|show|set|delete|rotate|test")
     elif args.command == "skill":
         _run_skill(argparse.Namespace(
             db_path=db_path,
