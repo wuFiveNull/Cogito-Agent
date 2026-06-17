@@ -7,25 +7,30 @@ v0.2.0-alpha released.
 v0.3.0-dev not released.
 v0.4.0-dev not released.
 v0.5.0-dev not released.
-v0.6.1-dev (provider hardening closure candidate, not released):
-- SecretProvider protocol with EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider placeholder
+v0.6.2-dev (keychain secrets + provider config hardening, not released):
+- SecretProvider protocol with EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider (real impl: keyring lib or platform fallback)
 - SecretValue wrapper: str/repr always show [REDACTED], raw value via .value
 - LocalSecretsProvider: SQLite-based storage with metadata tracking (created/updated/last_used), NOT encrypted
 - `cogito secrets` CLI: list, show, set, delete, rotate, test (--stdin, --value marked UNSAFE)
-- All secrets CLI mutations write audit logs
-- `model.secret_ref` config key: secret_ref > api_key_env priority, doctor checks secret_ref
-- `build_model_adapter_from_config()` resolves secret_ref from LocalSecretsProvider
-- `cogito provider` CLI: list, show, doctor, test (with --live flag for network)
+- All secrets CLI mutations write audit logs (verified in tests)
+- `secrets.backend` config: env | local | keychain, controls which provider is active
+- `secrets.service_name`, `secrets.local_path` sub-keys
+- `get_provider_from_config()` selects provider by backend config
+- `model.secret_ref` config key: secret_ref > api_key_env priority, doctor checks secret_ref and backend
+- `build_model_adapter_from_config()` resolves secret_ref from provider, passes timeout_sec to get_adapter()
+- `model.timeout_seconds` wired to get_adapter(timeout_sec=...) → OpenAICompatibleAdapter
+- `cogito provider` CLI: list, show, doctor, test (with --live flag with auth header + config timeout)
+- `--live` health check sends Bearer auth and respects model.timeout_seconds
 - Provider error normalization codes (PROVIDER_*)
 - `model.streaming_enabled` enforced: false forces chat() fallback, true uses stream_chat()
 - `model.max_retries` wired to RuntimeKernel._retry_with_backoff() for model calls
 - Real secret availability checks in provider doctor/test
-- 663 tests passing, ruff clean, mypy clean (70 files)
+- 688 tests passing, ruff clean, mypy clean (70 files)
 - docs/15_V0_6_SECRET_PROVIDER_PLAN.md updated
 
 ## Verification Status
 
-- **663 tests passing** (`pytest` clean)
+- **688 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
 - **mypy clean** (`mypy src/` clean, 70 files)
 

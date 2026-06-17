@@ -32,6 +32,7 @@ def get_adapter(
     model: str = "",
     api_key: str = "",
     base_url: str = "",
+    timeout_sec: int = 60,
 ) -> OpenAICompatibleAdapter:
     cfg = _PROVIDERS.get(provider)
     if cfg is None:
@@ -45,6 +46,7 @@ def get_adapter(
         api_key=api_key or cfg.api_key or os.environ.get("MODEL_API_KEY", ""),
         base_url=base_url or cfg.base_url or os.environ.get("MODEL_BASE_URL", "https://api.openai.com/v1"),
         model=model or cfg.default_model or os.environ.get("MODEL_NAME", "gpt-4o-mini"),
+        timeout_sec=timeout_sec,
     )
 
 

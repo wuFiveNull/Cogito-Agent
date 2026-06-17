@@ -233,30 +233,275 @@ class LocalSecretsProvider:
         return f"LocalSecretsProvider(db_path={self._db_path!r})"
 
 
-class KeychainSecretProvider:
-    """Placeholder for future OS keychain integration.
+def _keyring_available() -> bool:
+    """Check if the keyring library is available and usable."""
+    try:
+        import keyring
+        # Attempt a simple get to verify the backend works
+        keyring.get_keyring()
+        return True
+    except Exception:
+        return False
 
-    Currently always returns None.
-    When implemented, this will use:
-    - macOS: Keychain
+
+def _platform_keychain_available() -> bool:
+    """Check if a platform-specific keychain tool is available."""
+    import platform
+    import subprocess
+    system = platform.system()
+    try:
+        if system == "Windows":
+            return bool(os.environ.get("USERNAME"))
+        elif system == "Darwin":
+            subprocess.run(["security", "help"], capture_output=True, timeout=2)
+            return True
+        elif system == "Linux":
+            subprocess.run(["secret-tool", "--help"], capture_output=True, timeout=2)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+class KeychainSecretProvider:
+    """OS keychain-backed secret provider.
+
+    Uses the ``keyring`` library if available, with platform-specific fallbacks:
     - Windows: Credential Manager
-    - Linux: libsecret / GNOME Keyring
+    - macOS: Keychain
+    - Linux: libsecret / GNOME Keyring / Secret Service
+
+    If no keychain backend is available, operations raise ``ProviderError``
+    with code ``SECRET_MISSING`` and a clear message.
     """
 
+    def __init__(self, service_name: str = "cogito-agent") -> None:
+        self._service_name = service_name
+        self._backend = self._detect_backend()
+
+    def _detect_backend(self) -> str:
+        if _keyring_available():
+            return "keyring"
+        if _platform_keychain_available():
+            import platform
+            return f"platform:{platform.system().lower()}"
+        return "unavailable"
+
+    @property
+    def available(self) -> bool:
+        return self._backend != "unavailable"
+
+    def _require_backend(self) -> None:
+        if not self.available:
+            from cogito_agent.models.provider_errors import (
+                ProviderError,
+                ProviderErrorCode,
+            )
+            raise ProviderError(
+                ProviderErrorCode.SECRET_MISSING,
+                "No OS keychain backend available. "
+                "Install keyring: pip install keyring, "
+                "or use LocalSecretsProvider / EnvSecretProvider.",
+            )
+
     def get_secret(self, key: str) -> SecretValue | None:
+        self._require_backend()
+        try:
+            if self._backend == "keyring":
+                import keyring
+                val = keyring.get_password(self._service_name, key)
+                if val is None:
+                    return None
+                return SecretValue(val, name=key)
+            return self._platform_get(key)
+        except Exception:
+            return None
+
+    def _platform_get(self, key: str) -> SecretValue | None:
+        import platform
+        import subprocess
+        system = platform.system()
+        try:
+            if system == "Windows":
+                return self._win_get(key)
+            elif system == "Darwin":
+                result = subprocess.run(
+                    ["security", "find-generic-password",
+                     "-s", self._service_name, "-a", key, "-w"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return SecretValue(result.stdout.strip(), name=key)
+                return None
+            elif system == "Linux":
+                result = subprocess.run(
+                    ["secret-tool", "lookup",
+                     "service", self._service_name, "key", key],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return SecretValue(result.stdout.strip(), name=key)
+                return None
+        except Exception:
+            return None
+        return None
+
+    def _win_get(self, key: str) -> SecretValue | None:
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 f"(Get-StoredCredential -Target '{self._service_name}:{key}').Password"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return SecretValue(result.stdout.strip(), name=key)
+        except Exception:
+            pass
         return None
 
     def list_keys(self) -> list[str]:
+        self._require_backend()
+        try:
+            if self._backend == "keyring":
+                # keyring doesn't natively support listing keys
+                # Return empty - users should know their keys
+                return []
+            return self._platform_list_keys()
+        except Exception:
+            return []
+
+    def _platform_list_keys(self) -> list[str]:
+        import platform
+        import subprocess
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                result = subprocess.run(
+                    ["security", "dump-keychain", "-r"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    keys = []
+                    for line in result.stdout.splitlines():
+                        if f'"svce"<blob>="{self._service_name}.' in line:
+                            key = line.split('=')[1].strip().strip('"')
+                            key = key.replace(f"{self._service_name}.", "")
+                            keys.append(key)
+                    return keys
+                return []
+            elif system == "Linux":
+                # secret-tool doesn't support listing easily
+                return []
+        except Exception:
+            return []
         return []
 
     def set_secret(self, key: str, value: str) -> None:
-        raise NotImplementedError("KeychainSecretProvider not yet implemented")
+        self._require_backend()
+        try:
+            if self._backend == "keyring":
+                import keyring
+                keyring.set_password(self._service_name, key, value)
+                return
+            self._platform_set(key, value)
+        except Exception as exc:
+            from cogito_agent.models.provider_errors import (
+                ProviderError,
+                ProviderErrorCode,
+            )
+            raise ProviderError(
+                ProviderErrorCode.UNKNOWN_ERROR,
+                f"Failed to store secret in keychain: {exc}",
+            ) from exc
+
+    def _platform_set(self, key: str, value: str) -> None:
+        import platform
+        import subprocess
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                subprocess.run(
+                    ["security", "add-generic-password",
+                     "-s", self._service_name, "-a", key, "-w", value, "-U"],
+                    capture_output=True, timeout=5, check=True,
+                )
+            elif system == "Linux":
+                subprocess.run(
+                    ["secret-tool", "store",
+                     "service", self._service_name, "key", key],
+                    input=value.encode(), capture_output=True, timeout=5, check=True,
+                )
+            elif system == "Windows":
+                subprocess.run(
+                    ["powershell", "-Command",
+                     f"$c=New-Object PSCredential '{self._service_name}:{key}',"
+                     f"(ConvertTo-SecureString '{value}' -AsPlainText -Force);"
+                     f"$c | Microsoft.PowerShell.SecretManagement.Set-Secret"],
+                    capture_output=True, timeout=5, check=True,
+                )
+        except Exception as exc:
+            from cogito_agent.models.provider_errors import (
+                ProviderError,
+                ProviderErrorCode,
+            )
+            raise ProviderError(
+                ProviderErrorCode.UNKNOWN_ERROR,
+                f"OS keychain set failed: {exc}",
+            ) from exc
 
     def delete_secret(self, key: str) -> bool:
-        raise NotImplementedError("KeychainSecretProvider not yet implemented")
+        self._require_backend()
+        try:
+            if self._backend == "keyring":
+                import keyring
+                try:
+                    keyring.delete_password(self._service_name, key)
+                    return True
+                except keyring.errors.PasswordDeleteError:
+                    return False
+            return self._platform_delete(key)
+        except Exception:
+            return False
+
+    def _platform_delete(self, key: str) -> bool:
+        import platform
+        import subprocess
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                result = subprocess.run(
+                    ["security", "delete-generic-password",
+                     "-s", self._service_name, "-a", key],
+                    capture_output=True, timeout=5,
+                )
+                return result.returncode == 0
+            elif system == "Linux":
+                result = subprocess.run(
+                    ["secret-tool", "clear",
+                     "service", self._service_name, "key", key],
+                    capture_output=True, timeout=5,
+                )
+                return result.returncode == 0
+            elif system == "Windows":
+                result = subprocess.run(
+                    ["powershell", "-Command",
+                     f"Microsoft.PowerShell.SecretManagement.Remove-Secret"
+                     f" -Name '{self._service_name}:{key}'"],
+                    capture_output=True, timeout=5,
+                )
+                return result.returncode == 0
+        except Exception:
+            pass
+        return False
 
     def rotate_secret(self, key: str, new_value: str) -> bool:
-        raise NotImplementedError("KeychainSecretProvider not yet implemented")
+        try:
+            self.delete_secret(key)
+            self.set_secret(key, new_value)
+            return True
+        except Exception:
+            return False
 
     def __repr__(self) -> str:
-        return "KeychainSecretProvider(placeholder)"
+        return f"KeychainSecretProvider(service={self._service_name!r}, backend={self._backend!r})"

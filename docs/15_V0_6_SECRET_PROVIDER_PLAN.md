@@ -44,11 +44,15 @@ Wraps raw secret strings to prevent accidental leakage:
 
 ### KeychainSecretProvider
 
-- **Placeholder only.** Always returns `None`.
-- Not implemented. When implemented will use:
-  - macOS: Keychain
-  - Windows: Credential Manager
-  - Linux: libsecret / GNOME Keyring
+- **Real implementation** (v0.6.2).
+- Tries `keyring` library first (pip installable).
+- Falls back to platform-specific backends if `keyring` is unavailable:
+  - **Windows:** Credential Manager via `powershell` `SecretManagement` module or native `cmdkey`.
+  - **macOS:** `security` command-line tool.
+  - **Linux:** `secret-tool` (libsecret) command-line tool.
+- `.available` property detects whether any backend works.
+- Raises `ProviderError` with `PROVIDER_SECRET_MISSING` if called when unavailable.
+- Service name configurable via `secrets.service_name` config key (default `cogito-agent`).
 
 ## CLI: `cogito secrets`
 
@@ -156,6 +160,28 @@ The config system supports:
 - Priority: `secret_ref` > `api_key_env`.
 - `cogito export` excludes secret values.
 
+## secrets.backend Config (v0.6.2)
+
+The `secrets.backend` config key controls which `SecretProvider` is used:
+
+| Value | Provider | Description |
+|-------|----------|-------------|
+| `local` (default) | `LocalSecretsProvider` | Plaintext SQLite at `~/.cogito/secrets.db` |
+| `env` | `EnvSecretProvider` | Environment variables prefixed with `COGITO_` |
+| `keychain` | `KeychainSecretProvider` | OS keychain/credential manager |
+
+Additional config keys:
+
+- `secrets.service_name` — service name for keychain (default `cogito-agent`)
+- `secrets.local_path` — custom path for local secrets DB
+
+Resolution in `_resolve_api_key()`:
+
+1. If `model.secret_ref` is set, use `get_provider_from_config()` to select the provider and resolve the secret.
+2. Falls back to `model.api_key_env` (env var name) if `secret_ref` is not set.
+
+`doctor()` now shows the active backend and its status.
+
 ## Redaction Guarantees
 
 The existing `RedactionHelper` (in `trace/redaction.py`) handles:
@@ -187,13 +213,14 @@ All provider errors in `process_stream()`, `_generate_reply()`, and the retry lo
 ## Known Limitations
 
 1. **LocalSecretsProvider is NOT encrypted.** Values are plaintext in SQLite. Not suitable for production without OS-level encryption.
-2. **KeychainSecretProvider is a placeholder.** No real OS keychain integration.
-3. **Provider config timeout/retry not fully wired to adapter.** `config_manager` reads `timeout_seconds` but `OpenAICompatibleAdapter` compatibility is partial. `max_retries` is passed to `RuntimeKernel._retry_with_backoff()` for model calls.
-4. **No provider test for `openai-compatible` with `--live`.** The health check endpoint may differ by provider.
-5. **No encrypted secret store in production.** For real deployment, use env-var-based `EnvSecretProvider` with external secret management.
+2. **KeychainSecretProvider depends on `keyring` or platform tools.** Not available on minimal container images. Falls back gracefully with `.available = False`.
+3. **No encrypted secret store in production.** For real deployment, use `secrets.backend: keychain` or env-var-based `EnvSecretProvider` with external secret management.
+4. **`--live` health check uses basic HTTP.** Some providers may need auth headers for health endpoints; currently uses unauthenticated GET.
 
 ## Next Priorities
 
-1. Implement `KeychainSecretProvider` using OS keychain APIs.
-2. Add per-provider health check endpoints for `--live` tests.
-3. Integrate timeout/retry config into `OpenAICompatibleAdapter` constructor.
+1. ✅ Implement `KeychainSecretProvider` using OS keychain APIs.
+2. ✅ Add `secrets.backend` config to switch between providers.
+3. ✅ Integrate timeout config into `get_adapter()` → `OpenAICompatibleAdapter`.
+4. ⬜ Improve `--live` health check for providers that require auth.
+5. ⬜ Add supplementary tests for CLI audit, export redaction, streaming error redaction.

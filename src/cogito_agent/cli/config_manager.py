@@ -6,7 +6,12 @@ from pathlib import Path
 
 from cogito_agent.models import ModelAdapter, get_adapter, list_providers
 from cogito_agent.models.registry import _PROVIDERS
-from cogito_agent.security import LocalSecretsProvider, SecretProvider
+from cogito_agent.security import (
+    KeychainSecretProvider,
+    LocalSecretsProvider,
+    SecretProvider,
+    get_provider_from_config,
+)
 
 CONFIG_DIR = os.path.expanduser("~/.cogito")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
@@ -20,6 +25,9 @@ DEFAULT_CONFIG: dict[str, str] = {
     "model.timeout_seconds": "60",
     "model.max_retries": "2",
     "model.streaming_enabled": "true",
+    "secrets.backend": "local",
+    "secrets.service_name": "cogito-agent",
+    "secrets.local_path": "",
 }
 
 KEYS = tuple(DEFAULT_CONFIG.keys())
@@ -74,7 +82,7 @@ def _resolve_api_key(cfg: dict[str, str]) -> str:
     secret_ref = cfg.get("model.secret_ref", "")
     if secret_ref:
         try:
-            provider: SecretProvider = LocalSecretsProvider()
+            provider: SecretProvider = get_provider_from_config(cfg)
             sv = provider.get_secret(secret_ref)
             if sv is not None:
                 return sv.value
@@ -98,8 +106,8 @@ def build_model_adapter_from_config(
         model=cfg.get("model.model", ""),
         api_key=api_key,
         base_url=cfg.get("model.base_url", ""),
+        timeout_sec=timeout,
     )
-    adapter.timeout_sec = timeout
     return adapter  # type: ignore[return-value]
 
 
@@ -195,6 +203,37 @@ def doctor() -> list[dict[str, str]]:
                 "check": "api_key_env", "status": "warn",
                 "detail": f"${api_key_env} is not set or empty",
             })
+
+    backend = cfg.get("secrets.backend", "local")
+    if backend == "env":
+        results.append({
+            "check": "secrets_backend", "status": "ok",
+            "detail": "env (EnvSecretProvider)",
+        })
+    elif backend == "keychain":
+        try:
+            svc = cfg.get("secrets.service_name", "cogito-agent")
+            kc = KeychainSecretProvider(service_name=svc)
+            if kc.available:
+                results.append({
+                    "check": "secrets_backend", "status": "ok",
+                    "detail": "keychain (available)",
+                })
+            else:
+                results.append({
+                    "check": "secrets_backend", "status": "warn",
+                    "detail": "keychain (configured but backend unavailable)",
+                })
+        except Exception:
+            results.append({
+                "check": "secrets_backend", "status": "warn",
+                "detail": "keychain (configured but error loading)",
+            })
+    else:
+        results.append({
+            "check": "secrets_backend", "status": "ok",
+            "detail": "local (LocalSecretsProvider, plaintext SQLite)",
+        })
 
     config_file_exists = os.path.isfile(CONFIG_PATH)
     if config_file_exists:

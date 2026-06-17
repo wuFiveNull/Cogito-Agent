@@ -1,7 +1,7 @@
 """cogito provider CLI: list, show, doctor, test."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from cogito_agent.cli.config_manager import _resolve_api_key, get_config
 from cogito_agent.models import list_providers
@@ -156,6 +156,25 @@ def _health_strategy(name: str, base_url: str) -> tuple[str, str | None]:
     return strategies.get(name, (base_url.rstrip("/") + "/models", None))
 
 
+def _live_request(url: str, api_key: str | None, timeout_sec: int) -> int | str:
+    """Execute a live HTTP GET and return status code or error string."""
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(url)
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            return cast(int, resp.status)
+    except urllib.error.HTTPError as e:
+        return e.code
+    except urllib.error.URLError as e:
+        return f"connection_failed: {e.reason}"
+    except TimeoutError:
+        return "timeout"
+
+
 def provider_test(args: Any) -> None:
     """Test a provider's configuration without making real API calls (default).
 
@@ -174,6 +193,7 @@ def provider_test(args: Any) -> None:
 
     cfg = get_config()
     base_url = cfg.get("model.base_url", "")
+    timeout_sec = int(cfg.get("model.timeout_seconds", "60"))
 
     # Check config existence
     if name != cfg.get("model.provider", ""):
@@ -182,6 +202,7 @@ def provider_test(args: Any) -> None:
 
     # Check secret
     requires_secret = name not in ("mock", "ollama")
+    api_key = None
     if requires_secret:
         api_key = _resolve_api_key(cfg)
         if not api_key:
@@ -212,28 +233,23 @@ def provider_test(args: Any) -> None:
 
     if not live:
         print("  [INFO] Skipping network test (use --live to verify connectivity)")
+        print(f"  [INFO] Timeout: {timeout_sec}s")
         return
 
     # Live test
     health_url, _ = _health_strategy(name, base_url)
-    try:
-        import urllib.error
-        import urllib.request
-
-        req = urllib.request.Request(health_url)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            if resp.status < 500:
-                print(f"  [OK]  PROVIDER_REACHABLE: HTTP {resp.status}")
-            else:
-                print(f"  [WARN] PROVIDER_UNREACHABLE: HTTP {resp.status}")
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            print("  [ERR] PROVIDER_AUTH_FAILED: HTTP 401")
-        elif e.code == 404:
-            print("  [INFO] Provider returned 404 (endpoint may differ)")
+    print(f"  [INFO] Testing {health_url} (timeout: {timeout_sec}s)")
+    result = _live_request(health_url, api_key, timeout_sec)
+    if isinstance(result, int):
+        if result == 401:
+            print("  [ERR] PROVIDER_AUTH_FAILED: HTTP 401 (try setting a valid API key)")
+        elif result < 500:
+            print(f"  [OK]  PROVIDER_REACHABLE: HTTP {result}")
         else:
-            print(f"  [ERR] PROVIDER_UNREACHABLE: HTTP {e.code}")
-    except urllib.error.URLError:
-        print("  [ERR] PROVIDER_UNREACHABLE: connection failed")
-    except Exception:
+            print(f"  [WARN] PROVIDER_UNREACHABLE: HTTP {result}")
+    elif result == "timeout":
+        print("  [ERR] PROVIDER_TIMEOUT: connection timed out")
+    elif result.startswith("connection_failed"):
+        print(f"  [ERR] PROVIDER_UNREACHABLE: {result}")
+    else:
         print("  [ERR] PROVIDER_UNKNOWN_ERROR")
