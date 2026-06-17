@@ -6,10 +6,11 @@ from typing import Any, Protocol
 
 
 class SecretValue:
-    """Wraps a secret string with safe repr to prevent accidental leakage.
+    """Wraps a secret string with safe repr/str to prevent accidental leakage.
 
-    The raw value is accessible via .value or str() for API calls,
-    but repr() and str() default to [REDACTED].
+    The raw value is accessible ONLY through .value.
+    Do NOT use str() or repr() to obtain the raw secret — they always
+    return ``[REDACTED]``.
     """
 
     def __init__(self, value: str, name: str = "") -> None:

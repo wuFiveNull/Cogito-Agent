@@ -67,33 +67,57 @@ Wraps raw secret strings to prevent accidental leakage:
 - All mutations (`set`/`delete`/`rotate`) write audit log entries via `AuditLogger`.
 - Output is NOT redacted by `RedactionHelper` since no secret values are ever displayed. (Redaction applied at caller layer as needed.)
 
-## Provider Hardening
+## Provider CLI
 
-Not fully implemented in v0.6.0. The framework is in place:
+### `cogito provider list`
 
-- `EnvSecretProvider` and `LocalSecretsProvider` ready for provider secret storage.
-- Provider doctor CLI planned (`cogito provider doctor`, `cogito provider test`).
-- Secret ref support planned (config `model.secret_ref`).
+Shows all registered providers with type, secret requirement, and configured status.
 
-## Config secret_ref Design
+### `cogito provider show <provider>`
 
-The config system will support:
+Shows provider metadata:
+- Name, configured status, secret requirement, secret availability
+- Default base_url (redacted) and default model
+- Streaming support
+
+### `cogito provider doctor`
+
+Runs the same checks as `cogito doctor` for the current provider, including secret_ref resolution.
+
+### `cogito provider test <provider>`
+
+Tests provider configuration:
+- Checks secret availability (no value shown)
+- Checks base_url configuration
+- With `--live`: executes a real network request to verify reachability
+- **Default: no network request** (use `--live` explicitly, which may incur API costs)
+- Normalizes errors using `PROVIDER_*` codes:
+  - `PROVIDER_NOT_CONFIGURED`, `PROVIDER_SECRET_MISSING`, `PROVIDER_UNREACHABLE`
+  - `PROVIDER_TIMEOUT`, `PROVIDER_RATE_LIMITED`, `PROVIDER_AUTH_FAILED`
+  - `PROVIDER_MODEL_UNAVAILABLE`, `PROVIDER_UNKNOWN_ERROR`
+
+## Config secret_ref (Implemented)
+
+The config system supports:
 
 ```json
 {
   "model.provider": "openai",
   "model.model": "gpt-4o-mini",
   "model.secret_ref": "openai_api_key",
-  "model.timeout_seconds": 60,
-  "model.max_retries": 2,
-  "model.streaming_enabled": true
+  "model.timeout_seconds": "60",
+  "model.max_retries": "2",
+  "model.streaming_enabled": "true"
 }
 ```
 
-- `model.secret_ref` references a key in the SecretProvider (not a direct value).
-- `cogito doctor` resolves `secret_ref` to check availability without revealing the value.
+- `model.secret_ref` references a key in the SecretProvider (via `LocalSecretsProvider`).
+- `build_model_adapter_from_config()` resolves `secret_ref` first, falls back to `api_key_env`.
+- `cogito doctor` now shows `secret_ref` availability status.
+- `cogito config set model.secret_ref <name>` fully supported.
 - Legacy `model.api_key_env` env-var-based config still works as fallback.
-- `cogito export` excludes secret values; may include `secret_ref` metadata (redacted by default).
+- Priority: `secret_ref` > `api_key_env`.
+- `cogito export` excludes secret values.
 
 ## Redaction Guarantees
 
@@ -113,15 +137,13 @@ The `SecretValue` class adds a **second layer** of protection: if any code path 
 
 1. **LocalSecretsProvider is NOT encrypted.** Values are plaintext in SQLite. Not suitable for production without OS-level encryption.
 2. **KeychainSecretProvider is a placeholder.** No real OS keychain integration.
-3. **Provider doctor CLI not implemented.** `cogito provider doctor` and `cogito provider test` are not yet available.
-4. **Config `secret_ref` not implemented.** The config system still uses env-var-based API key loading. Migration path is designed but not coded.
-5. **Provider timeout/retry config not unified.** The `OpenAICompatibleAdapter` has `timeout_sec` but no retry config from settings.
-6. **No `cogito config set model.secret_ref` support.** Secret ref is described in design docs only.
+3. **Provider config timeout/retry not fully wired.** `config_manager` reads `timeout_seconds` but `OpenAICompatibleAdapter` compatibility is partial.
+4. **`model.streaming_enabled` config flag exists but not enforced.** The ModelAdapter `supports_streaming` attribute is checked at runtime, but the config flag is not yet read.
+5. **No provider test for `openai-compatible` with `--live`.** The health check endpoint may differ by provider.
 
 ## Next Priorities
 
-1. Implement `cogito provider doctor` and `cogito provider test` CLIs.
-2. Wire `model.secret_ref` in config manager → adapter initialization.
-3. Add `cogito config set model.secret_ref` support.
-4. Integrate timeout/retry/streaming flags from config to provider adapters.
-5. Implement `KeychainSecretProvider` using OS keychain APIs.
+1. Wire `streaming_enabled` config flag into adapter selection.
+2. Integrate `max_retries` into adapter retry logic.
+3. Implement `KeychainSecretProvider` using OS keychain APIs.
+4. Add per-provider health check endpoints for `--live` tests.

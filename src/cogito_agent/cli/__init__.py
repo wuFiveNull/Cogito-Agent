@@ -529,16 +529,31 @@ def run_cli() -> None:
                               help="Show metadata (created/updated/last_used)")
     secrets_set = secrets_sub.add_parser("set", help="Set a secret value")
     secrets_set.add_argument("secret_name", help="Secret name")
+    secrets_set.add_argument("--stdin", dest="stdin", action="store_true",
+                             help="Read secret from stdin (pipe)")
     secrets_set.add_argument("--value", dest="value", default="",
-                             help="Secret value (omit for secure prompt)")
+                             help="[UNSAFE] Secret as CLI argument (visible in process list)")
     secrets_delete = secrets_sub.add_parser("delete", help="Delete a secret")
     secrets_delete.add_argument("secret_name", help="Secret name")
     secrets_rotate = secrets_sub.add_parser("rotate", help="Rotate a secret value")
     secrets_rotate.add_argument("secret_name", help="Secret name")
+    secrets_rotate.add_argument("--stdin", dest="stdin", action="store_true",
+                                help="Read secret from stdin (pipe)")
     secrets_rotate.add_argument("--value", dest="value", default="",
-                                help="New secret value (omit for secure prompt)")
+                                help="[UNSAFE] Secret as CLI argument (visible in process list)")
     secrets_test = secrets_sub.add_parser("test", help="Test a secret is available")
     secrets_test.add_argument("secret_name", help="Secret name")
+
+    provider_parser = sub.add_parser("provider", help="Manage model providers")
+    provider_sub = provider_parser.add_subparsers(dest="provider_action", help="Provider command")
+    provider_sub.add_parser("list", help="List registered providers")
+    provider_show_cmd = provider_sub.add_parser("show", help="Show provider details")
+    provider_show_cmd.add_argument("provider_name", help="Provider name")
+    provider_sub.add_parser("doctor", help="Check current provider configuration")
+    provider_test_cmd = provider_sub.add_parser("test", help="Test provider configuration")
+    provider_test_cmd.add_argument("provider_name", help="Provider name")
+    provider_test_cmd.add_argument("--live", dest="live", action="store_true",
+                                   help="Execute real network request (may incur cost)")
 
     args = parser.parse_args()
 
@@ -957,6 +972,7 @@ def run_cli() -> None:
             db_path=db_path,
             secret_name=getattr(args, "secret_name", ""),
             value=getattr(args, "value", ""),
+            stdin=getattr(args, "stdin", False),
             show_metadata=getattr(args, "show_metadata", False),
         )
         sec_dispatch = {
@@ -972,6 +988,23 @@ def run_cli() -> None:
             handler(sec_ns)
         else:
             print("Usage: cogito secrets list|show|set|delete|rotate|test")
+    elif args.command == "provider":
+        from .provider_cli import provider_doctor, provider_list, provider_show, provider_test
+        pv_ns = argparse.Namespace(
+            provider_name=getattr(args, "provider_name", ""),
+            live=getattr(args, "live", False),
+        )
+        pv_dispatch = {
+            "list": provider_list,
+            "show": provider_show,
+            "doctor": provider_doctor,
+            "test": provider_test,
+        }
+        handler = pv_dispatch.get(args.provider_action)
+        if handler:
+            handler(pv_ns)
+        else:
+            print("Usage: cogito provider list|show|doctor|test <name>")
     elif args.command == "skill":
         _run_skill(argparse.Namespace(
             db_path=db_path,

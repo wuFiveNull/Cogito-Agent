@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import getpass
+import sys
 from typing import Any
 
 from cogito_agent.governance.audit import AuditLogger
@@ -89,14 +90,22 @@ def _audit_log(db_path: str, action: str, key: str) -> None:
         pass
 
 
+def _read_secret_value(key: str, ns: Any) -> str:
+    if hasattr(ns, "stdin") and ns.stdin:
+        return sys.stdin.read().strip()
+    try:
+        if ns.value:
+            return str(ns.value)
+    except AttributeError:
+        pass
+    return getpass.getpass(f"  Enter secret value for '{key}': ")
+
+
 def _set_secret(args: Any) -> None:
     ns = args
     provider = _get_provider(ns.db_path)
     key = ns.secret_name
-    if ns.value:
-        value = ns.value
-    else:
-        value = getpass.getpass(f"  Enter secret value for '{key}': ")
+    value = _read_secret_value(key, ns)
     provider.set_secret(key, value)
     _audit_log(ns.db_path, "secret.set", key)
     print(f"  Secret '{key}' set.")
@@ -117,10 +126,7 @@ def _rotate_secret(args: Any) -> None:
     ns = args
     provider = _get_provider(ns.db_path)
     key = ns.secret_name
-    if ns.value:
-        new_value = ns.value
-    else:
-        new_value = getpass.getpass(f"  Enter new secret value for '{key}': ")
+    new_value = _read_secret_value(key, ns)
     if provider.rotate_secret(key, new_value):
         _audit_log(ns.db_path, "secret.rotate", key)
         print(f"  Secret '{key}' rotated.")

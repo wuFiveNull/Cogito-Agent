@@ -59,6 +59,12 @@ cogito schedule maintenance consolidate --daily 03:00 # schedule a task
 cogito inbox list                                     # list inbox items
 cogito inbox read <id>                                # show inbox item detail
 
+# Provider management (v0.6)
+cogito provider list                                  # list registered providers
+cogito provider show <name>                           # show provider details
+cogito provider doctor                                # check current provider config
+cogito provider test <name>                           # test provider (add --live for network)
+
 # Secrets management (v0.6)
 cogito secrets list                                   # list secrets (metadata only)
 cogito secrets show <name>                            # show secret metadata (never value)
