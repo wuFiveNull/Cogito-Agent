@@ -1,10 +1,9 @@
 """cogito provider CLI: list, show, doctor, test."""
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from cogito_agent.cli.config_manager import get_config
+from cogito_agent.cli.config_manager import _resolve_api_key, get_config
 from cogito_agent.models import list_providers
 from cogito_agent.models.registry import _PROVIDERS
 from cogito_agent.trace.redaction import RedactionHelper
@@ -25,17 +24,23 @@ def _redact(s: str) -> str:
     return RedactionHelper().redact(s)
 
 
+def _check_secret_available() -> bool:
+    """Real check: try to resolve API key from secret_ref or api_key_env."""
+    cfg = get_config()
+    key = _resolve_api_key(cfg)
+    return bool(key)
+
+
 def _get_provider_info(name: str) -> dict[str, Any]:
     """Return info dict for a provider by name."""
     cfg: Any = _PROVIDERS.get(name, {})
     config_data = get_config()
-    secret_ref = config_data.get("model.secret_ref", "")
-    has_secret = bool(secret_ref) or bool(os.environ.get("MODEL_API_KEY", ""))
     return {
         "name": name,
         "configured": name == config_data.get("model.provider", ""),
         "requires_secret": name not in ("mock", "ollama"),
-        "secret_available": has_secret,
+        "secret_available": _check_secret_available() if name not in ("mock",) else True,
+        "secret_ref": config_data.get("model.secret_ref", ""),
         "base_url": getattr(cfg, "base_url", "") if hasattr(cfg, "base_url") else "",
         "default_model": getattr(cfg, "default_model", "") if hasattr(cfg, "default_model") else "",
     }
@@ -81,12 +86,74 @@ def provider_doctor(args: Any) -> None:
     """Check current provider configuration."""
     from cogito_agent.cli.config_manager import doctor as run_doctor
 
+    cfg = get_config()
+    provider = cfg.get("model.provider", "mock")
+
+    # Check provider listing
+    providers = list_providers()
+    if provider == "mock":
+        print("  [OK]  provider: mock (no API needed)")
+    elif provider in providers:
+        print(f"  [OK]  provider: '{provider}' registered")
+    else:
+        print(f"  [WARN] provider: '{provider}' not in known list ({', '.join(sorted(providers))})")
+
+    # Check secret availability
+    if provider not in ("mock",):
+        if _check_secret_available():
+            sr = cfg.get("model.secret_ref", "")
+            if sr:
+                print(f"  [OK]  secret_ref: '{sr}' available")
+            else:
+                print("  [OK]  api_key_env: set (legacy)")
+        else:
+            sr = cfg.get("model.secret_ref", "")
+            if sr:
+                print(f"  [WARN] secret_ref: '{sr}' configured but NOT available")
+                print(f"         Set: echo -n '<value>' | cogito secrets set {sr}")
+            else:
+                print("  [WARN] api_key_env: not set")
+                print("         Set: cogito config set model.secret_ref <name>")
+                print("         Or:  export MODEL_API_KEY=...")
+
+    # Check streaming config
+    se = cfg.get("model.streaming_enabled", "true")
+    if se.lower() == "true":
+        print("  [OK]  streaming_enabled: true")
+    else:
+        print("  [INFO] streaming_enabled: false (adapter may still support streaming)")
+
+    # Check timeout
+    try:
+        to = int(cfg.get("model.timeout_seconds", "60"))
+        print(f"  [OK]  timeout: {to}s" if to > 0 else f"  [WARN] timeout: {to}s (invalid)")
+    except ValueError:
+        print("  [WARN] timeout_seconds: not a valid integer")
+
+    # Check max_retries
+    try:
+        mr = int(cfg.get("model.max_retries", "2"))
+        print(f"  [OK]  max_retries: {mr}" if mr >= 0 else "  [WARN] max_retries: negative")
+    except ValueError:
+        print("  [WARN] max_retries: not a valid integer")
+
+    # Delegate to base doctor for remaining checks
     checks = run_doctor()
     for c in checks:
         status = c.get("status", "?")
         detail = _redact(c.get("detail", ""))
         tag = {"ok": "OK", "warn": "WARN", "info": "INFO", "error": "ERR"}.get(status, "?")
         print(f"  [{tag}] {c.get('check', '?')}: {detail}")
+
+
+def _health_strategy(name: str, base_url: str) -> tuple[str, str | None]:
+    """Return (health_url, error_if_missing_secret) for a provider."""
+    strategies = {
+        "ollama": (base_url.rstrip("/") + "/api/tags", None),
+        "openai": (base_url.rstrip("/") + "/models", None),
+    }
+    # Generic openai-compatible
+    return strategies.get(name, (base_url.rstrip("/") + "/models", None))
 
 
 def provider_test(args: Any) -> None:
@@ -101,7 +168,8 @@ def provider_test(args: Any) -> None:
     providers = list_providers()
 
     if name not in providers:
-        print(f"  [ERR] Provider '{name}' not found. Known: {', '.join(sorted(providers))}")
+        print(f"  [ERR] PROVIDER_NOT_CONFIGURED: Provider '{name}' not found")
+        print(f"         Known: {', '.join(sorted(providers))}")
         return
 
     cfg = get_config()
@@ -118,8 +186,13 @@ def provider_test(args: Any) -> None:
         api_key = _resolve_api_key(cfg)
         if not api_key:
             print(f"  [ERR] PROVIDER_SECRET_MISSING: No API key found for '{name}'")
-            print("         Set via: cogito config set model.secret_ref <name>")
-            print("         Or set:  export MODEL_API_KEY=...")
+            sr = cfg.get("model.secret_ref", "")
+            if sr:
+                print(f"         Secret ref '{sr}' configured but not resolvable")
+                print(f"         Set: echo -n '<value>' | cogito secrets set {sr}")
+            else:
+                print("         Set via: cogito config set model.secret_ref <name>")
+                print("         Or:  export MODEL_API_KEY=...")
             return
         print("  [OK]  Secret available (not shown)")
 
@@ -127,44 +200,40 @@ def provider_test(args: Any) -> None:
         print("  [OK]  Mock provider (no network needed)")
         return
 
-    # Check base_url
+    # Resolve base_url
     if not base_url:
         pcfg = _PROVIDERS.get(name)
         if pcfg and hasattr(pcfg, "base_url") and pcfg.base_url:
             base_url = pcfg.base_url
-            print(f"  [OK]  Using default base_url: {_redact(base_url)}")
+            print("  [OK]  Using default base_url")
         else:
             base_url = "https://api.openai.com/v1"
-            print(f"  [INFO] Using default base_url: {_redact(base_url)}")
+            print("  [INFO] Using default base_url (https://api.openai.com/v1)")
 
     if not live:
         print("  [INFO] Skipping network test (use --live to verify connectivity)")
         return
 
     # Live test
+    health_url, _ = _health_strategy(name, base_url)
     try:
         import urllib.error
         import urllib.request
 
-        if name == "ollama":
-            test_url = base_url.rstrip("/") + "/api/tags"
-        else:
-            test_url = base_url.rstrip("/") + "/models"
-
-        req = urllib.request.Request(test_url)
+        req = urllib.request.Request(health_url)
         with urllib.request.urlopen(req, timeout=5) as resp:
             if resp.status < 500:
-                print(f"  [OK]  Provider reachable at {_redact(base_url)} (HTTP {resp.status})")
+                print(f"  [OK]  PROVIDER_REACHABLE: HTTP {resp.status}")
             else:
-                print(f"  [WARN] Provider returned HTTP {resp.status}")
+                print(f"  [WARN] PROVIDER_UNREACHABLE: HTTP {resp.status}")
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            print(f"  [ERR] PROVIDER_AUTH_FAILED: HTTP 401 at {_redact(base_url)}")
+            print("  [ERR] PROVIDER_AUTH_FAILED: HTTP 401")
         elif e.code == 404:
-            print(f"  [INFO] Provider at {_redact(base_url)} returned 404 (may need specific path)")
+            print("  [INFO] Provider returned 404 (endpoint may differ)")
         else:
-            print(f"  [ERR] PROVIDER_UNREACHABLE: HTTP {e.code} at {_redact(base_url)}")
-    except urllib.error.URLError as e:
-        print(f"  [ERR] PROVIDER_UNREACHABLE: {e.reason} at {_redact(base_url)}")
-    except Exception as e:
-        print(f"  [ERR] PROVIDER_UNKNOWN_ERROR: {_redact(str(e))}")
+            print(f"  [ERR] PROVIDER_UNREACHABLE: HTTP {e.code}")
+    except urllib.error.URLError:
+        print("  [ERR] PROVIDER_UNREACHABLE: connection failed")
+    except Exception:
+        print("  [ERR] PROVIDER_UNKNOWN_ERROR")

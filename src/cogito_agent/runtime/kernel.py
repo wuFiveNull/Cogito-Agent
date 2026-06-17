@@ -234,6 +234,8 @@ class RuntimeKernel:
     def _stream_generate_reply(
         self, event: RuntimeEvent, message: str,
         trace: object, span: object,
+        streaming_enabled: bool = True,
+        max_retries: int = 2,
     ) -> Generator[StreamEvent, None, ModelResponse]:
         """Yield delta events for each token, return the final ModelResponse."""
         if not message.strip():
@@ -247,7 +249,8 @@ class RuntimeKernel:
         call_start = datetime.now(UTC)
 
         echo = f"You said: {message}" if self._model_adapter is None else ""
-        gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo)
+        gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
+                              streaming_enabled=streaming_enabled)
         for chunk in gen:
             yield StreamEvent(
                 type=StreamEventType.delta,
@@ -302,6 +305,8 @@ class RuntimeKernel:
 
     def process_stream(
         self, event: RuntimeEvent, request_id: str = "",
+        streaming_enabled: bool = True,
+        max_retries: int = 2,
     ) -> Generator[StreamEvent, None, None]:
         """Full-turn streaming: yields StreamEvent objects.
 
@@ -360,7 +365,11 @@ class RuntimeKernel:
             text = str(raw_text) if raw_text is not None else ""
 
             # Stream delta events during model inference
-            delta_gen = self._stream_generate_reply(event, text, trace, span)
+            delta_gen = self._stream_generate_reply(
+                event, text, trace, span,
+                streaming_enabled=streaming_enabled,
+                max_retries=max_retries,
+            )
             try:
                 while True:
                     ev = next(delta_gen)
@@ -606,6 +615,7 @@ class RuntimeKernel:
     def _generate_reply(
         self, event: RuntimeEvent, message: str,
         trace: object, span: object,
+        max_retries: int = 2,
     ) -> ModelResponse:
         if not message.strip():
             return ModelResponse(content="I didn't receive any message.")
@@ -615,6 +625,7 @@ class RuntimeKernel:
         call_start = datetime.now(UTC)
         resp: ModelResponse = self._retry_with_backoff(
             lambda: self._model_adapter.chat(msgs),
+            max_retries=max_retries,
         )
         latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
         self._model_call_count += 1

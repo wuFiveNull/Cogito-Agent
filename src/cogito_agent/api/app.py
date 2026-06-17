@@ -425,7 +425,15 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
     def event_stream() -> Generator[str, None, None]:
         rid = request.state.request_id
         try:
-            for sev in kernel.process_stream(event, request_id=rid):
+            from cogito_agent.cli.config_manager import get_config
+            cfg = get_config()
+            streaming_enabled = cfg.get("model.streaming_enabled", "true").lower() == "true"
+            max_retries = int(cfg.get("model.max_retries", "2"))
+            for sev in kernel.process_stream(
+                event, request_id=rid,
+                streaming_enabled=streaming_enabled,
+                max_retries=max_retries,
+            ):
                 if sev.type == StreamEventType.delta:
                     if "delta" in sev.data:
                         sev.data["delta"] = redactor.redact(str(sev.data["delta"]))

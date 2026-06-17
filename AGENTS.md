@@ -17,6 +17,9 @@ v0.6.0-dev (secret/provider hardening candidate, not released):
 - `build_model_adapter_from_config()` resolves secret_ref from LocalSecretsProvider
 - `cogito provider` CLI: list, show, doctor, test (with --live flag for network)
 - Provider error normalization codes (PROVIDER_*)
+- `model.streaming_enabled` enforced: false forces chat() fallback, true uses stream_chat()
+- `model.max_retries` wired to RuntimeKernel._retry_with_backoff() for model calls
+- Real secret availability checks in provider doctor/test
 - 652 tests passing, ruff clean, mypy clean (69 files)
 - docs/15_V0_6_SECRET_PROVIDER_PLAN.md updated
 

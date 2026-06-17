@@ -67,6 +67,29 @@ Wraps raw secret strings to prevent accidental leakage:
 - All mutations (`set`/`delete`/`rotate`) write audit log entries via `AuditLogger`.
 - Output is NOT redacted by `RedactionHelper` since no secret values are ever displayed. (Redaction applied at caller layer as needed.)
 
+## Streaming Config Enforcement
+
+`model.streaming_enabled` (default `"true"`) now controls whether `StreamGenerator` uses `stream_chat()`:
+
+| streaming_enabled | adapter.supports_streaming | Behavior |
+|---|---|---|
+| `true` | `True` | Per-token delta events via `stream_chat()` |
+| `true` | `False` | Single delta via `chat()` fallback |
+| `false` | `True` | Forces `chat()` fallback (no streaming) |
+| `false` | `False` | Single delta via `chat()` (no change) |
+
+The flag is read per-request in the API `chat_stream` endpoint and passed through `process_stream()` → `_stream_generate_reply()` → `StreamGenerator`.
+
+## Max Retries Config
+
+`model.max_retries` (default `"2"`) controls the number of retry attempts for model calls:
+
+- Read from config per-request in the API streaming endpoint.
+- Passed to `_stream_generate_reply()` and `StreamGenerator`.
+- Non-stream `/chat` also uses `_retry_with_backoff()` with configurable max_retries.
+- Exponential backoff (2^attempt * 0.5s base).
+- The existing `RuntimeKernel._retry_with_backoff()` is used for both model calls and tool dispatch.
+
 ## Provider CLI
 
 ### `cogito provider list`
@@ -137,13 +160,12 @@ The `SecretValue` class adds a **second layer** of protection: if any code path 
 
 1. **LocalSecretsProvider is NOT encrypted.** Values are plaintext in SQLite. Not suitable for production without OS-level encryption.
 2. **KeychainSecretProvider is a placeholder.** No real OS keychain integration.
-3. **Provider config timeout/retry not fully wired.** `config_manager` reads `timeout_seconds` but `OpenAICompatibleAdapter` compatibility is partial.
-4. **`model.streaming_enabled` config flag exists but not enforced.** The ModelAdapter `supports_streaming` attribute is checked at runtime, but the config flag is not yet read.
-5. **No provider test for `openai-compatible` with `--live`.** The health check endpoint may differ by provider.
+3. **Provider config timeout/retry not fully wired to adapter.** `config_manager` reads `timeout_seconds` but `OpenAICompatibleAdapter` compatibility is partial. `max_retries` is passed to `RuntimeKernel._retry_with_backoff()` for model calls.
+4. **No provider test for `openai-compatible` with `--live`.** The health check endpoint may differ by provider.
+5. **No encrypted secret store in production.** For real deployment, use env-var-based `EnvSecretProvider` with external secret management.
 
 ## Next Priorities
 
-1. Wire `streaming_enabled` config flag into adapter selection.
-2. Integrate `max_retries` into adapter retry logic.
-3. Implement `KeychainSecretProvider` using OS keychain APIs.
-4. Add per-provider health check endpoints for `--live` tests.
+1. Implement `KeychainSecretProvider` using OS keychain APIs.
+2. Add per-provider health check endpoints for `--live` tests.
+3. Integrate timeout/retry config into `OpenAICompatibleAdapter` constructor.

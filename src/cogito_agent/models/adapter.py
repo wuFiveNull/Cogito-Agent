@@ -39,10 +39,12 @@ class StreamGenerator:
         adapter: ModelAdapter | None,
         messages: list[dict[str, str]],
         echo_text: str = "",
+        streaming_enabled: bool = True,
     ) -> None:
         self._adapter = adapter
         self._messages = messages
         self._echo_text = echo_text
+        self._streaming_enabled = streaming_enabled
         self.response: ModelResponse | None = None
 
     def __iter__(self) -> Iterator[str]:
@@ -52,7 +54,7 @@ class StreamGenerator:
             self.response = ModelResponse(content=self._echo_text)
             return
         supports = getattr(self._adapter, "supports_streaming", None)
-        if supports is True:
+        if supports is True and self._streaming_enabled:
             collected: list[str] = []
             for chunk in self._adapter.stream_chat(self._messages):
                 collected.append(chunk)
