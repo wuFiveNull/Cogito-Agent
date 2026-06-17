@@ -24,7 +24,7 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
-v0.8.0-dev (Console MVP Phase 1–3, current):
+v0.8.0-dev (Console MVP Phase 1–4, current):
 - **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
 - **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
   - Message area with user/assistant bubbles
@@ -44,12 +44,20 @@ v0.8.0-dev (Console MVP Phase 1–3, current):
   - All mutations write audit logs with redacted details
   - Shared `utils.py` with `menu_items()` to avoid circular imports
   - 30 new tests, 831 tests passing, ruff clean, mypy clean (84 source files)
+- **Phase 4 — Approval Queue MVP**: Approval management page at `/console/approval` with:
+  - List page with stats (total/pending/approved/rejected), filter bar (status/search)
+  - Detail page with full metadata, approve/reject forms
+  - Approve/reject via `ApprovalRepository.resolve()` (idempotent)
+  - Double-process detection with clear error messages
+  - All mutations write audit logs with redacted details
+  - Reuses `utils.py` for shared menu items
+  - 29 new tests, 859 tests passing, ruff clean, mypy clean (85 source files)
 
 ## Verification Status
 
-- **831 tests passing** (`pytest` clean)
+- **859 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 84 files)
+- **mypy clean** (`mypy src/` clean, 85 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -86,10 +94,9 @@ v0.8.0-dev (Console MVP Phase 1–3, current):
 - ✅ AuthMiddleware protects chat routes (401 without valid key)
 - ✅ Console‑default session (`console-default`), auto‑created workspace
 - ✅ 17 new tests for chat page, API, streaming, XSS, redaction, auth
-- 🚧 Memory & Approval pages (Phase 3)
-- 🚧 Trace & Audit pages (Phase 4)
-- 🚧 Autonomy pages (Phase 5)
-- 🚧 Config page (Phase 6)
+- 🚧 Trace & Audit pages (Phase 5)
+- 🚧 Autonomy pages (Phase 6)
+- 🚧 Config page (Phase 7)
 
 ## V2 Status
 

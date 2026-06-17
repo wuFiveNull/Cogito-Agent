@@ -4,10 +4,11 @@
 
 - **Predecessor**: v0.7.0-rc1 (tagged, 755 tests, ruff/mypy clean)
 - **Branch**: master
-- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ — interactive chat with send + SSE streaming, memory management page with accept/reject/edit/archive/delete
-- **831 tests**, ruff clean, mypy clean (84 files)
+- **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ + Phase 4 (Approval Queue MVP) ✅ — interactive chat, memory management, approval queue with approve/reject
+- **859 tests**, ruff clean, mypy clean (85 files)
 - Chat page at `/console/chat`, send at `POST /console/chat/send`, stream at `POST /console/chat/stream`
 - Memory page at `/console/memory`, actions at `/console/memory/candidates/{id}/accept|reject|edit`, `/console/memory/{id}/edit|archive|delete`
+- Approval page at `/console/approval`, actions at `/console/approval/{id}/approve|reject`
 
 ## Goal
 
@@ -225,7 +226,7 @@ templates/
 1. ✅ **Phase 1: Foundation** — FastAPI static file serving + Jinja2 setup, base template, dashboard page, `/api/v1/status` endpoint
 2. ✅ **Phase 2: Chat** — Chat page with htmx send + SSE streaming integration
 3. ✅ **Phase 3: Memory Review** — Memory review list with accept/reject, edit/archive/delete
-4. 🚧 **Phase 4: Approval** — Approval queue with approve/reject
+4. ✅ **Phase 4: Approval** — Approval queue with approve/reject
 5. 🚧 **Phase 5: Trace** — Trace list/detail with span tree viewer
 6. 🚧 **Phase 6: Autonomy** — Decisions list/detail, Outbox list, Feedback form
 7. 🚧 **Phase 7: Config & Doctor** — Config viewer, Doctor page, Audit log list/detail
@@ -269,9 +270,9 @@ templates/
 [x] Memory edit works
 [x] Memory archive works
 [x] Memory delete works
-[ ] Approval queue shows pending items
-[ ] Approval approve works
-[ ] Approval reject works
+[x] Approval queue shows pending items
+[x] Approval approve works
+[x] Approval reject works
 [ ] Trace list shows traces
 [ ] Trace detail shows span tree
 [ ] Audit list shows entries

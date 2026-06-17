@@ -6,7 +6,7 @@ def menu_items() -> list[dict[str, str | bool]]:
         {"label": "Dashboard", "href": "/console/", "icon": "home"},
         {"label": "Chat", "href": "/console/chat", "icon": "chat"},
         {"label": "Memory", "href": "/console/memory", "icon": "memory"},
-        {"label": "Approvals", "href": "/console/approval", "icon": "approval", "soon": True},
+        {"label": "Approvals", "href": "/console/approval", "icon": "approval"},
         {"label": "Traces", "href": "/console/traces", "icon": "trace", "soon": True},
         {"label": "Audit", "href": "/console/audit", "icon": "audit", "soon": True},
         {"label": "Autonomy", "href": "/console/autonomy", "icon": "autonomy", "soon": True},

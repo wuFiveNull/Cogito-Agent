@@ -1,0 +1,60 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="apv-header">
+  <div class="apv-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.pending }}</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.approved }}</div><div class="stat-label">Approved</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.rejected }}</div><div class="stat-label">Rejected</div></div>
+  </div>
+
+  <form class="apv-filters" method="get" action="/console/approval">
+    <select name="status">
+      <option value="">All Status</option>
+      <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="approved" {% if status == 'approved' %}selected{% endif %}>Approved</option>
+      <option value="rejected" {% if status == 'rejected' %}selected{% endif %}>Rejected</option>
+    </select>
+    <input type="search" name="q" placeholder="Search capability, operation, resource..." value="{{ q | e }}" class="apv-search">
+    <button type="submit" class="btn-filter">Filter</button>
+    <a href="/console/approval" class="btn-clear">Clear</a>
+  </form>
+</div>
+
+<div id="approval-list" class="apv-list">
+  {% for item in items %}
+    <div class="apv-card" id="apv-{{ item.id }}">
+      <div class="apv-card-top">
+        <span class="apv-badge apv-badge-{{ item.status | e }}">{{ item.status | e }}</span>
+        <span class="apv-capability">{{ item.capability_name | e }}</span>
+        <span class="apv-operation">{{ item.operation | e }}</span>
+      </div>
+      <div class="apv-card-resource">{{ item.resource | e }}</div>
+      {% if item.reason %}
+      <div class="apv-card-reason">{{ item.reason | e }}</div>
+      {% endif %}
+      <div class="apv-card-meta">
+        <code>{{ item.id | e }}</code>
+        &middot; by {{ (item.actor_id or "?") | e }}
+        &middot; {{ (item.created_at or "") | e }}
+      </div>
+      <div class="apv-card-actions">
+        {% if item.status == 'pending' %}
+          <form hx-post="/console/approval/{{ item.id }}/approve" hx-target="#apv-{{ item.id }}" hx-swap="outerHTML" style="display:inline">
+            <input type="hidden" name="reason" value="">
+            <button class="btn-action btn-accept">Approve</button>
+          </form>
+          <form hx-post="/console/approval/{{ item.id }}/reject" hx-target="#apv-{{ item.id }}" hx-swap="outerHTML" style="display:inline"
+                onsubmit="return confirm('Reject this approval?')">
+            <input type="hidden" name="reason" value="">
+            <button class="btn-action btn-reject">Reject</button>
+          </form>
+        {% endif %}
+        <a class="btn-action btn-view" href="/console/approval/{{ item.id }}">View</a>
+      </div>
+    </div>
+  {% else %}
+    <div class="empty-state">No approvals found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

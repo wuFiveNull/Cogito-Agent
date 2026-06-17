@@ -17,6 +17,20 @@
 - **30 new tests**: console routes, status API JSON fields, auth (no-key/wrong-key/valid-key), redaction
 - **82 source files** (+4 new: `console/__init__.py`, `console/router.py`, `console/status.py`, `console/redaction.py`)
 
+### **Console MVP Phase 4 — Approval Queue MVP**
+
+- **Approval list page** (`GET /console/approval`) — stat cards (total/pending/approved/rejected), filter bar (status/search), cards with approve/reject/view actions
+- **Approval detail page** (`GET /console/approval/{id}`) — full metadata table, approve/reject forms with optional reason
+- **Approve** (`POST /console/approval/{id}/approve`) — delegates to `ApprovalRepository.resolve()`, idempotent (double-process returns clear error)
+- **Reject** (`POST /console/approval/{id}/reject`) — delegates to `ApprovalRepository.resolve()`, idempotent
+- **All mutations write audit log**: `approval.approve` / `approval.reject` with full details (capability, resource, decision_before/after, reason)
+- **Templates**: `approval.html` (list + stats + filters + cards), `approval_detail.html` (detail + action forms), `components/approval_success.html`
+- **Approval CSS**: stat cards, filter bar, card layout, badges (pending/approved/rejected), detail view, action forms
+- **Route registration**: `approval_router` imported and mounted before `/{page}` catch-all, "approval" removed from placeholder list
+- **Menu item**: "soon" badge removed from Approvals
+- **29 new tests**: page rendering (list, stats, filters, search, 404), action endpoints (approve/reject, idempotency, double-process, 404), audit logging, security (no stack trace, no secret leak, redaction, XSS escape, auth)
+- **859 tests total**, ruff clean, mypy clean (85 source files)
+
 ### **Console MVP Phase 3 — Memory Review MVP**
 
 - **Memory list page** (`GET /console/memory`) — stat cards (total/pending/active/archived/stale), filter bar (status/search), tabs (All/Candidates/Memories), cards with accept/reject/archive/delete actions

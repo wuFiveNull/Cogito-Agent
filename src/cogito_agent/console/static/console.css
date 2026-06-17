@@ -174,6 +174,52 @@ h3 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
 .mem-success-text { font-size: 0.9rem; margin: 0.3rem 0; }
 .btn-back { display: inline-block; margin-top: 0.5rem; font-size: 0.85rem; }
 
+/* ─── Approval Panel ──────────────────────────────────────────────────── */
+.apv-header { margin-bottom: 1rem; }
+.apv-stats { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.apv-stats .stat-card { flex: 1; min-width: 80px; padding: 0.5rem; }
+.apv-stats .stat-value { font-size: 1.3rem; }
+.apv-stats .stat-label { font-size: 0.65rem; }
+
+.apv-filters { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.apv-filters select, .apv-search { padding: 0.3rem 0.5rem; border: 1px solid #d0d5dd; border-radius: 4px; font-size: 0.8rem; }
+.apv-search { flex: 1; min-width: 120px; }
+
+.apv-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.apv-card {
+  background: #fff; border: 1px solid #e0e4ea; border-radius: 6px;
+  padding: 0.7rem 0.9rem; font-size: 0.85rem;
+}
+.apv-card-top { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.3rem; flex-wrap: wrap; }
+.apv-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; }
+.apv-badge-pending { background: #fef3c7; color: #92400e; }
+.apv-badge-approved { background: #d1fae5; color: #065f46; }
+.apv-badge-rejected { background: #fee2e2; color: #991b1b; }
+.apv-badge-expired { background: #f3f4f6; color: #6b7280; }
+.apv-badge-unknown { background: #f3f4f6; color: #6b7280; }
+.apv-capability { font-weight: 600; font-size: 0.85rem; }
+.apv-operation { font-size: 0.7rem; color: #6b7280; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+.apv-card-resource { margin: 0.2rem 0; font-family: monospace; font-size: 0.8rem; color: #1a1a2e; word-break: break-word; }
+.apv-card-reason { margin: 0.2rem 0; font-size: 0.8rem; color: #6b7280; font-style: italic; }
+.apv-card-meta { font-size: 0.7rem; color: #9ca3af; margin-bottom: 0.3rem; }
+.apv-card-meta code { font-size: 0.65rem; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.apv-card-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+.apv-detail { max-width: 800px; }
+.apv-detail h3 { margin-top: 0.5rem; }
+.apv-detail h4 { margin-top: 1.5rem; margin-bottom: 0.3rem; }
+.apv-detail-actions { display: flex; gap: 1rem; margin: 0.5rem 0; flex-wrap: wrap; }
+.apv-action-form { display: flex; flex-direction: column; gap: 0.3rem; max-width: 400px; border: 1px solid #e0e4ea; border-radius: 6px; padding: 0.7rem; }
+.apv-action-form label { font-size: 0.8rem; font-weight: 600; color: #6b7280; }
+.apv-input { padding: 0.4rem 0.6rem; border: 1px solid #d0d5dd; border-radius: 4px; font-family: inherit; font-size: 0.85rem; }
+.apv-input:focus { outline: none; border-color: #3b82f6; }
+
+.apv-success { padding: 1rem; text-align: center; }
+.apv-success-icon { font-size: 1.5rem; color: #059669; }
+.apv-success-text { font-size: 0.9rem; margin: 0.3rem 0; }
+
+.high-risk { border-left: 3px solid #dc2626; }
+
 @media (max-width: 640px) {
   .layout { flex-direction: column; }
   .sidebar { width: 100%; flex-direction: row; padding: 0.5rem 1rem; align-items: center; }

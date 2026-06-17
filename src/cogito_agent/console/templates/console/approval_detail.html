@@ -1,0 +1,52 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="apv-detail">
+  <p><a href="/console/approval">&larr; Back to Approvals</a></p>
+  <h3>Approval Detail</h3>
+
+  <table class="info-table">
+    <tr><td>ID</td><td><code>{{ (item.id or "") | e }}</code></td></tr>
+    <tr><td>Status</td><td><span class="apv-badge apv-badge-{{ (item.status or 'unknown') | e }}">{{ (item.status or "unknown") | e }}</span></td></tr>
+    <tr><td>Capability</td><td>{{ (item.capability_name or "") | e }}</td></tr>
+    <tr><td>Operation</td><td>{{ (item.operation or "") | e }}</td></tr>
+    <tr><td>Resource</td><td>{{ (item.resource or "") | e }}</td></tr>
+    {% if item.reason %}
+    <tr><td>Reason</td><td>{{ item.reason | e }}</td></tr>
+    {% endif %}
+    <tr><td>Requested By</td><td>{{ (item.actor_id or "") | e }}</td></tr>
+    <tr><td>Workspace</td><td>{{ (item.workspace_id or "") | e }}</td></tr>
+    <tr><td>Created</td><td>{{ (item.created_at or "") | e }}</td></tr>
+    {% if item.expires_at %}
+    <tr><td>Expires</td><td>{{ item.expires_at | e }}</td></tr>
+    {% endif %}
+    {% if item.decided_at %}
+    <tr><td>Decided At</td><td>{{ item.decided_at | e }}</td></tr>
+    {% endif %}
+    {% if item.decided_by %}
+    <tr><td>Decided By</td><td>{{ item.decided_by | e }}</td></tr>
+    {% endif %}
+    {% if item.decision %}
+    <tr><td>Decision</td><td>{{ item.decision | e }}</td></tr>
+    {% endif %}
+    {% if item.session_id %}
+    <tr><td>Session</td><td>{{ item.session_id | e }}</td></tr>
+    {% endif %}
+  </table>
+
+  {% if item.status == 'pending' %}
+  <h4>Actions</h4>
+  <div class="apv-detail-actions">
+    <form class="apv-action-form" hx-post="/console/approval/{{ item.id }}/approve" hx-target="body">
+      <label for="approve-reason">Optional note</label>
+      <input type="text" name="reason" id="approve-reason" placeholder="Reason (optional)" class="apv-input">
+      <button class="btn-action btn-accept" type="submit">Approve</button>
+    </form>
+    <form class="apv-action-form" hx-post="/console/approval/{{ item.id }}/reject" hx-target="body">
+      <label for="reject-reason">Reason for rejection</label>
+      <input type="text" name="reason" id="reject-reason" placeholder="Reason (required)" class="apv-input" required>
+      <button class="btn-action btn-reject" type="submit">Reject</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
