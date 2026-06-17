@@ -17,6 +17,24 @@
 - **30 new tests**: console routes, status API JSON fields, auth (no-key/wrong-key/valid-key), redaction
 - **82 source files** (+4 new: `console/__init__.py`, `console/router.py`, `console/status.py`, `console/redaction.py`)
 
+### **Console MVP Phase 7 — Config Viewer & Doctor Page**
+
+- **Config viewer** (`GET /console/config`) — read-only section-grouped config table (Environment, Model Provider, Secrets, Autonomy, Auth & Console), all content redacted (API keys, Bearer tokens, passwords) via `redact_html()`, HTML-escaped via Jinja2 `| e`
+- **Doctor page** (`GET /console/doctor`) — system health check with section-grouped results (core, database, provider, secrets, governance, autonomy, console), overall status badge (ok/warning/error)
+- **Doctor JSON API** (`GET /api/v1/doctor`) — returns JSON with status, checks, limitations; `?live=1` returns 501 (not implemented in console viewer)
+- **Doctor checks**: app version, Python/platform, config load, package availability, DB reachability/schema version/table counts, provider registration/model config/secret resolution, secrets backend availability, PolicyEngine/ApprovalRepository/AuditLogger/Tracer availability, recent audit count, recent traces count, autonomy store availability, template availability, static asset availability, htmx presence, auth middleware status, known limitations
+- **Live provider check**: skipped by default; use `cogito provider test <name> --live` on CLI
+- **Shared modules**: `config_views.py`, `doctor_views.py` keep `router.py` clean
+- **Templates**: `config.html` (section-grouped tables), `doctor.html` (overall status badge + section check cards)
+- **CSS**: `.cfg-section` / `.doc-section` section grouping, `.doc-card` check cards, `.doc-badge` status badges (ok/warning/error)
+- **Route registration**: both routers mounted before `/{page}` catch-all, "config" and "doctor" removed from placeholder list
+- **Menu items**: "Config" and "Doctor" now link to real pages (no "soon" badge)
+- **Status API updated**: limitations now show "Config viewer is read-only in v0.8 Phase 7"
+- **Known limitations**: no config editing, no live provider check UI, no advanced diagnostics, no diagnostic bundle export
+- **Pre-existing ruff line-length issues in doctor_views.py fixed in this phase**
+- **New API**: `GET /api/v1/doctor` returns JSON with status, checks, limitations; `?live=1` returns 501 (4 tests)
+- **938 tests total**, ruff clean, mypy clean (90 source files)
+
 ### **Console MVP Phase 6 — Autonomy Console MVP**
 
 - **Autonomy dashboard** (`GET /console/autonomy`) — stat cards (decisions total/24h, push/skip/defer/require_approval, outbox pending/sent/failed, feedback useful/too_many/wrong_time), quick links

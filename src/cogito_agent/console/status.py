@@ -103,7 +103,8 @@ def build_status() -> dict[str, object]:
         },
         "limitations": [
             "No real Telegram/Feishu delivery for outbox",
-            "Config and Doctor pages are still placeholders",
+            "Config viewer is read-only (no editing)",
+            "Live provider check not available in console doctor",
         ],
     }
 

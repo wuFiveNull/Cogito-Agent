@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -105,6 +105,38 @@ _console_static = Path(__file__).resolve().parent.parent / "console" / "static"
 app.mount("/console/static", StaticFiles(directory=str(_console_static)), name="console_static")
 app.include_router(console_router, prefix="/console")
 app.include_router(status_router, prefix="/api/v1/status")
+
+
+@app.get("/api/v1/doctor", include_in_schema=False)
+async def doctor_api_endpoint(live: str = Query("")) -> JSONResponse:
+    if live and live not in ("", "0", "false"):
+        return JSONResponse(
+            status_code=501,
+            content={
+                "status": "error",
+                "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.8.0-dev"),
+                "checks": [{
+                    "section": "provider",
+                    "name": "live_check",
+                    "status": "skipped",
+                    "message": "Live provider check not implemented in console viewer",
+                }],
+                "limitations": ["Live provider check not available in console viewer"],
+            },
+        )
+    from cogito_agent.console.doctor_views import _build_checks, _overall_status
+    checks = _build_checks()
+    overall = _overall_status(checks)
+    return JSONResponse({
+        "status": overall,
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.8.0-dev"),
+        "checks": checks,
+        "limitations": [
+            "No real Telegram/Feishu delivery for outbox",
+            "Live provider check not run by default",
+            "Config viewer is read-only in v0.8 Phase 7",
+        ],
+    })
 
 
 app.add_middleware(

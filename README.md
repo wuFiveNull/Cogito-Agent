@@ -102,7 +102,7 @@ curl -N -X POST http://localhost:8000/chat/stream \
 - **MockModel** is the default provider. For a real model, set `model.provider` via `cogito config` and configure the API key through an environment variable (never written to config file, trace, audit, or export).
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
-- **Limitations:** No Web UI or TUI, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only. Autonomy outbox is a local SQLite queue (not real Telegram/Feishu push). No LLM relevance judge for autonomy decisions (deterministic rules only).
+- **Limitations:** Web Console is read-only for config and doctor (no editing). No live provider health check in Doctor UI. No advanced diagnostics or diagnostic bundle export. Polish (navigation, responsive, loading states) still in progress. No encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only. Autonomy outbox is a local SQLite queue (not real Telegram/Feishu push). No LLM relevance judge for autonomy decisions (deterministic rules only).
 - **/chat/stream** uses true per-token streaming when the model adapter supports it (`supports_streaming=True` and `stream_chat()`). Falls back to single-delta emission for non-streaming adapters.
 - Streaming tool calls: `stream_chat()` yields content-only deltas. Tool intents from the model response are dispatched after streaming completes (no tool-interrupt during streaming). For real-time tool-in-stream scenarios, a separate tool-call SSE event type is used.
 
@@ -112,9 +112,9 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.7.0-rc1 (Autonomy Plane MVP release candidate)** — RC tagged but not formally released.
-Verified: **755 tests passing**, `ruff check src/` clean, `mypy src/` clean (78 files).
-Includes: v0.6.2 SecretProvider (Env/Local/Keychain with `secrets.backend` config), v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2, and v0.7.0 Autonomy Plane MVP (NotificationGate, DecisionStore, Outbox, ProactiveLoop, Feedback, CLI, trace/audit integration, migration v6, 755 tests).
+**v0.8.0-dev (Console MVP Phase 1–7)** — Web Console with Dashboard, Chat, Memory Review, Approval Queue, Trace & Audit Viewer, Autonomy Console, Config Viewer, and Doctor page.
+Verified: **938 tests passing**, `ruff check src/` clean, `mypy src/` clean (90 source files).
+Includes: v0.7.0 Autonomy Plane MVP, v0.6.2 SecretProvider, v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2.
 
 ## Development
 

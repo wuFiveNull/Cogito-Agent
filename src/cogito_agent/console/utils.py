@@ -10,6 +10,6 @@ def menu_items() -> list[dict[str, str | bool]]:
         {"label": "Traces", "href": "/console/traces", "icon": "trace"},
         {"label": "Audit", "href": "/console/audit", "icon": "audit"},
         {"label": "Autonomy", "href": "/console/autonomy", "icon": "autonomy"},
-        {"label": "Config", "href": "/console/config", "icon": "config", "soon": True},
-        {"label": "Doctor", "href": "/console/doctor", "icon": "doctor", "soon": True},
+        {"label": "Config", "href": "/console/config", "icon": "config"},
+        {"label": "Doctor", "href": "/console/doctor", "icon": "doctor"},
     ]

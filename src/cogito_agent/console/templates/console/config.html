@@ -1,0 +1,20 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="cfg-header">
+  <p class="cfg-readonly-badge">Read-Only &mdash; v0.8 Phase 7</p>
+</div>
+
+{% for section in sections %}
+<div class="cfg-section">
+  <h3>{{ section.title }}</h3>
+  <table class="info-table">
+    {% for row in section.rows %}
+    <tr>
+      <td>{{ row.key }}</td>
+      <td><code>{{ row.value | e }}</code></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+{% endblock %}

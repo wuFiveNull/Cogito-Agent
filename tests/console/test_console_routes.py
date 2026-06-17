@@ -48,21 +48,50 @@ class TestConsoleDashboard:
         assert "Traces (24h)" in html
 
 
-class TestConsolePlaceholders:
-    @pytest.mark.parametrize("page", ["config", "doctor"])
-    def test_placeholder_pages(self, page: str) -> None:
+class TestConsolePages:
+    @pytest.mark.parametrize("page,expected", [
+        ("config", "Configuration"),
+        ("doctor", "Doctor"),
+    ])
+    def test_real_pages(self, page: str, expected: str) -> None:
         resp = client.get(f"/console/{page}")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        assert "Coming soon" in resp.text
-
-    def test_placeholder_autonomy_no_longer_placeholder(self) -> None:
-        resp = client.get("/console/autonomy")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
+        assert expected in resp.text
         assert "Coming soon" not in resp.text
 
     def test_unknown_page_returns_404(self) -> None:
         resp = client.get("/console/foobar")
         assert resp.status_code == 404
         assert "Not Found" in resp.text
+
+
+class TestDoctorAPI:
+    def test_doctor_api_returns_json(self) -> None:
+        resp = client.get("/api/v1/doctor")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "status" in data
+        assert data["status"] in ("ok", "warning", "error")
+        assert "checks" in data
+        assert isinstance(data["checks"], list)
+        assert "limitations" in data
+
+    def test_doctor_api_has_checks(self) -> None:
+        resp = client.get("/api/v1/doctor")
+        data = resp.json()
+        assert len(data["checks"]) > 0
+        sections = {c["section"] for c in data["checks"] if "section" in c}
+        assert "core" in sections
+
+    def test_doctor_api_live_returns_501(self) -> None:
+        resp = client.get("/api/v1/doctor?live=1")
+        assert resp.status_code == 501
+        data = resp.json()
+        assert data["status"] == "error"
+
+    def test_doctor_api_no_leak(self) -> None:
+        resp = client.get("/api/v1/doctor")
+        data = resp.text
+        assert "sk-" not in data  # no secret leakage
+        assert "Bearer " not in data

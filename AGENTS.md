@@ -24,7 +24,7 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
-v0.8.0-dev (Console MVP Phase 1–6, current):
+v0.8.0-dev (Console MVP Phase 1–7, current):
 - **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
 - **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
   - Message area with user/assistant bubbles
@@ -76,14 +76,23 @@ v0.8.0-dev (Console MVP Phase 1–6, current):
   - FeedbackStore extended: `list_feedback()`, `count_by_value()`
   - All content redacted + HTML escaped; AuthMiddleware protects all routes
   - 49 new tests, 935 tests passing, ruff clean, mypy clean (88 source files)
+- **Phase 7 — Config Viewer & Doctor Page**: Console config viewer and doctor page at `/console/config` and `/console/doctor` with:
+  - Config viewer at `/console/config`: read-only section-grouped config table (Environment, Model Provider, Secrets, Autonomy, Auth & Console), redacted secret values (API keys, Bearer tokens, passwords), all content HTML-escaped
+  - Doctor page at `/console/doctor`: system health check with section-grouped results (core, database, provider, secrets, governance, autonomy, console), overall status badge (ok/warning/error), supports `GET /api/v1/doctor` JSON API
+  - Doctor checks include: app version, Python/platform, config load, package availability, DB reachability/schema version/table counts, provider registration/model config/secret resolution, secrets backend availability, PolicyEngine/ApprovalRepository/AuditLogger/Tracer availability, recent audit count, recent traces count, autonomy store availability, template availability, static asset availability, htmx presence, auth middleware status, known limitations
+  - Doctor live provider check: skipped by default (returns `"skipped"` status), explicit `?live=1` returns 501 (not implemented in console viewer — use `cogito provider test <name> --live` on CLI)
+  - All content redacted + HTML escaped; AuthMiddleware protects both routes
+  - Shared modules: `config_views.py`, `doctor_views.py` keep router.py clean
+  - Redaction: all config values with `secret_ref`, `api_key`, `password`, `bearer`, `token` patterns redacted via `redact_html()`; Doctor check messages also redacted
+  - Templates: `config.html` (section-grouped tables), `doctor.html` (overall status badge + section check cards with name/status/message)
+  - 938 tests passing, ruff clean, mypy clean (90 source files)
+  - New API: `GET /api/v1/doctor` returns JSON with status, checks, limitations; `?live=1` returns 501
 
 ## Verification Status
 
-- **935 tests passing** (`pytest` clean)
+- **938 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 88 files)
-
-## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
+- **mypy clean** (`mypy src/` clean, 90 files)
 
 - ✅ Phase 1 (Epics A–B): Runtime full turn pipeline, context engine with budget shares
 - ✅ Phase 2 (Epics C–E): Tool dispatch, approval flow, budget enforcement
@@ -101,7 +110,7 @@ v0.8.0-dev (Console MVP Phase 1–6, current):
 - ✅ Console module structure (`src/cogito_agent/console/`)
 - ✅ Dashboard at `/console/` with stat cards, system info, quick links
 - ✅ Status API at `/api/v1/status` with counts, DB health, provider info, secrets info
-- ✅ 8 placeholder pages (chat, memory, approval, traces, audit, autonomy, config, doctor)
+- ✅ All 8 initial pages now real (chat, memory, approval, traces, audit, autonomy, config, doctor)
 - ✅ 404 error page
 - ✅ Auth integration (reuses existing `AuthMiddleware`)
 - ✅ Redaction (reuses `RedactionHelper` from `trace/redaction.py`)
@@ -120,7 +129,7 @@ v0.8.0-dev (Console MVP Phase 1–6, current):
 - ✅ 17 new tests for chat page, API, streaming, XSS, redaction, auth
 - ✅ Trace & Audit pages (Phase 5)
 - ✅ Autonomy pages (Phase 6)
-- 🚧 Config page (Phase 7)
+- ✅ Config page & Doctor page (Phase 7)
 
 ## V2 Status
 

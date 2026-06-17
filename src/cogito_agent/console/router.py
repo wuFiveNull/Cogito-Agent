@@ -13,6 +13,8 @@ from fastapi.templating import Jinja2Templates
 from .approval import approval_router as _approval_router
 from .audit_views import audit_router as _audit_router
 from .autonomy_views import autonomy_router as _autonomy_router
+from .config_views import config_router as _config_router
+from .doctor_views import doctor_router as _doctor_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
 from .status import build_status
@@ -267,19 +269,16 @@ console_router.include_router(_approval_router, prefix="/approval")
 console_router.include_router(_trace_router, prefix="/traces")
 console_router.include_router(_audit_router, prefix="/audit")
 console_router.include_router(_autonomy_router, prefix="/autonomy")
+console_router.include_router(_config_router, prefix="/config")
+console_router.include_router(_doctor_router, prefix="/doctor")
 
 
 # ─── Placeholder Pages ──────────────────────────────────────────────────────
 
 
-PLACEHOLDER_PAGES = [
-    "config", "doctor",
-]
+PLACEHOLDER_PAGES: list[str] = []
 
-_PHASE_MAP = {
-    "config": "7 (Config & Doctor)",
-    "doctor": "7 (Config & Doctor)",
-}
+_PHASE_MAP: dict[str, str] = {}
 
 
 @console_router.get("/{page}", response_class=HTMLResponse, include_in_schema=False)

@@ -1,0 +1,44 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="doc-header">
+  <div class="doc-overall doc-overall-{{ overall }}">
+    Overall Status: <strong>{{ overall | upper }}</strong>
+  </div>
+</div>
+
+{% set section_order = ["core", "database", "provider", "secrets", "governance", "autonomy", "console"] %}
+{% set section_labels = {
+  "core": "Core",
+  "database": "Database & Storage",
+  "provider": "Provider",
+  "secrets": "Secrets",
+  "governance": "Governance & Audit",
+  "autonomy": "Autonomy",
+  "console": "Console",
+} %}
+
+{% for sec in section_order %}
+{% if sec in sections %}
+<div class="doc-section">
+  <h3>{{ section_labels.get(sec, sec | capitalize) }}</h3>
+  <div class="doc-checks">
+    {% for check in sections[sec] %}
+    <div class="doc-check doc-check-{{ check.status }}">
+      <div class="doc-check-status">{{ check.status | upper }}</div>
+      <div class="doc-check-body">
+        <div class="doc-check-name">{{ check.name }}</div>
+        <div class="doc-check-message">{{ check.message | e }}</div>
+        {% if check.details %}
+        <details>
+          <summary>Details</summary>
+          <pre class="doc-check-details">{{ check.details | e }}</pre>
+        </details>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}
