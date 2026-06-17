@@ -7,32 +7,29 @@ v0.2.0-alpha released.
 v0.3.0-dev not released.
 v0.4.0-dev not released.
 v0.5.0-dev not released.
-v0.6.2-dev (keychain secrets + provider config hardening, not released):
-- SecretProvider protocol with EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider (real impl: keyring lib or platform fallback)
-- SecretValue wrapper: str/repr always show [REDACTED], raw value via .value
-- LocalSecretsProvider: SQLite-based storage with metadata tracking (created/updated/last_used), NOT encrypted
-- `cogito secrets` CLI: list, show, set, delete, rotate, test (--stdin, --value marked UNSAFE)
-- All secrets CLI mutations write audit logs (verified in tests)
-- `secrets.backend` config: env | local | keychain, controls which provider is active
-- `secrets.service_name`, `secrets.local_path` sub-keys
-- `get_provider_from_config()` selects provider by backend config
-- `model.secret_ref` config key: secret_ref > api_key_env priority, doctor checks secret_ref and backend
-- `build_model_adapter_from_config()` resolves secret_ref from provider, passes timeout_sec to get_adapter()
-- `model.timeout_seconds` wired to get_adapter(timeout_sec=...) → OpenAICompatibleAdapter
-- `cogito provider` CLI: list, show, doctor, test (with --live flag with auth header + config timeout)
-- `--live` health check sends Bearer auth and respects model.timeout_seconds
-- Provider error normalization codes (PROVIDER_*)
-- `model.streaming_enabled` enforced: false forces chat() fallback, true uses stream_chat()
-- `model.max_retries` wired to RuntimeKernel._retry_with_backoff() for model calls
-- Real secret availability checks in provider doctor/test
-- 688 tests passing, ruff clean, mypy clean (70 files)
-- docs/15_V0_6_SECRET_PROVIDER_PLAN.md updated
+v0.6.2-dev (keychain secrets + provider config hardening, not released).
+v0.7.1-dev (Autonomy Plane MVP hardening / release candidate):
+- AutonomyEvent with AutonomySourceType (scheduler/drift/webhook/memory/manual/system), PriorityLevel (low/normal/high/urgent), deterministic dedup_key (SHA256)
+- normalize_from_dict() / normalize_manual() normalizer
+- NotificationGate with rule-based evaluate(): quiet hours, daily/hourly quota, dedup window, deterministic cost score, governance check
+- NotificationDecision rich object with action (push/skip/defer/require_approval), reason_code, cost_score
+- DecisionStore for notification_decisions table
+- Outbox for outbox_messages table (local SQLite queue, NOT real push)
+- FeedbackStore with FeedbackValue enum, audit logging
+- ProactiveLoop with per-step trace spans (event_received, gate.evaluate, decision.persist, outbox.push, audit.*)
+- CLI: `cogito autonomy emit|decisions|outbox|feedback`
+- Default policy rule for notification.send (allow_with_audit)
+- migration v6 for new tables
+- SpanKind.autonomous for autonomy trace spans
+- Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
+- 745 tests passing, ruff clean, mypy clean (78 files)
+- docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
 ## Verification Status
 
-- **688 tests passing** (`pytest` clean)
+- **745 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 70 files)
+- **mypy clean** (`mypy src/` clean, 78 files)
 
 ## Architecture Completion Status (docs/07_ARCHITECTURE_COMPLETION_PLAN.md)
 
@@ -45,6 +42,7 @@ v0.6.2-dev (keychain secrets + provider config hardening, not released):
 - ✅ Phase 5 (Epics K–L): Capability safety (path sandboxing, JSON Schema), storage completeness (hard delete, export, migration)
 - ✅ Phase 6 (Epics M–P): Skill runtime depth, background security, failure/retry, interrupt/resume
 - ✅ Phase 7 (Epics Q–S): Drift maintenance, CLI/API polish, replay
+- ✅ Phase 8 (Autonomy Plane MVP): Notification Gate, Decision Log, Outbox, Proactive Loop, Feedback, CLI, trace/audit integration
 
 ## V2 Status
 
@@ -69,6 +67,7 @@ Local-first personal Agent runtime with long-term memory, governed capabilities,
 11. Model provider adapter (OpenAI-compatible or Ollama)
 12. E2E local demo
 13–14. Skill & autonomy (V1, after MVP)
+15. Autonomy Plane MVP (v0.7)
 
 Each epic depends on previous ones. Do not skip ahead.
 
@@ -104,6 +103,8 @@ Do not read, modify, or reference `docs_zh/`, `private/`, `.local/`, or `secrets
 ## What Not to Overbuild (MVP)
 
 No cloud sync, plugin marketplaces, distributed queues, multi-agent orchestration, UI clients (TUI/Web), proactive notifications, background skill execution, scheduler, or MCP integration.
+
+Note: v0.7 adds constrained proactive behavior via Autonomy Plane MVP. This is limited to CLI-only, local outbox (no real push), deterministic rules (no LLM judge), and no Web UI.
 
 ## Tech Stack
 

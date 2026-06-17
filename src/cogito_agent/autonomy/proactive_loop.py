@@ -62,6 +62,15 @@ class ProactiveLoop:
         )
         self._db.connection.commit()
 
+    def _span(self, trace_id: str, name: str) -> Any | None:
+        if not self._tracer:
+            return None
+        return self._tracer.create_span(trace_id, name, SpanKind.autonomous)
+
+    def _end_span(self, span: Any | None) -> None:
+        if span is not None and self._tracer:
+            self._tracer.end_span(span)
+
     def process_event(
         self,
         event: AutonomyEvent,
@@ -73,18 +82,21 @@ class ProactiveLoop:
         trace_id = event.trace_id or str(uuid.uuid4())
         event.trace_id = trace_id
 
+        span_root: Any = None
         if tracer:
             trace = tracer.create_trace(
                 workspace_id=event.workspace_id,
                 root_event_id=event.event_id,
             )
             trace_id = trace.id
-            span = tracer.create_span(
+            span_root = tracer.create_span(
                 trace.id, f"autonomy_{event.source_type.value}",
-                SpanKind.scheduler,
+                SpanKind.autonomous,
             )
 
+        span_audit: Any | None = None
         if self._audit:
+            span_audit = self._span(trace_id, "audit.event_received")
             self._audit.log(
                 actor_id=event.source or "proactive_loop",
                 action="autonomy.event_received",
@@ -98,10 +110,14 @@ class ProactiveLoop:
                     "category": event.category,
                 }),
             )
+            self._end_span(span_audit)
 
+        span_gate: Any = self._span(trace_id, "gate.evaluate")
         decision = self._gate.evaluate(event, cfg)
         decision.trace_id = trace_id
+        self._end_span(span_gate)
 
+        span_persist: Any = self._span(trace_id, "decision.persist")
         self._decision_store.save_decision(
             decision_id=decision.decision_id,
             event_id=decision.event_id,
@@ -118,8 +134,10 @@ class ProactiveLoop:
             requires_approval=decision.requires_approval,
             trace_id=trace_id,
         )
+        self._end_span(span_persist)
 
         if decision.action == DecisionAction.push:
+            span_push: Any = self._span(trace_id, "outbox.push")
             nid = self._gate.record_notification(
                 workspace_id=event.workspace_id,
                 title=event.title,
@@ -140,7 +158,9 @@ class ProactiveLoop:
                 source=event.source,
                 trace_id=trace_id,
             )
+            self._end_span(span_push)
             if self._audit:
+                span_notify_audit = self._span(trace_id, "audit.notification_pushed")
                 self._audit.log(
                     actor_id=event.source or "proactive_loop",
                     action="autonomy.notification_pushed",
@@ -154,9 +174,11 @@ class ProactiveLoop:
                         "cost_score": decision.cost_score,
                     }),
                 )
+                self._end_span(span_notify_audit)
 
         elif decision.action == DecisionAction.require_approval:
             if self._audit:
+                span_approve_audit = self._span(trace_id, "audit.approval_required")
                 self._audit.log(
                     actor_id=event.source or "proactive_loop",
                     action="autonomy.approval_required",
@@ -167,9 +189,27 @@ class ProactiveLoop:
                     reason=decision.reason_code,
                     details=json.dumps({"reason": decision.reason}),
                 )
+                self._end_span(span_approve_audit)
+        else:
+            if self._audit:
+                span_skip_audit = self._span(trace_id, "audit.decision_skip")
+                self._audit.log(
+                    actor_id=event.source or "proactive_loop",
+                    action="autonomy.decision_skip",
+                    resource=f"event:{event.event_id}",
+                    workspace_id=event.workspace_id,
+                    trace_id=trace_id,
+                    decision="deny",
+                    reason=decision.reason_code,
+                    details=json.dumps({
+                        "reason_code": decision.reason_code,
+                        "reason": decision.reason,
+                    }),
+                )
+                self._end_span(span_skip_audit)
 
         if tracer:
-            tracer.end_span(span)
+            tracer.end_span(span_root)
             tracer.end_trace(trace)
 
         return decision
@@ -185,21 +225,21 @@ class ProactiveLoop:
         category: str = "",
         config: dict[str, Any] | None = None,
     ) -> NotificationDecision:
+        try:
+            st = AutonomySourceType(source_type)
+        except ValueError:
+            st = AutonomySourceType.manual
+        try:
+            pl = PriorityLevel(priority)
+        except ValueError:
+            pl = PriorityLevel.normal
         event = AutonomyEvent(
             source=source,
-            source_type=(
-                AutonomySourceType(source_type)
-                if source_type in AutonomySourceType._value2member_map_
-                else AutonomySourceType.manual
-            ),
+            source_type=st,
             workspace_id=workspace_id,
             title=title,
             body=body,
-            priority=(
-                PriorityLevel(priority)
-                if priority in PriorityLevel._value2member_map_
-                else PriorityLevel.normal
-            ),
+            priority=pl,
             category=category,
         )
         return self.process_event(event, config)

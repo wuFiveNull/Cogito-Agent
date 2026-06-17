@@ -77,6 +77,8 @@ class PolicyEngine:
                    DecisionType.allow),
         PolicyRule("*", "tool", "*",
                    DecisionType.allow),
+        PolicyRule("*", "send", "*",
+                   DecisionType.allow_with_audit, capability="notification.send"),
         # ── Final fallback ──────────────────────────────────────────
         PolicyRule("*", "*", "*", DecisionType.escalate),
     ]

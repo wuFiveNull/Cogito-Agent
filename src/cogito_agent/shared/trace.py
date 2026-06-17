@@ -18,6 +18,7 @@ class SpanKind(StrEnum):
     storage = "storage"
     result = "result"
     scheduler = "scheduler"
+    autonomous = "autonomous"
 
 
 class Span(BaseModel):

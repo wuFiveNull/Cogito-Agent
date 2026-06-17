@@ -81,7 +81,7 @@ def run_autonomy_decisions(args: Any) -> None:
             return
         print(f"  Decisions ({len(decisions)}):")
         for d in decisions:
-            did = str(d.get("id", ""))[:8]
+            did = str(d.get("id", ""))
             action = str(d.get("action", "?"))
             reason = str(d.get("reason_code", ""))
             ws = str(d.get("workspace_id", ""))[:8]
@@ -105,7 +105,7 @@ def run_autonomy_outbox(args: Any) -> None:
             return
         print(f"  Outbox ({len(messages)}):")
         for m in messages:
-            mid = str(m.get("id", ""))[:8]
+            mid = str(m.get("id", ""))
             status = str(m.get("status", "?"))
             title = _redact(str(m.get("title", ""))[:40])
             created = str(m.get("created_at", ""))[:19]

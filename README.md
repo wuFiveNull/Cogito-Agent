@@ -55,6 +55,12 @@ cogito daemon status                                  # check daemon status
 cogito schedule list                                  # list scheduled jobs
 cogito schedule maintenance consolidate --daily 03:00 # schedule a task
 
+# Autonomy notifications (v0.7)
+cogito autonomy emit --title "test" --body "hello"    # emit an autonomy event
+cogito autonomy decisions                              # list notification decisions
+cogito autonomy outbox                                 # list outbox messages
+cogito autonomy feedback <id> --value useful           # record feedback on a decision
+
 # Inbox
 cogito inbox list                                     # list inbox items
 cogito inbox read <id>                                # show inbox item detail
@@ -96,7 +102,7 @@ curl -N -X POST http://localhost:8000/chat/stream \
 - **MockModel** is the default provider. For a real model, set `model.provider` via `cogito config` and configure the API key through an environment variable (never written to config file, trace, audit, or export).
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
-- **Limitations:** No Web UI or TUI, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only.
+- **Limitations:** No Web UI or TUI, no encrypted secret store. `cogito daemon run` is blocking (no background process management). Export is workspace-scoped only. Autonomy outbox is a local SQLite queue (not real Telegram/Feishu push). No LLM relevance judge for autonomy decisions (deterministic rules only).
 - **/chat/stream** uses true per-token streaming when the model adapter supports it (`supports_streaming=True` and `stream_chat()`). Falls back to single-delta emission for non-streaming adapters.
 - Streaming tool calls: `stream_chat()` yields content-only deltas. Tool intents from the model response are dispatched after streaming completes (no tool-interrupt during streaming). For real-time tool-in-stream scenarios, a separate tool-call SSE event type is used.
 
@@ -106,9 +112,9 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.6.1-dev (provider hardening closure candidate)** — Not released. No GitHub tag or release.
-Verified: **663 tests passing**, `ruff check src/` clean, `mypy src/` clean (70 files).
-SecretProvider protocol (EnvSecretProvider, LocalSecretsProvider, KeychainSecretProvider placeholder). SecretValue wrapper with automatic [REDACTED] repr/str. LocalSecretsProvider with SQLite storage and metadata tracking. `cogito secrets` CLI for set/list/show/delete/rotate/test with audit logging.
+**v0.7.1-dev (Autonomy Plane MVP release candidate)** — Not released. No GitHub tag or release.
+Verified: **745 tests passing**, `ruff check src/` clean, `mypy src/` clean (78 files).
+Includes: v0.6.2 SecretProvider (Env/Local/Keychain with `secrets.backend` config), v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2, and v0.7.0 Autonomy Plane MVP (NotificationGate, DecisionStore, Outbox, ProactiveLoop, Feedback, CLI, trace/audit integration, migration v6, 745 tests).
 
 ## Development
 
