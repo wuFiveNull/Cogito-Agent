@@ -113,7 +113,7 @@ curl -N -X POST http://localhost:8000/chat/stream \
 ## Release Status
 
 **v0.8.0-dev (Console MVP Phase 1–7)** — Web Console with Dashboard, Chat, Memory Review, Approval Queue, Trace & Audit Viewer, Autonomy Console, Config Viewer, and Doctor page.
-Verified: **938 tests passing**, `ruff check src/` clean, `mypy src/` clean (90 source files).
+Verified: **1011 tests passing**, `ruff check src/` clean, `mypy src/` clean (90 source files).
 Includes: v0.7.0 Autonomy Plane MVP, v0.6.2 SecretProvider, v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2.
 
 ## Development

@@ -2,6 +2,24 @@
 
 ## v0.8.0-dev (2026-06-17)
 
+### **Console MVP Phase 8 — Polish & RC Hardening**
+
+- **Nav active state**: sidebar now highlights current page via `request.url.path` comparison
+- **Dashboard quick links**: removed all "coming soon" labels (all pages are real now)
+- **CSS polish**: UUID/code wrapping (`word-break: break-all`), raw JSON scroll (`overflow-x: auto`), empty state styling, responsive improvements (sidebar, stat cards, tables, filters), button styles (accept/reject/archive/delete/view/filter)
+- **Loading states**: global htmx indicator (`#global-indicator`) for all htmx actions, CSS opacity (`button.htmx-request`) for visual feedback
+- **Critical bugfix**: `<!DOCTYPE html>` before `{% extends %}` in `traces.html` and `trace_detail.html` removed (causes Jinja2 `TemplateSyntaxError`)
+- **Error page**: returns 404 with console layout for unknown pages
+- **Security regression**: 73 new unified tests in `test_console_security_regression.py` covering:
+  - Auth blocks all 9 console pages + 2 API endpoints without token
+  - Auth allows valid Bearer token on all pages
+  - Auth blocks wrong Bearer token on all pages
+  - No secret value leak (password, token_value) on any page
+  - No API key pattern leak (`sk-[a-zA-Z0-9]{10,}`)
+  - No Bearer token credential leak
+  - No stack trace / file path leak on any page
+- **1011 tests total**, ruff clean, mypy clean (90 source files)
+
 ### Added
 
 - **Console MVP Phase 1**: FastAPI+Jinja2+htmx Web Console at `/console/`

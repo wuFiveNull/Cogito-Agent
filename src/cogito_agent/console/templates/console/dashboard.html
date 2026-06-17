@@ -43,8 +43,8 @@
 <h3>Quick Links</h3>
 <div class="quick-links">
   {% for item in menu %}
-  <a href="{{ item.href }}" class="quick-link{% if item.soon %} soon{% endif %}">
-    {{ item.label }}{% if item.soon %} (coming soon){% endif %}
+  <a href="{{ item.href }}" class="quick-link">
+    {{ item.label }}
   </a>
   {% endfor %}
 </div>

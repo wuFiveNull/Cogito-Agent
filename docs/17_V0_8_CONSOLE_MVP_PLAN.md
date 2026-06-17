@@ -5,7 +5,7 @@
 - **Predecessor**: v0.7.0-rc1 (tagged, 755 tests, ruff/mypy clean)
 - **Branch**: master
 - **Nature**: Phase 1 (Foundation) ✅ + Phase 2 (Chat MVP) ✅ + Phase 3 (Memory Review MVP) ✅ + Phase 4 (Approval Queue MVP) ✅ + Phase 5 (Trace & Audit MVP) ✅ + Phase 6 (Autonomy Console MVP) ✅ + Phase 7 (Config & Doctor) ✅ — interactive chat, memory management, approval queue, trace/audit viewers, autonomy decision/outbox/feedback management, config viewer, doctor page
-- **938 tests**, ruff clean, mypy clean (90 files)
+- **1011 tests**, ruff clean, mypy clean (90 files)
 - Chat page at `/console/chat`, send at `POST /console/chat/send`, stream at `POST /console/chat/stream`
 - Memory page at `/console/memory`, actions at `/console/memory/candidates/{id}/accept|reject|edit`, `/console/memory/{id}/edit|archive|delete`
 - Approval page at `/console/approval`, actions at `/console/approval/{id}/approve|reject`
@@ -233,7 +233,7 @@ templates/
 5. ✅ **Phase 5: Trace & Audit** — Trace list/detail with span tree viewer + Audit list/detail with filters and redacted details
 6. ✅ **Phase 6: Autonomy** — Decisions list/detail, Outbox list, Feedback form, dashboard, filters
 7. ✅ **Phase 7: Config & Doctor** — Config viewer (read-only, section-grouped, redacted secrets), Doctor page (system health check, section-grouped results, overall status badge, JSON API)
-8. 🚧 **Phase 8: Polish** — Navigation, responsive layout, loading states, error pages
+8. ✅ **Phase 8: Polish** — Nav active state, responsive CSS, loading states, security regression tests, critical Jinja2 bugfix
 
 ---
 
@@ -292,7 +292,12 @@ templates/
 [x] Doctor page shows system status
 [x] All pages respect auth (when COGITO_API_KEY is set)
 [x] No secret leakage in any HTML output
-[x] pytest passes
+[x] Nav active state works on all pages
+[x] Empty states present on list pages
+[x] Loading indicators on htmx interactions
+[x] Critical Jinja2 extends bug fixed (traces.html, trace_detail.html)
+[x] 73 security regression tests added (auth, secret leak, stack trace)
+[x] pytest passes (1011)
 [x] ruff check src/ passes
 [x] mypy src/ passes
 [x] Existing CLI tests still pass

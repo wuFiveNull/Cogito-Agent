@@ -24,7 +24,7 @@ v0.7.0-rc1 (Autonomy Plane MVP release candidate):
 - Config keys: autonomy.enabled, quiet_hours.*, notification.*, dedup.*, feedback.*
 - docs/16_V0_7_AUTONOMY_NOTIFICATION_GATE_PLAN.md updated
 
-v0.8.0-dev (Console MVP Phase 1–7, current):
+v0.8.0-dev (Console MVP Phase 1–8, current):
 - **Phase 1 — Foundation**: Console module, Dashboard, Status API, 8 placeholder pages, base layout, auth, redaction, static files, packaging
 - **Phase 2 — Chat MVP**: Interactive chat at `/console/chat` with:
   - Message area with user/assistant bubbles
@@ -87,10 +87,18 @@ v0.8.0-dev (Console MVP Phase 1–7, current):
   - Templates: `config.html` (section-grouped tables), `doctor.html` (overall status badge + section check cards with name/status/message)
   - 938 tests passing, ruff clean, mypy clean (90 source files)
   - New API: `GET /api/v1/doctor` returns JSON with status, checks, limitations; `?live=1` returns 501
+- **Phase 8 — Polish & RC Hardening** (current):
+  - Nav active state: sidebar highlights current page
+  - Dashboard quick links: no more "coming soon" labels
+  - CSS polish: UUID wrapping, raw JSON scroll, empty state, responsive improvements, button styles
+  - Loading states: global htmx indicator, CSS opacity on active requests
+  - Critical bugfix: `traces.html` / `trace_detail.html` had `<!DOCTYPE html>` before `{% extends %}` (Jinja2 error)
+  - Security regression: 73 new unified tests for auth (all pages), secret leak (sk-/Bearer/password), stack trace leak
+  - 1011 tests passing, ruff clean, mypy clean (90 source files)
 
 ## Verification Status
 
-- **938 tests passing** (`pytest` clean)
+- **1011 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
 - **mypy clean** (`mypy src/` clean, 90 files)
 

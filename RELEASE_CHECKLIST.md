@@ -1,6 +1,63 @@
 # Release Checklist
 
-## v0.7.0-rc1 Release Candidate
+## v0.8.0-rc1 Release Checklist
+
+### Code Quality
+- [ ] fresh clone install ok (`pip install -e ".[dev]"`)
+- [ ] pytest passes (1011 tests)
+- [ ] ruff check src/ passes
+- [ ] mypy src/ passes (90 files)
+
+### Console Pages (all pages load with valid auth)
+- [ ] /console/ — Dashboard with stats and quick links
+- [ ] /console/chat — Chat page with send/stream
+- [ ] /console/memory — Memory review with accept/reject/edit/archive/delete
+- [ ] /console/approval — Approval queue with approve/reject
+- [ ] /console/traces — Trace list with filters and span tree on detail
+- [ ] /console/audit — Audit list with filters and redacted details
+- [ ] /console/autonomy — Autonomy dashboard with decisions/outbox/feedback
+- [ ] /console/config — Read-only config viewer (redacted secrets)
+- [ ] /console/doctor — System health check with section-grouped results
+- [ ] /api/v1/status — System status JSON
+- [ ] /api/v1/doctor — Doctor JSON API
+
+### Auth & Security
+- [ ] AuthMiddleware protects all console pages (401 without token)
+- [ ] Auth works with valid Bearer token (200)
+- [ ] No secret leakage in any HTML output (sk-, Bearer token, password, token_value)
+- [ ] No API key pattern leak (sk-[a-zA-Z0-9]{10,})
+- [ ] No Bearer token leak (Bearer <credential>)
+- [ ] No stack trace in UI
+- [ ] XSS escape verified on all pages (per-page tests pass)
+- [ ] Redaction applied to all dynamic content
+
+### Navigation & UI Polish
+- [ ] Sidebar nav active state highlights current page
+- [ ] No "coming soon" on any page
+- [ ] Dashboard quick links all point to real pages
+- [ ] Empty states present on list pages
+- [ ] Loading indicators on htmx actions
+- [ ] 404 page uses console layout
+- [ ] Responsive: sidebar/mobile works
+- [ ] UUID/code content wraps properly
+- [ ] Raw JSON areas scroll horizontally
+
+### Documentation
+- [ ] README.md reflects Console MVP Phase 1–8
+- [ ] AGENTS.md reflects current state
+- [ ] CHANGELOG.md reflects all phases
+- [ ] docs/17_V0_8_CONSOLE_MVP_PLAN.md completed
+- [ ] RELEASE_CHECKLIST.md updated
+- [ ] Known limitations documented
+
+### Release Steps
+- [ ] All checkboxes verified
+- [ ] Tag commit as v0.8.0-rc1
+- [ ] Push tag to origin
+- [ ] Create GitHub Release with changelog
+- [ ] Publish to PyPI (optional)
+
+## v0.7.0-rc1 Release Candidate (historical)
 
 ### Code Quality
 - [x] fresh clone install ok (`pip install -e ".[dev]"`)
@@ -72,18 +129,21 @@
 ### Release Steps
 - [x] pyproject.toml version set to 0.7.0-rc1
 - [x] All checkboxes verified
-- [ ] Tag commit as v0.7.0-rc1
-- [ ] Push tag to origin
+- [ ] Tag commit as v0.7.0-rc1 (superseded by v0.8.0-rc1)
+- [ ] Push tag to origin (superseded by v0.8.0-rc1)
 - [ ] Create GitHub Release with changelog
 - [ ] Publish to PyPI (optional)
 
-## Known Limitations (v0.7.0-rc1)
+## Known Limitations (v0.8.0-rc1)
 
-- No Web UI / TUI — autonomy only via CLI
-- No Telegram / Feishu real push — outbox is local SQLite queue
-- No LLM relevance judge — cost score is purely deterministic (priority + quiet_hours + quota + recent feedback)
-- No complex multi-agent autonomy — single ProactiveLoop, no subagent delegation
-- Dedup shares state with old `notifications` table (legacy `should_notify()` code path)
-- No scheduled outbox delivery — messages stay in outbox until manually marked sent/failed
+- No multi-user / OAuth / RBAC
+- No config editing (read-only)
+- No real Telegram / Feishu delivery — outbox is local SQLite queue
+- No outbox dispatcher UI
+- No advanced diagnostics or diagnostic bundle export
+- No Plugin Marketplace
 - LocalSecretsProvider is unencrypted SQLite
 - No cloud sync, plugin marketplace, or distributed queuing
+- No LLM relevance judge — cost score is purely deterministic
+- Chat supports single console-default session only
+- Missing polish: loading states on some htmx actions, responsive edge cases
