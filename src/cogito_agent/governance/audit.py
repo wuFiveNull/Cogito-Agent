@@ -19,20 +19,23 @@ class AuditLogger:
         reason: str = "",
         details: str = "{}",
         redact_details: bool = True,
-    ) -> None:
+    ) -> str:
         if redact_details and details and details != "{}":
             from cogito_agent.trace.redaction import RedactionHelper
 
             helper = RedactionHelper()
             details = helper.redact(details)
+        import uuid
+        audit_id = str(uuid.uuid4())
         self._db.connection.execute(
             "INSERT INTO audit_logs"
-            " (actor_id, action, resource, workspace_id, session_id,"
+            " (id, actor_id, action, resource, workspace_id, session_id,"
             " trace_id, decision, reason, details)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                actor_id, action, resource, workspace_id, session_id,
+                audit_id, actor_id, action, resource, workspace_id, session_id,
                 trace_id, decision, reason, details,
             ),
         )
         self._db.connection.commit()
+        return audit_id

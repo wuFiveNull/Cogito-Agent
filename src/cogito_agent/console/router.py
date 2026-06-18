@@ -11,17 +11,20 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from .approval import approval_router as _approval_router
+from .artifact_views import artifact_router as _artifact_router
 from .audit_views import audit_router as _audit_router
 from .autonomy_views import autonomy_router as _autonomy_router
 from .chat_sessions import router as _chat_sessions_router
 from .config_views import config_router as _config_router
 from .doctor_views import doctor_router as _doctor_router
+from .drift_views import drift_router as _drift_router
 from .inbox_views import inbox_router as _inbox_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
 from .status import build_status
 from .trace_views import trace_router as _trace_router
 from .utils import menu_items as _menu_items
+from .workspace_views import workspace_files_router as _workspace_files_router
 
 logger = logging.getLogger(__name__)
 
@@ -306,8 +309,11 @@ console_router.include_router(_trace_router, prefix="/traces")
 console_router.include_router(_audit_router, prefix="/audit")
 console_router.include_router(_autonomy_router, prefix="/autonomy")
 console_router.include_router(_config_router, prefix="/config")
+console_router.include_router(_drift_router, prefix="/drift")
 console_router.include_router(_doctor_router, prefix="/doctor")
 console_router.include_router(_inbox_router, prefix="/inbox")
+console_router.include_router(_workspace_files_router, prefix="/workspace/files")
+console_router.include_router(_artifact_router, prefix="/artifacts")
 
 
 # ─── Placeholder Pages ──────────────────────────────────────────────────────

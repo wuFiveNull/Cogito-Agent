@@ -30,6 +30,40 @@ class PolicyRule:
         ])
 
 
+FILE_POLICY_RULES: list[PolicyRule] = [
+    PolicyRule("assistant", "read", "interactive",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("assistant", "scan", "interactive",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("assistant", "search", "interactive",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("assistant", "write", "interactive",
+               DecisionType.require_approval, resource="artifact"),
+    PolicyRule("assistant", "delete", "interactive",
+               DecisionType.require_approval, resource="workspace_file"),
+    PolicyRule("scheduler", "read", "background",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("scheduler", "scan", "background",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("scheduler", "search", "background",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("scheduler", "write", "background",
+               DecisionType.deny, resource="artifact"),
+    PolicyRule("scheduler", "write", "background",
+               DecisionType.require_approval, resource="artifact"),
+    PolicyRule("skill", "read", "interactive",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("skill", "scan", "interactive",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("skill", "search", "interactive",
+               DecisionType.allow_with_audit, resource="workspace_file"),
+    PolicyRule("skill", "write", "interactive",
+               DecisionType.allow_with_audit, resource="artifact"),
+    PolicyRule("skill", "write", "background",
+               DecisionType.require_approval, resource="artifact"),
+]
+
+
 class PolicyEngine:
     MVP_MATRIX: list[PolicyRule] = [
         # ── Interactive: explicit rules evaluated first ──────────────
@@ -84,7 +118,7 @@ class PolicyEngine:
     ]
 
     def __init__(self, rules: list[PolicyRule] | None = None) -> None:
-        self._rules = rules or list(self.MVP_MATRIX)
+        self._rules = rules or list(self.MVP_MATRIX) + FILE_POLICY_RULES
 
     def evaluate(self, request: PolicyRequest) -> PolicyDecision:
         for rule in self._rules:

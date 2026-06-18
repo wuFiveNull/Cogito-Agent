@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.14.0-dev (2026-06-18)
+
+### **Real Skills + Drift Runtime**
+
+- **5 Real Built-in Skills**: `daily_brief`, `memory_consolidation`, `task_extraction`, `trace_review`, `inbox_digest` upgraded from stubs to full implementations.
+
+- **daily_brief**: Collects memories, tasks, sessions, inbox items, artifacts, and file chunks; generates a Markdown briefing report as an artifact; creates an inbox notification with artifact link; integrates with ContextEngine; writes audit logs and trace spans. `src/cogito_agent/skill/builtin/daily_brief.py`.
+
+- **memory_consolidation**: `_find_duplicates` (groups by identical lowercase text, proposes merge), `_find_stale` (≥30 days old, proposes archive), `_find_conflicting` (negation-based conflict detection with ≥3 overlapping words and opposing negation), `_find_low_confidence` (<0.3 confidence, proposes flag). Outputs JSON proposal artifact with action/reason/confidence/source_memory_ids. **Proposal-only — does NOT perform any mutations**. Inbox notification. Trace/audit. `src/cogito_agent/skill/builtin/memory_consolidation.py`.
+
+- **task_extraction**: Scans recent sessions (with title, excludes "Console Chat"), task/project memories (>20 chars), pending inbox items, and recent artifacts. Each source contributes structured candidates with title/description/source/priority/confidence/requires_confirmation. **Does NOT write task memories**. JSON candidate artifact. Inbox notification. Trace/audit. `src/cogito_agent/skill/builtin/task_extraction.py`.
+
+- **trace_review**: Analyzes failed traces, denied tool calls, unresolved approvals (pending), slow tool calls (>10s), high-cost model calls (>30s), dead-letter outbox messages, file ingestion errors, and skill failures. Generates Markdown health report artifact with issue type, affected IDs, risk level (low/medium/high), and recommended fixes. Inbox notification. Trace/audit. `src/cogito_agent/skill/builtin/trace_review.py`.
+
+- **inbox_digest**: Aggregates unread inbox items from DB, merges duplicates via normalized key (`source:title[:40]:body[:60]`), identifies noisy sources (>30% of total items, count ≥3). Generates Markdown digest artifact with groups, noisy sources, and recommendations. **Does NOT create inbox notifications** (no recursive spam). Trace/audit. `src/cogito_agent/skill/builtin/inbox_digest.py`.
+
+- **SkillRunner output metadata**: `SkillRunLog` tracks `output_types`, `artifact_ids`, `inbox_item_ids`, `proposal_ids` in the persisted step log JSON. `src/cogito_agent/skill/runner.py`.
+
+- **DriftRuntime**: Full daemon tick loop (60s interval), skill selection prioritizing low-risk skills (`memory_consolidation`, `trace_review`, `inbox_digest`) before medium-risk (`daily_brief`, `task_extraction` with 2x cooldown), quiet hours (configurable start/end), daily budget (default 5), per-skill cooldown (300s low-risk, 600s medium-risk), pause/resume with reason, trace/audit per run, `drift_runs` table persistence, `status()` API with next eligible skills, `update_settings()` API. Legacy `submit()`/`process()` kept for backward compat. `src/cogito_agent/runtime/drift.py`.
+
+- **DriftMaintenance**: `consolidate_memories()` (delete exact duplicates, workspace-scoped or global), `archive_stale_memories()` (insert stale copies with `status='stale'`), `refresh_fts()` (rebuild FTS index), `cleanup_traces()` (purge traces/source data older than N days), `usage_report()` (count messages/memories/traces/tool_calls/audit_logs per workspace or global). `src/cogito_agent/runtime/drift.py`.
+
+- **Console Drift Page**: `/console/drift` dashboard with status/budget stat cards, pause/resume actions, run history table with artifact/trace/audit links. `/console/drift/runs/{run_id}` detail page. All content redacted + HTML-escaped. AuthMiddleware protected. `src/cogito_agent/console/drift_views.py`, `drift.html`, `drift_run_detail.html`.
+
+- **Migration v10**: `drift_runs` table (id, workspace_id, skill_name, status, trace_id, audit_id, artifact_id, started_at, completed_at, error_message, metadata_json, created_at) with indexes. `drift_state` table (enabled, paused, quiet_hours_start/end, daily_budget, timezone, runs_today, pause_reason, paused_at, updated_at) with default row. Export includes both tables.
+
+- **Security fix**: `LocalSecretsProvider._init_db()` now creates parent directories automatically (fixes `unable to open database file` on Windows when `/tmp/` doesn't exist).
+
+- **Bugfixes**: `trace_review.py` and `task_extraction.py` now properly convert `sqlite3.Row` objects to `dict` before calling `.get()`. Test fixture inserts for `workspace_files` and `file_chunks` now include `created_at`/`updated_at` columns (NOT NULL constraints from migration v9).
+
+- **v0.14 Stabilization**: 3 new release regression tests verify `memory_consolidation` does not mutate memories directly, `_tick()` does not run during quiet hours, and `inbox_digest` does not create recursive inbox notifications. Existing quiet hours tests made deterministic (always-quiet range). All pre-existing issues documented.
+
+- **47 new tests** (26 skill + 17 drift + 3 regression + 1 fix), **1192 tests passing**, ruff clean, mypy clean (112 source files)
+- **docs/23_V0_14_REAL_SKILLS_DRIFT_RUNTIME_PLAN.md** created
+- **docs/24_V0_15_PRODUCTION_PACKAGING_PLAN.md** created (draft)
+
+## v0.13.0-dev (2026-06-18)
+
+### **Workspace Files + Artifact System**
+
+- **Workspace File Registry**: `WorkspaceFileRegistry` with root registration, file CRUD, path traversal/symlink escape prevention (sandboxed to registered roots), SHA256 hashing, fnmatch-based ignore patterns (`.gitignore`-style). `src/cogito_agent/workspace/registry.py`.
+- **File Ingestion Service**: `FileIngestionService` with idempotent scan, text extraction for `.txt`/`.md`/`.json`/`.py`/`.ts`/`.js`, encoding fallback (UTF-8/UTF-16/latin-1), configurable max file size, ignore patterns support at scan time. `src/cogito_agent/workspace/ingestion.py`.
+- **Chunk Index + FTS5 Search**: Files split into overlapping chunks (512-char, 64-char overlap), indexed in `file_chunks_fts` (FTS5) for full-text search with path/line-number metadata. `FileRetriever.search()` tries FTS5 first, falls back to `MockEmbeddingService` (hash-based 384-dim) for semantic similarity. `src/cogito_agent/workspace/retrieval.py`.
+- **Artifact System**: `ArtifactService` with create/list/detail/delete operations, markdown/JSON/text render, audit log integration (`log()` now returns `audit_id`), trace spans. Artifacts can be sourced from skills, tools, or manual input. `src/cogito_agent/workspace/artifacts.py`.
+- **5 New File Capabilities**: `workspace.file.scan` (scan workspace roots), `.search` (FTS5 + semantic), `.read` (read file content), `.write_artifact` (create artifacts from skill/tool output), `.remove_from_index` (remove files from index). Each with JSON Schema params, risk levels, approval requirements, audit rules. `src/cogito_agent/capability/file_capabilities.py`.
+- **ContextEngine file_context**: `FileRetriever.search()` integrated into `ContextEngine.build()` — file chunks become `ContextItem` with `source=file` type and `source_lineage` metadata (path, chunk index, line range).
+- **Console Workspace Files Page**: `/console/workspace/files` — list indexed workspace files with path/type/size/mtime/chunk count, scan/reindex/remove actions. `<span class="text-danger">` for failed chunks. All content redacted + HTML espaced. AuthMiddleware protected. `src/cogito_agent/console/workspace_views.py`.
+- **Console Artifacts Page**: `/console/artifacts` — list all artifacts with title/type/source/created; detail view with rendered content (markdown/JSON/text); download raw content. All content redacted + HTML-escaped. AuthMiddleware protected. `src/cogito_agent/console/artifact_views.py`.
+- **Upgraded `project_status` Skill**: Builtin skill that collects memories, sessions, inbox items, and file chunks; generates a comprehensive Markdown report as an artifact; creates an inbox notification with artifact link; writes audit logs and trace spans. `src/cogito_agent/skill/builtin/project_status.py`.
+- **Migration v9**: New tables `workspace_roots`, `workspace_files`, `file_chunks`, `file_chunk_embeddings`, `file_chunks_fts`, `artifacts` with indexes and foreign keys. Export includes all new tables.
+- **Policy**: `FILE_POLICY_RULES` added for stricter background/scheduler operations on file capabilities.
+- **Audit fix**: `log()` now returns `str` (audit_id) for artifact integration.
+- **44 new tests**: workspace registry (13), file ingestion (10), FTS chunks (4), artifact system (11), project_status skill (6) — covering path traversal deny, symlink escape deny, scan idempotency, encoding fallback, size limits, ignore patterns, FTS search, embedding fallback, artifact CRUD/render, real project_status run with trace/audit/inbox.
+- **1146 tests passing**, ruff clean, mypy clean (95 source files)
+- **docs/22_V0_13_WORKSPACE_FILES_ARTIFACTS_PLAN.md** created
+
 ## v0.11.0-dev (2026-06-18)
 
 ### **Autonomy Delivery & Local Production Hardening**

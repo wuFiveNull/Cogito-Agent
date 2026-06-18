@@ -43,6 +43,126 @@ register_migration(7, """
     ALTER TABLE outbox_messages ADD COLUMN updated_at TEXT;
     ALTER TABLE inbox_items ADD COLUMN decision_id TEXT DEFAULT '';
 """)
+register_migration(9, """
+    CREATE TABLE IF NOT EXISTS workspace_roots (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        root_path TEXT NOT NULL,
+        label TEXT DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        ignore_patterns TEXT DEFAULT '',
+        max_file_size INTEGER DEFAULT 10485760,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_wr_workspace ON workspace_roots(workspace_id);
+    CREATE TABLE IF NOT EXISTS workspace_files (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        root_id TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        mime_type TEXT DEFAULT '',
+        size_bytes INTEGER DEFAULT 0,
+        sha256 TEXT DEFAULT '',
+        modified_at TEXT,
+        indexed_at TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        sensitivity_level TEXT DEFAULT 'normal',
+        error_message TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (root_id) REFERENCES workspace_roots(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wf_workspace ON workspace_files(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_wf_root ON workspace_files(root_id);
+    CREATE INDEX IF NOT EXISTS idx_wf_status ON workspace_files(status);
+    CREATE INDEX IF NOT EXISTS idx_wf_sha256 ON workspace_files(sha256);
+    CREATE TABLE IF NOT EXISTS file_chunks (
+        id TEXT PRIMARY KEY,
+        workspace_file_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        token_count INTEGER DEFAULT 0,
+        start_line INTEGER DEFAULT 0,
+        end_line INTEGER DEFAULT 0,
+        sha256 TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (workspace_file_id) REFERENCES workspace_files(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_fc_file ON file_chunks(workspace_file_id);
+    CREATE INDEX IF NOT EXISTS idx_fc_workspace ON file_chunks(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_fc_chunk ON file_chunks(workspace_file_id, chunk_index);
+    CREATE VIRTUAL TABLE IF NOT EXISTS file_chunks_fts USING fts5(
+        text, content=file_chunks, content_rowid=rowid
+    );
+    CREATE TABLE IF NOT EXISTS file_chunk_embeddings (
+        chunk_id TEXT NOT NULL,
+        embedding BLOB,
+        model_name TEXT DEFAULT '',
+        PRIMARY KEY (chunk_id),
+        FOREIGN KEY (chunk_id) REFERENCES file_chunks(id)
+    );
+    CREATE TABLE IF NOT EXISTS artifacts (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT DEFAULT '',
+        title TEXT NOT NULL,
+        artifact_type TEXT NOT NULL DEFAULT 'markdown',
+        mime_type TEXT DEFAULT 'text/markdown',
+        content_json TEXT DEFAULT '',
+        content_sha256 TEXT DEFAULT '',
+        size_bytes INTEGER DEFAULT 0,
+        storage_path TEXT DEFAULT '',
+        created_by TEXT DEFAULT '',
+        trace_id TEXT DEFAULT '',
+        audit_id TEXT DEFAULT '',
+        deleted_at TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_art_workspace ON artifacts(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_art_source ON artifacts(source_type, source_id);
+    CREATE INDEX IF NOT EXISTS idx_art_trace ON artifacts(trace_id);
+    CREATE INDEX IF NOT EXISTS idx_art_type ON artifacts(artifact_type);
+""")
+register_migration(10, """
+    CREATE TABLE IF NOT EXISTS drift_runs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        trace_id TEXT DEFAULT '',
+        audit_id TEXT DEFAULT '',
+        artifact_id TEXT DEFAULT '',
+        started_at TEXT,
+        completed_at TEXT,
+        error_message TEXT DEFAULT '',
+        metadata_json TEXT DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_drift_workspace ON drift_runs(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_drift_status ON drift_runs(status);
+    CREATE INDEX IF NOT EXISTS idx_drift_skill ON drift_runs(skill_name);
+    CREATE TABLE IF NOT EXISTS drift_state (
+        id TEXT PRIMARY KEY DEFAULT 'main',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        paused INTEGER NOT NULL DEFAULT 0,
+        quiet_hours_start TEXT DEFAULT '',
+        quiet_hours_end TEXT DEFAULT '',
+        daily_budget INTEGER NOT NULL DEFAULT 5,
+        timezone TEXT NOT NULL DEFAULT 'UTC',
+        last_tick_at TEXT,
+        runs_today INTEGER NOT NULL DEFAULT 0,
+        pause_reason TEXT DEFAULT '',
+        paused_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT OR IGNORE INTO drift_state (id) VALUES ('main');
+""")
 register_migration(6, """
     CREATE TABLE IF NOT EXISTS notification_decisions (
         id TEXT PRIMARY KEY,
@@ -148,6 +268,9 @@ class Database:
             "workspace_skills", "skill_run_logs",
             "inbox_items", "inbox", "memory_edit_log",
             "daemon_state",
+            "workspace_roots", "workspace_files", "file_chunks",
+            "file_chunk_embeddings", "artifacts",
+            "drift_runs",
         ]
         for table in tables:
             try:

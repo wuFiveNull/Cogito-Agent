@@ -62,6 +62,8 @@ class WorkspaceRepository:
             "audit_logs", "model_calls", "tool_calls", "spans", "traces",
             "workspace_skills", "skill_run_logs",
             "memory_candidates", "file_artifacts",
+            "file_chunk_embeddings", "file_chunks", "artifacts",
+            "workspace_files", "workspace_roots",
         ]
         msgs = self._db.connection.execute(
             "SELECT id FROM messages WHERE workspace_id = ?", (wid,)

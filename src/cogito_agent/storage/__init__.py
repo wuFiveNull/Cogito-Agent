@@ -8,6 +8,9 @@ from .repositories import (
     WorkspaceRepository,
 )
 
+# Re-exported for convenience, but the primary workspace layer
+# is accessed via workspace/ subpackage.
+
 __all__ = [
     "Database",
     "WorkspaceRepository",

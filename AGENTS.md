@@ -135,9 +135,9 @@ v0.11.0-dev (Autonomy Delivery & Local Production Hardening, current):
 
 ## Verification Status
 
-- **1043 tests passing** (`pytest` clean)
+- **1192 tests passing** (`pytest` clean)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 91 files)
+- **mypy clean** (`mypy src/` clean, 112 files)
 
 - ✅ Phase 1 (Epics A–B): Runtime full turn pipeline, context engine with budget shares
 - ✅ Phase 2 (Epics C–E): Tool dispatch, approval flow, budget enforcement
@@ -149,6 +149,7 @@ v0.11.0-dev (Autonomy Delivery & Local Production Hardening, current):
 - ✅ Phase 6 (Epics M–P): Skill runtime depth, background security, failure/retry, interrupt/resume
 - ✅ Phase 7 (Epics Q–S): Drift maintenance, CLI/API polish, replay
 - ✅ Phase 8 (Autonomy Plane MVP): Notification Gate, Decision Log, Outbox, Proactive Loop, Feedback, CLI, trace/audit integration
+- ✅ Phase 9 (V0.14 Real Skills + Drift Runtime): 5 real built-in skills (daily_brief, memory_consolidation, task_extraction, trace_review, inbox_digest), DriftRuntime (tick loop, quiet hours, budget, cooldown, pause/resume), DriftMaintenance, Console Drift page, migration v10
 
 ## Console Status (v0.8 Phase 1–2)
 
@@ -181,6 +182,37 @@ v0.11.0-dev (Autonomy Delivery & Local Production Hardening, current):
 - ✅ Trace & Audit pages (Phase 5)
 - ✅ Autonomy pages (Phase 6)
 - ✅ Config page & Doctor page (Phase 7)
+
+v0.13.0-dev (Workspace Files + Artifact System):
+- WorkspaceFileRegistry with root registration, file CRUD, path traversal/symlink escape prevention, SHA256 hashing, fnmatch ignore patterns
+- FileIngestionService with idempotent scan, text extraction (.txt/.md/.json/.py/.ts/.js), encoding fallback, max file size limit
+- Chunk index with FTS5 (file_chunks_fts): 512-char chunks, 64-char overlap, path/line-number metadata
+- FileRetriever.search() with FTS5 primary + MockEmbeddingService fallback for semantic search
+- ArtifactService with CRUD + render (markdown/json/text) + audit log integration + trace spans
+- 5 new file capability manifests: workspace.file.scan/.search/.read/.write_artifact/.remove_from_index
+- ContextEngine file_context integration: FileRetriever results as ContextItem with source_lineage
+- Console pages: /console/workspace/files (list/scan/reindex/remove), /console/artifacts (list/detail/download/delete)
+- Upgraded project_status builtin skill: collects memories/sessions/inbox/file chunks → Markdown artifact + inbox notification
+- Migration v9: workspace_roots, workspace_files, file_chunks, file_chunk_embeddings, file_chunks_fts, artifacts
+- FILE_POLICY_RULES for stricter background/scheduler file operations
+- Audit log() now returns audit_id string
+- 44 new tests, 1146 tests passing, ruff clean, mypy clean (95 source files)
+- docs/22_V0_13_WORKSPACE_FILES_ARTIFACTS_PLAN.md created
+
+v0.14.0-dev (Real Skills + Drift Runtime, current):
+- 5 built-in skills upgraded from stubs to real implementations:
+  - **daily_brief**: collects memories/tasks/sessions/inbox/artifacts/file_chunks → Markdown artifact + inbox notification; ContextEngine integration; trace/audit
+  - **memory_consolidation**: finds duplicates (identical text), stale (≥30 days), conflicting (negation-based), low-confidence (<0.3) memories → JSON proposal artifact; proposal-only (NO direct merge/archive/delete); inbox notification; trace/audit
+  - **task_extraction**: extracts candidates from sessions/task memories/pending inbox/recent artifacts → JSON candidate artifact; does NOT write task memories; inbox notification; trace/audit
+  - **trace_review**: analyzes failed traces/denied calls/unresolved approvals/slow calls/high-cost calls/dead-letters/file errors/skill failures → Markdown health report artifact; inbox notification; trace/audit
+  - **inbox_digest**: aggregates unread inbox items, merges duplicates by normalized key, identifies noisy sources (>30% ratio, ≥3 count) → Markdown digest artifact; does NOT create inbox notification (no recursive spam)
+- SkillRunner updated: SkillRunLog tracks output_types, artifact_ids, inbox_item_ids, proposal_ids
+- DriftRuntime with daemon tick loop (60s interval), skill selection (low-risk first: memory_consolidation/trace_review/inbox_digest, then medium-risk: daily_brief/task_extraction with 2x cooldown), quiet hours, daily budget (default 5), per-skill cooldown (300s/600s), pause/resume with reason, trace/audit per run, drift_runs table persistence, status() API, update_settings() API
+- DriftMaintenance with consolidate_memories, archive_stale_memories, refresh_fts, cleanup_traces, usage_report
+- Console Drift page: /console/drift dashboard (status/budget cards, pause/resume, run history), /console/drift/runs/{id} detail (trace/artifact/audit links)
+- Migration v10: drift_runs, drift_state tables
+- 47 new tests, 1192 tests passing, ruff clean, mypy clean (112 source files)
+- docs/23_V0_14_REAL_SKILLS_DRIFT_RUNTIME_PLAN.md created
 
 ## V2 Status
 

@@ -28,6 +28,20 @@ class SkillRunLog:
         self.status = status
         self.step_logs: list[dict[str, object]] = []
         self.outputs: dict[str, str] = {}
+        self.artifact_ids: list[str] = []
+        self.inbox_item_ids: list[str] = []
+        self.proposal_ids: list[str] = []
+
+    @property
+    def output_types(self) -> list[str]:
+        types: list[str] = []
+        if self.artifact_ids:
+            types.append("artifact")
+        if self.inbox_item_ids:
+            types.append("inbox")
+        if self.proposal_ids:
+            types.append("proposal")
+        return types
 
 
 class SkillRunner:
@@ -666,6 +680,10 @@ class SkillRunner:
         payload = {
             "step_logs": log.step_logs,
             "outputs": log.outputs,
+            "output_types": log.output_types,
+            "artifact_ids": log.artifact_ids,
+            "inbox_item_ids": log.inbox_item_ids,
+            "proposal_ids": log.proposal_ids,
         }
         resume_json = json.dumps(resume_data) if resume_data else None
         self._db.connection.execute(

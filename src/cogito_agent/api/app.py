@@ -494,17 +494,15 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
                     yield sev.to_sse()
         except Exception:
             logger.exception("chat_stream runtime error")
-            yield (
-                f"event: error\n"
-                f"data: {json.dumps({
-                    'error': {
-                        'code': 'RUNTIME_ERROR',
-                        'message': 'Internal error during processing',
-                        'request_id': rid,
-                        'retryable': False,
-                    },
-                })}\n\n"
-            )
+            err_data = json.dumps({
+                "error": {
+                    "code": "RUNTIME_ERROR",
+                    "message": "Internal error during processing",
+                    "request_id": rid,
+                    "retryable": False,
+                },
+            })
+            yield f"event: error\ndata: {err_data}\n\n"
 
     return StreamingResponse(
         event_stream(),

@@ -1,6 +1,9 @@
 """Tests: secrets.backend config controls which SecretProvider is used."""
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from cogito_agent.security import (
     EnvSecretProvider,
     KeychainSecretProvider,
@@ -30,8 +33,9 @@ def test_backend_keychain():
 
 
 def test_backend_local_with_path():
+    path = str(Path(tempfile.gettempdir()) / "cogito_test_secrets.db")
     provider = get_provider_from_config({
         "secrets.backend": "local",
-        "secrets.local_path": "/tmp/test_secrets.db",
+        "secrets.local_path": path,
     })
     assert isinstance(provider, LocalSecretsProvider)

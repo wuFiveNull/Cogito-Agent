@@ -13,4 +13,7 @@ def menu_items() -> list[dict[str, str | bool]]:
         {"label": "Autonomy", "href": "/console/autonomy", "icon": "autonomy"},
         {"label": "Config", "href": "/console/config", "icon": "config"},
         {"label": "Doctor", "href": "/console/doctor", "icon": "doctor"},
+        {"label": "Files", "href": "/console/workspace/files", "icon": "file"},
+        {"label": "Artifacts", "href": "/console/artifacts", "icon": "artifact"},
+        {"label": "Drift", "href": "/console/drift", "icon": "drift"},
     ]

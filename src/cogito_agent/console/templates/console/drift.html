@@ -1,0 +1,114 @@
+{% extends "console/base.html" %}
+{% block content %}
+<h1>Drift Runtime</h1>
+
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Status</h5>
+                <p>
+                    <strong>Enabled:</strong>
+                    <span class="{% if status.enabled %}text-success{% else %}text-danger{% endif %}">
+                        {{ status.enabled|yesno:"Yes,No" }}
+                    </span>
+                </p>
+                <p>
+                    <strong>Paused:</strong>
+                    <span class="{% if status.paused %}text-warning{% else %}text-success{% endif %}">
+                        {{ status.paused|yesno:"Yes,No" }}
+                    </span>
+                </p>
+                {% if status.paused and status.pause_reason %}
+                <p><strong>Pause Reason:</strong> {{ status.pause_reason }}</p>
+                {% endif %}
+                <p><strong>Quiet Hours:</strong> {{ status.quiet_hours_start }} - {{ status.quiet_hours_end }}</p>
+                <p><strong>In Quiet Hours:</strong> {{ status.in_quiet_hours|yesno:"Yes,No" }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Budget</h5>
+                <p><strong>Daily Budget:</strong> {{ status.daily_budget }}</p>
+                <p><strong>Runs Today:</strong> {{ status.runs_today }}</p>
+                <p><strong>Budget Remaining:</strong> {{ status.budget_remaining }}</p>
+                <p><strong>Last Tick:</strong> {{ status.last_tick|default:"Never" }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Actions</h5>
+                {% if status.paused %}
+                <form action="/console/drift/resume" method="post" style="display:inline;">
+                    <button type="submit" class="btn btn-success btn-sm">Resume</button>
+                </form>
+                {% else %}
+                <form action="/console/drift/pause" method="post" style="display:inline;">
+                    <input type="text" name="reason" placeholder="Pause reason (optional)" class="form-control-sm" style="width:200px;">
+                    <button type="submit" class="btn btn-warning btn-sm">Pause</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if status.next_eligible_skills %}
+<div class="alert alert-info">
+    <strong>Next eligible skills:</strong> {{ status.next_eligible_skills|join:", " }}
+</div>
+{% endif %}
+
+<h2 class="mt-4">Run History</h2>
+<div class="table-responsive">
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Skill</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Artifact</th>
+                <th>Trace</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr>
+                <td>{{ run.skill_name }}</td>
+                <td>
+                    <span class="badge bg-{% if run.status == 'completed' %}success{% elif run.status == 'failed' %}danger{% else %}secondary{% endif %}">
+                        {{ run.status }}
+                    </span>
+                </td>
+                <td>{{ run.started_at|default:run.created_at|truncatechars:16 }}</td>
+                <td>
+                    {% if run.artifact_id %}
+                    <a href="/console/artifacts/{{ run.artifact_id }}">View</a>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if run.trace_id %}
+                    <a href="/console/traces/{{ run.trace_id }}">{{ run.trace_id|truncatechars:12 }}</a>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td><a href="/console/drift/runs/{{ run.id }}">Detail</a></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-muted">No drift runs yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

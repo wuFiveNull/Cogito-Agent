@@ -109,6 +109,8 @@ class LocalSecretsProvider:
 
     def _init_db(self) -> None:
         import sqlite3
+        from pathlib import Path
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS secrets ("

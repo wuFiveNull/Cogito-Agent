@@ -1,3 +1,11 @@
+from .file_capabilities import (
+    _ALL_FILE_MANIFESTS,
+    READ_FILE_MANIFEST_V2,
+    REMOVE_FILE_MANIFEST,
+    SCAN_FILE_MANIFEST,
+    SEARCH_FILE_MANIFEST,
+    WRITE_ARTIFACT_MANIFEST,
+)
 from .registry import CapabilityRegistry, ToolResult, _validate_json_schema
 from .tools import (
     LIST_FILES_MANIFEST,
@@ -13,6 +21,12 @@ __all__ = [
     "ToolResult",
     "READ_FILE_MANIFEST",
     "LIST_FILES_MANIFEST",
+    "SCAN_FILE_MANIFEST",
+    "SEARCH_FILE_MANIFEST",
+    "READ_FILE_MANIFEST_V2",
+    "WRITE_ARTIFACT_MANIFEST",
+    "REMOVE_FILE_MANIFEST",
+    "_ALL_FILE_MANIFESTS",
     "_read_file",
     "_list_files",
     "set_sandbox_root",

@@ -119,9 +119,9 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.11.0-dev (Autonomy Delivery & Local Production Hardening)** — OutboxDispatcher with retry/backoff/dead-letter, DeliveryAdapter abstraction, Web Console Inbox, Backup/Restore/Export CLI, Secret Store Hardening (Fernet-encrypted SQLite, DevSqliteSecretProvider warning).
-Verified: **1097 tests passing**, `ruff check src/` clean, `mypy src/` clean (95 source files).
-Includes: v0.10.0 Hybrid Memory Search + Streaming Tool Interrupt + Multi-round Tool Loop, v0.9.0 Multi-Session Chat, v0.8.0 Console MVP, v0.7.0 Autonomy Plane MVP, v0.6.x hardening.
+**v0.14.0-dev (Real Skills + Drift Runtime)** — 5 real built-in skills (daily_brief, memory_consolidation, task_extraction, trace_review, inbox_digest) upgraded from stubs to full implementations with artifact/inbox/trace/audit output. DriftRuntime with daemon tick loop, skill selection, quiet hours, daily budget, per-skill cooldown, pause/resume. Console Drift page at `/console/drift`. All skills proposal-only (no automatic mutations). Inbox_digest does NOT create recursive spam.
+Verified: **1192 tests passing**, `ruff check src/` clean, `mypy src/` clean (112 source files).
+Includes: v0.13.0 Workspace Files + Artifacts, v0.11.0 Delivery Hardening, v0.10.0 Hybrid Memory + Streaming Tools + Tool Loop, v0.9.0 Multi-Session Chat, v0.8.0 Console MVP, v0.7.0 Autonomy Plane MVP.
 
 ## Development
 

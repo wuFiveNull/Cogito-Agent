@@ -1,0 +1,40 @@
+{% extends "console/base.html" %}
+{% block content %}
+<h1>Drift Run Detail</h1>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <p><strong>Run ID:</strong> <code>{{ run.id }}</code></p>
+        <p><strong>Skill:</strong> {{ run.skill_name }}</p>
+        <p><strong>Status:</strong>
+            <span class="badge bg-{% if run.status == 'completed' %}success{% elif run.status == 'failed' %}danger{% else %}secondary{% endif %}">
+                {{ run.status }}
+            </span>
+        </p>
+        <p><strong>Started:</strong> {{ run.started_at|default:run.created_at }}</p>
+        <p><strong>Completed:</strong> {{ run.completed_at|default:"-" }}</p>
+        {% if run.error_message %}
+        <p><strong>Error:</strong> <span class="text-danger">{{ run.error_message }}</span></p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title">Links</h5>
+        <ul>
+            {% if run.trace_id %}
+            <li><a href="/console/traces/{{ run.trace_id }}">View Trace</a></li>
+            {% endif %}
+            {% if run.artifact_id %}
+            <li><a href="/console/artifacts/{{ run.artifact_id }}">View Artifact</a></li>
+            {% endif %}
+            {% if run.audit_id %}
+            <li><a href="/console/audit?q={{ run.audit_id }}">View Audit</a></li>
+            {% endif %}
+        </ul>
+    </div>
+</div>
+
+<a href="/console/drift" class="btn btn-secondary">&larr; Back to Drift</a>
+{% endblock %}
