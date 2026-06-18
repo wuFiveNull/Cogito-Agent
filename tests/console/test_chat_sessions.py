@@ -2,13 +2,24 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
-from cogito_agent.api.app import app
-from cogito_agent.api.app import get_db
+from cogito_agent.api.app import app, get_db
 from cogito_agent.storage.repositories import MessageRepository, SessionRepository
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_db() -> None:
+    """Reset the shared database singleton before each test."""
+    import sys
+    api_mod = sys.modules["cogito_agent.api.app"]
+    api_mod._db = None
+    api_mod._kernel = None
+    _ensure_default_workspace()
+    yield
 
 CONSOLE_WORKSPACE_ID = "default"
 

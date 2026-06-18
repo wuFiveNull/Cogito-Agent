@@ -36,6 +36,18 @@ def run_cli(db_path: str = ":memory:") -> None:
     if current_provider != "mock":
         print(f"  Model provider: {current_provider}")
 
+    # Print recent context once at session start
+    from cogito_agent.storage.repositories import MessageRepository
+    msg_repo = MessageRepository(db)
+    recent_msgs = msg_repo.list_by_session(session_id, workspace_id)
+    if recent_msgs:
+        print(f"  Session has {len(recent_msgs)} previous message(s)")
+        for m in recent_msgs[-3:]:
+            role = str(m.get("role", ""))
+            content = str(m.get("content", ""))[:50]
+            if content:
+                print(f"  [{role}] {content}")
+
     while True:
         try:
             user_input = input("You: ")
@@ -392,12 +404,7 @@ def _display_result(
                 print(f"  \u2713 {tool_name}: {summary[:60]}")
 
     if tr.sources:
-        print()
-        for s in tr.sources:
-            stype = str(s.get("type", ""))
-            text = str(s.get("text", ""))[:40]
-            if text:
-                print(f"  [{stype}] {text}")
+        pass  # sources printed once at session start
 
 
 def _export_workspace(db: Database, workspace_id: str) -> None:

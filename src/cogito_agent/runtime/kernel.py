@@ -679,6 +679,13 @@ class RuntimeKernel:
         self, event: RuntimeEvent, message: str, trace: object,
     ) -> list[dict[str, str]]:
         msgs: list[dict[str, str]] = []
+        system_prompt = (
+            "You are a helpful personal assistant running in Cogito-Agent, "
+            "a local-first personal agent runtime. You have access to tools, "
+            "long-term memory, and governed capabilities. "
+            "Respond concisely and helpfully."
+        )
+        msgs.append({"role": "system", "content": system_prompt})
         recent = self._msg_repo.list_by_session(
             event.session_id, event.workspace_id
         )
