@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -505,3 +506,249 @@ class KeychainSecretProvider:
 
     def __repr__(self) -> str:
         return f"KeychainSecretProvider(service={self._service_name!r}, backend={self._backend!r})"
+
+
+class LocalEncryptedSecretProvider:
+    """Stores secrets in a local SQLite database with Fernet encryption at rest.
+
+    Uses a key file (``~/.cogito/secrets.key`` by default) to encrypt/decrypt
+    values transparently. The key file itself should be protected with file
+    system permissions (e.g. ``chmod 600`` on Linux/macOS).
+
+    If the key file does not exist, a new key is generated on first use.
+    **Losing the key file makes all stored secrets unrecoverable.**
+
+    Requires the ``cryptography`` package::
+
+        pip install cryptography
+    """
+
+    def __init__(self, db_path: str = "", key_path: str = "") -> None:
+        from pathlib import Path
+        if not db_path:
+            db_path = str(Path.home() / ".cogito" / "secrets_encrypted.db")
+        if not key_path:
+            key_path = str(Path.home() / ".cogito" / "secrets.key")
+        self._db_path = db_path
+        self._key_path = key_path
+        try:
+            self._fernet = self._load_or_create_key()
+        except ImportError as exc:
+            raise ImportError(
+                "LocalEncryptedSecretProvider requires 'cryptography'. "
+                "Install it: pip install cryptography"
+            ) from exc
+        self._init_db()
+
+    def _load_or_create_key(self) -> Any:
+        from pathlib import Path
+        try:
+            from cryptography.fernet import Fernet
+        except ImportError as exc:
+            raise ImportError(
+                "LocalEncryptedSecretProvider requires 'cryptography'. "
+                "Install it: pip install cryptography"
+            ) from exc
+        key_path = Path(self._key_path)
+        if key_path.exists():
+            raw = key_path.read_bytes()
+            try:
+                return Fernet(raw)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Invalid encryption key at {self._key_path}: {exc}"
+                ) from exc
+        key = Fernet.generate_key()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(key)
+        try:
+            key_path.chmod(0o600)
+        except Exception:
+            pass
+        return Fernet(key)
+
+    def _init_db(self) -> None:
+        import sqlite3
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS secrets ("
+                "  key TEXT PRIMARY KEY,"
+                "  value TEXT NOT NULL,"
+                "  created_at TEXT NOT NULL,"
+                "  updated_at TEXT NOT NULL,"
+                "  last_used_at TEXT"
+                ")"
+            )
+            conn.commit()
+
+    def _encrypt(self, plaintext: str) -> str:
+        result: bytes = self._fernet.encrypt(plaintext.encode())
+        return result.decode()
+
+    def _decrypt(self, ciphertext: str) -> str:
+        result: bytes = self._fernet.decrypt(ciphertext.encode())
+        return result.decode()
+
+    def get_secret(self, key: str) -> SecretValue | None:
+        import sqlite3
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                row = conn.execute(
+                    "SELECT value FROM secrets WHERE key = ?", (key,)
+                ).fetchone()
+                if row is None:
+                    return None
+                conn.execute(
+                    "UPDATE secrets SET last_used_at = ? WHERE key = ?",
+                    (datetime.now(UTC).isoformat(), key),
+                )
+                conn.commit()
+                return SecretValue(self._decrypt(row[0]), name=key)
+        except sqlite3.OperationalError:
+            return None
+
+    def list_keys(self) -> list[str]:
+        import sqlite3
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute(
+                    "SELECT key FROM secrets ORDER BY key"
+                ).fetchall()
+                return [r[0] for r in rows]
+        except sqlite3.OperationalError:
+            return []
+
+    def set_secret(self, key: str, value: str) -> None:
+        import sqlite3
+        now = datetime.now(UTC).isoformat()
+        encrypted = self._encrypt(value)
+        with sqlite3.connect(self._db_path) as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM secrets WHERE key = ?", (key,)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE secrets SET value = ?, updated_at = ? WHERE key = ?",
+                    (encrypted, now, key),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO secrets (key, value, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (key, encrypted, now, now),
+                )
+            conn.commit()
+
+    def delete_secret(self, key: str) -> bool:
+        import sqlite3
+        with sqlite3.connect(self._db_path) as conn:
+            cur = conn.execute(
+                "DELETE FROM secrets WHERE key = ?", (key,)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def rotate_secret(self, key: str, new_value: str) -> bool:
+        import sqlite3
+        now = datetime.now(UTC).isoformat()
+        encrypted = self._encrypt(new_value)
+        with sqlite3.connect(self._db_path) as conn:
+            cur = conn.execute(
+                "UPDATE secrets SET value = ?, updated_at = ? WHERE key = ?",
+                (encrypted, now, key),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def metadata(self, key: str) -> dict[str, Any] | None:
+        import sqlite3
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                row = conn.execute(
+                    "SELECT key, created_at, updated_at, last_used_at"
+                    " FROM secrets WHERE key = ?", (key,)
+                ).fetchone()
+                if row is None:
+                    return None
+                return {
+                    "key": row[0],
+                    "created_at": row[1],
+                    "updated_at": row[2],
+                    "last_used_at": row[3],
+                }
+        except sqlite3.OperationalError:
+            return None
+
+    def all_metadata(self) -> list[dict[str, Any]]:
+        import sqlite3
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute(
+                    "SELECT key, created_at, updated_at, last_used_at"
+                    " FROM secrets ORDER BY key"
+                ).fetchall()
+                return [
+                    {
+                        "key": r[0],
+                        "created_at": r[1],
+                        "updated_at": r[2],
+                        "last_used_at": r[3],
+                    }
+                    for r in rows
+                ]
+        except sqlite3.OperationalError:
+            return []
+
+    def __repr__(self) -> str:
+        return f"LocalEncryptedSecretProvider(db_path={self._db_path!r})"
+
+
+class DevSqliteSecretProvider:
+    """Development-only secret provider backed by plaintext SQLite.
+
+    This provider stores secrets as plaintext base64 in a local SQLite
+    database. **Do NOT use in production.** A warning is emitted on
+    every instantiation.
+
+    For production use, prefer:
+    - ``KeychainSecretProvider`` (OS keychain)
+    - ``LocalEncryptedSecretProvider`` (Fernet-encrypted SQLite)
+    - ``EnvSecretProvider`` (environment variables)
+    """
+
+    def __init__(self, db_path: str = "") -> None:
+        warnings.warn(
+            "DevSqliteSecretProvider: secrets are stored as plaintext in SQLite. "
+            "Do NOT use in production. Use KeychainSecretProvider or "
+            "LocalEncryptedSecretProvider instead.",
+            UserWarning,
+            stacklevel=2,
+        )
+        if not db_path or db_path == ":memory:":
+            import tempfile
+            db_path = tempfile.mktemp(suffix=".db")
+        self._inner = LocalSecretsProvider(db_path=db_path)
+
+    def get_secret(self, key: str) -> SecretValue | None:
+        return self._inner.get_secret(key)
+
+    def list_keys(self) -> list[str]:
+        return self._inner.list_keys()
+
+    def set_secret(self, key: str, value: str) -> None:
+        self._inner.set_secret(key, value)
+
+    def delete_secret(self, key: str) -> bool:
+        return self._inner.delete_secret(key)
+
+    def rotate_secret(self, key: str, new_value: str) -> bool:
+        return self._inner.rotate_secret(key, new_value)
+
+    def metadata(self, key: str) -> dict[str, Any] | None:
+        return self._inner.metadata(key)
+
+    def all_metadata(self) -> list[dict[str, Any]]:
+        return self._inner.all_metadata()
+
+    def __repr__(self) -> str:
+        return f"DevSqliteSecretProvider(db_path={self._inner._db_path!r})"

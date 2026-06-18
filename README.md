@@ -46,8 +46,14 @@ cogito usage --last 7d                                # usage summary
 cogito replay list                                    # list replayable traces
 cogito replay show <trace_id>                         # show full replay detail
 
-# Export
-cogito export --workspace default --out export.json
+# Export / Backup
+cogito export data --workspace default --out export.json    # workspace data export
+cogito export memories --out memories.json                  # memory JSON export
+cogito export traces --out traces.json                      # trace JSON export
+cogito backup create --out backup.zip                       # full system backup
+cogito backup restore backup.zip --dry-run                  # preflight validation
+cogito backup restore backup.zip                            # restore from backup
+# NOTE: secrets are excluded from backup by default; use --include-secrets
 
 # Daemon / Scheduled maintenance
 cogito daemon once                                    # run one tick cycle
@@ -102,9 +108,10 @@ curl -N -X POST http://localhost:8000/chat/stream \
 - **MockModel** is the default provider. For a real model, set `model.provider` via `cogito config` and configure the API key through an environment variable (never written to config file, trace, audit, or export).
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
-- **Limitations:** No multi-user / OAuth / RBAC. No config editing (read-only). No real Telegram / Feishu delivery (outbox is local SQLite queue). No outbox dispatcher UI. No advanced diagnostics or diagnostic bundle export. No Plugin Marketplace. LocalSecretsProvider is unencrypted SQLite. No cloud sync or distributed queue. `cogito daemon run` is blocking (no background process management). No LLM relevance judge for autonomy decisions (deterministic rules only). Session title editing not yet available in the UI.
+- **Secret backends:** Default is `DevSqliteSecretProvider` (plaintext SQLite, dev only). For production, use `cogito config set secrets.backend local_encrypted` (requires `pip install cryptography`) or `cogito config set secrets.backend keychain` (OS keychain via `keyring` library). See `cogito doctor` for security risk assessment.
+- **Limitations:** No multi-user / OAuth / RBAC. No config editing (read-only). No real Telegram / Feishu delivery (outbox is local SQLite queue). No advanced diagnostics or diagnostic bundle export. No Plugin Marketplace. No cloud sync or distributed queue. `cogito daemon run` is blocking (no background process management). No LLM relevance judge for autonomy decisions (deterministic rules only). Session title editing not yet available in the UI. Memory vector search uses MockEmbeddingService fallback (deterministic hash) when `sentence-transformers` is not installed — install `sentence-transformers` for real semantic embeddings.
 - **/chat/stream** uses true per-token streaming when the model adapter supports it (`supports_streaming=True` and `stream_chat()`). Falls back to single-delta emission for non-streaming adapters.
-- Streaming tool calls: `stream_chat()` yields content-only deltas. Tool intents from the model response are dispatched after streaming completes (no tool-interrupt during streaming). For real-time tool-in-stream scenarios, a separate tool-call SSE event type is used.
+- Streaming tool calls (v0.10): `process_stream()` now yields `tool_call_started` and `tool_call_completed` SSE events during tool dispatch, with full governance pipeline (policy, approval, audit, trace, redaction). Tools are dispatched in a multi-round loop up to `max_tool_rounds` (default 3).
 
 ## Requirements
 
@@ -112,9 +119,9 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.9.0-dev (Multi-Session Chat + History Recovery)** — Full Console Chat with session management, history persistence, and page-refresh recovery.
-Verified: **1043 tests passing**, `ruff check src/` clean, `mypy src/` clean (91 source files).
-Includes: v0.8.0 Console MVP Phases 1–8 (Dashboard, Chat, Memory, Approval, Traces, Audit, Autonomy, Config, Doctor), v0.7.0 Autonomy Plane MVP, v0.6.2 SecretProvider, v0.6.1 streaming/retry hardening, v0.5.0 true per-token streaming, v0.3.0 Memory V2/Skill V2/Autonomy V2.
+**v0.11.0-dev (Autonomy Delivery & Local Production Hardening)** — OutboxDispatcher with retry/backoff/dead-letter, DeliveryAdapter abstraction, Web Console Inbox, Backup/Restore/Export CLI, Secret Store Hardening (Fernet-encrypted SQLite, DevSqliteSecretProvider warning).
+Verified: **1097 tests passing**, `ruff check src/` clean, `mypy src/` clean (95 source files).
+Includes: v0.10.0 Hybrid Memory Search + Streaming Tool Interrupt + Multi-round Tool Loop, v0.9.0 Multi-Session Chat, v0.8.0 Console MVP, v0.7.0 Autonomy Plane MVP, v0.6.x hardening.
 
 ## Development
 

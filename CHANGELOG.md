@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.11.0-dev (2026-06-18)
+
+### **Autonomy Delivery & Local Production Hardening**
+
+- **Secret Store Hardening**: `LocalEncryptedSecretProvider` (Fernet-encrypted SQLite, requires `cryptography`), `DevSqliteSecretProvider` (plaintext SQLite with warning). `get_provider_from_config()` defaults to `dev_sqlite`. Doctor page shows security risk level per backend. `cryptography` is optional.
+- **DeliveryAdapter Abstraction**: `DeliveryAdapter` protocol, `LocalInboxDeliveryAdapter` (notifications table), `ConsoleNotificationAdapter` (inbox_items table). Standardized `DeliveryResult` model.
+- **Autonomy Dispatcher**: `OutboxDispatcher` with exponential backoff (30s base, 1h cap), max 5 retries, delivery states (pending/delivering/sent/failed/retrying/dead_letter). Migration v7 adds delivery-tracking columns. Trace span and audit log per attempt. All payloads redacted. Governance check via PolicyEngine.
+- **Web Console Inbox**: `/console/inbox` with stat cards, status/search/time filters, batch retry/dismiss/read/feedback. `/console/inbox/{id}` detail with trace link, raw JSON, feedback form. All content redacted + HTML-escaped. AuthMiddleware protected.
+- **Backup/Restore/Export CLI**: `cogito backup create [--include-secrets]`, `cogito backup restore [--dry-run]`, `cogito export memories|traces`. Secrets excluded by default (opt-in flag required). All operations write audit logs. Preflight validation for restore.
+- **27 new tests**, 1097 tests passing, ruff clean, mypy clean (95 source files)
+- **docs/20_V0_11_AUTONOMY_DELIVERY_HARDENING_PLAN.md** created
+
+## v0.10.0-dev (2026-06-18)
+
+### **Core Runtime Hardening**
+
+- **Hybrid Memory Search**: `EmbeddingService` now falls back to `MockEmbeddingService` when `sentence-transformers` is not installed (no more `ImportError`). `HybridRetriever.search()` uses full hybrid scoring: BM25 + cosine similarity + recency bonus + confidence bonus + pinned boost (2.0x). `MemoryRetriever.search()` tries hybrid search first, falling back to FTS5 + LIKE. `search_with_lineage()` preserved. `ContextEngine.build()` reads lineage info from memory results. All existing search behavior is backward-compatible.
+- **Streaming Tool Interrupt**: `process_stream()` yields `tool_call_started` (with `tool_count` + `round`) and `tool_call_completed` (with redacted `tool_results`) SSE events during tool dispatch. Tools go through full `CapabilityRegistry` + `PolicyEngine` + `ApprovalRepository` + `AuditLogger` + `Tracer` pipeline. Output redacted via `RedactionHelper`. Approval required and budget exceeded events emitted as `approval_required` / `error` events.
+- **Multi-round Tool Loop**: `RuntimeKernel` now supports `max_tool_rounds` parameter (default 3). `process()` and `process_stream()` loop model → tools → follow-up model → tools up to `max_tool_rounds`. Each round checks model/tool budget and writes trace/audit. At max rounds, returns safe termination message. `_dispatch_tools` only calls follow-up model if at least one tool was actually invoked (not denied/skipped).
+- **`MockEmbeddingService`**: Deterministic hash-based embedding, 384-dim, no external dependencies. Used as fallback when `sentence-transformers` not installed.
+- **Test isolation fix**: `_reset_db` fixture in `test_chat_sessions.py` now uses `sys.modules` to reset the shared `_db` singleton (previously set attribute on the FastAPI app instance due to `__init__.py` module shadowing).
+- **System prompt**: Added to `_build_model_messages` — "You are a helpful personal assistant running in Cogito-Agent..."
+- **CLI history fix**: Sources printing removed from per-turn `_display_result`; one-time context print at session start.
+- **32 new tests**: hybrid memory (16), streaming tools (8), multi-round tool loop (8)
+- **1070 tests passing**, ruff clean, mypy clean (91 source files)
+- **docs/19_V0_10_CORE_RUNTIME_HARDENING_PLAN.md** created
+
 ## v0.9.0-dev (2026-06-17)
 
 ### **Multi-Session Chat + History Recovery**

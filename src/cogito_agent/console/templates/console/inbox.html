@@ -1,0 +1,96 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="inbox-header">
+  <div class="inbox-stats">
+    <div class="stat-card"><div class="stat-value">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.pending }}</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.sent }}</div><div class="stat-label">Sent</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.retrying }}</div><div class="stat-label">Retrying</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.failed }}</div><div class="stat-label">Failed</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.dead_letter }}</div><div class="stat-label">Dead Letter</div></div>
+    <div class="stat-card"><div class="stat-value">{{ stats.skipped }}</div><div class="stat-label">Skipped</div></div>
+  </div>
+</div>
+
+<div class="filter-bar">
+  <form method="GET" action="/console/inbox" class="filter-form">
+    <select name="status" onchange="this.form.submit()">
+      <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Status</option>
+      <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="sent" {% if status_filter == 'sent' %}selected{% endif %}>Sent</option>
+      <option value="failed" {% if status_filter == 'failed' %}selected{% endif %}>Failed</option>
+      <option value="retrying" {% if status_filter == 'retrying' %}selected{% endif %}>Retrying</option>
+      <option value="dead_letter" {% if status_filter == 'dead_letter' %}selected{% endif %}>Dead Letter</option>
+      <option value="skipped" {% if status_filter == 'skipped' %}selected{% endif %}>Skipped</option>
+    </select>
+    <input type="text" name="q" placeholder="Search title/body/ID..." value="{{ q }}" class="filter-input">
+    <select name="time_range" onchange="this.form.submit()">
+      <option value="all" {% if time_range == 'all' %}selected{% endif %}>All Time</option>
+      <option value="1h" {% if time_range == '1h' %}selected{% endif %}>Last Hour</option>
+      <option value="24h" {% if time_range == '24h' %}selected{% endif %}>Last 24h</option>
+      <option value="7d" {% if time_range == '7d' %}selected{% endif %}>Last 7 Days</option>
+    </select>
+    <button type="submit" class="btn btn-sm">Filter</button>
+  </form>
+</div>
+
+{% if items %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Status</th>
+      <th>Priority</th>
+      <th>Source</th>
+      <th>Retries</th>
+      <th>Created</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in items %}
+    <tr class="{% if not item.read_at %}unread{% endif %}">
+      <td><a href="/console/inbox/{{ item.id }}" class="item-link">{{ (item.title or "Untitled")[:80] }}</a></td>
+      <td><span class="badge badge-{{ item.status }}">{{ item.status }}</span></td>
+      <td>{{ item.priority }}</td>
+      <td>{{ item.source or "system" }}</td>
+      <td>{{ item.delivery_attempts or 0 }}/5</td>
+      <td class="cell-date">{{ (item.created_at or "")[:19] }}</td>
+      <td class="cell-actions">
+        {% if item.status in ('failed', 'dead_letter') %}
+        <form method="POST" action="/console/inbox/{{ item.id }}/retry" class="inline-form">
+          <button type="submit" class="btn btn-sm btn-primary">Retry</button>
+        </form>
+        {% endif %}
+        {% if not item.read_at and item.status == 'sent' %}
+        <form method="POST" action="/console/inbox/{{ item.id }}/read" class="inline-form">
+          <button type="submit" class="btn btn-sm">Mark Read</button>
+        </form>
+        {% endif %}
+        {% if not item.dismissed_at %}
+        <form method="POST" action="/console/inbox/{{ item.id }}/dismiss" class="inline-form">
+          <button type="submit" class="btn btn-sm btn-warning">Dismiss</button>
+        </form>
+        {% endif %}
+        <form method="POST" action="/console/inbox/{{ item.id }}/feedback" class="inline-form">
+          <select name="value" required>
+            <option value="">Feedback</option>
+            <option value="useful">Useful</option>
+            <option value="not_useful">Not Useful</option>
+            <option value="too_many">Too Many</option>
+            <option value="wrong_time">Wrong Time</option>
+            <option value="irrelevant">Irrelevant</option>
+          </select>
+          <button type="submit" class="btn btn-sm btn-secondary">Send</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+  <p>No inbox items found.</p>
+</div>
+{% endif %}
+{% endblock %}

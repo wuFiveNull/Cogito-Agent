@@ -57,8 +57,16 @@ class MemoryRetriever:
         self, workspace_id: str, query: str, limit: int = 10,
         include_archived: bool = False,
     ) -> list[dict[str, object]]:
-        archived_clause = "" if include_archived else " AND m.archived_at IS NULL"
+        try:
+            from cogito_agent.memory.vector import HybridRetriever
+            hybrid = HybridRetriever(self._db)
+            hybrid_results = hybrid.search(workspace_id, query, limit, include_archived)
+            if hybrid_results:
+                return hybrid_results
+        except Exception:
+            pass
 
+        archived_clause = "" if include_archived else " AND m.archived_at IS NULL"
         fts_results: list[dict[str, object]] = []
         try:
             cur = self._db.connection.execute(
@@ -124,7 +132,8 @@ class MemoryRetriever:
 
             hybrid = HybridRetriever(self._db)
             return hybrid.search(
-                workspace_id, query, limit, bm25_weight, semantic_weight
+                workspace_id, query, limit,
+                bm25_weight=bm25_weight, semantic_weight=semantic_weight,
             )
         except Exception:
             return self.search(workspace_id, query, limit)

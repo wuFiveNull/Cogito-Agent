@@ -77,13 +77,17 @@ class ContextEngine:
             ))
         for i, mem in enumerate(memories):
             text = str(mem.get("text", ""))
+            lineage_info = mem.get("lineage_info")
+            reason = "retrieved"
+            if isinstance(lineage_info, dict):
+                reason = str(lineage_info.get("reason", reason))
             items.append(ContextItem(
                 source_type="memory",
                 source_id=str(mem.get("id", "")),
                 text=text,
                 rank=i + 1,
                 token_estimate=self._estimate_tokens(text),
-                reason="retrieved",
+                reason=reason,
             ))
         for i, tr in enumerate(tool_results or []):
             text = str(tr.get("summary", "") or tr.get("error", ""))

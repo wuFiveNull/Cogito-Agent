@@ -94,7 +94,7 @@ def test_hybrid_retriever_with_embeddings(tmp_path) -> None:
         vec = fake.encode(text)
         blob = _pack_embedding(vec)
         db.connection.execute(
-            "INSERT INTO memory_embeddings (memory_id, embedding, model_name)"
+            "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, model_name)"
             " VALUES (?, ?, ?)",
             (mid, blob, fake.model_name),
         )

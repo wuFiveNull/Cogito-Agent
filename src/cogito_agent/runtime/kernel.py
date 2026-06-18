@@ -76,6 +76,7 @@ class RuntimeKernel:
         context_engine: ContextEngine | None = None,
         memory_retriever: MemoryRetriever | None = None,
         candidate_extractor: CandidateExtractor | None = None,
+        max_tool_rounds: int = 3,
     ) -> None:
         self._db = db
         self._sm = TurnStateMachine()
@@ -96,6 +97,7 @@ class RuntimeKernel:
         self._start_time: datetime | None = None
         self._tool_results: list[dict[str, object]] = []
         self._sources: list[dict[str, object]] = []
+        self._max_tool_rounds = max_tool_rounds
 
     @property
     def state(self) -> TurnState:
@@ -154,6 +156,24 @@ class RuntimeKernel:
             model_resp = self._generate_reply(event, text, trace, span)
 
             self._transition(TurnState.planning_tool)
+
+            # Multi-round tool loop
+            tool_round = 0
+            while (
+                model_resp.tool_intents
+                and self._cap_reg
+                and tool_round < self._max_tool_rounds
+            ):
+                tool_round += 1
+                model_resp = self._dispatch_tools(event, model_resp, trace, span)
+                # Budget check is handled inside _dispatch_tools per-tool
+
+            if tool_round >= self._max_tool_rounds and model_resp.tool_intents:
+                # Cap reached — return safe summary
+                model_resp = ModelResponse(
+                    content="Tool chain terminated: maximum tool rounds reached. "
+                            "Results from completed tools have been applied."
+                )
 
             model_result = self._compose_result(event, model_resp, trace, span)
             tool_summaries = list(self._tool_results)
@@ -404,24 +424,33 @@ class RuntimeKernel:
 
             self._transition(TurnState.planning_tool)
 
-            # Tool dispatch if intents present
-            if model_resp.tool_intents and self._cap_reg:
+            # Multi-round tool loop in streaming
+            tool_round = 0
+            while (
+                model_resp.tool_intents
+                and self._cap_reg
+                and tool_round < self._max_tool_rounds
+            ):
+                tool_round += 1
                 yield StreamEvent(
                     type=StreamEventType.tool_call_started,
-                    data={"tool_count": len(model_resp.tool_intents)},
+                    data={"tool_count": len(model_resp.tool_intents), "round": tool_round},
                     request_id=request_id,
                     trace_id=trace.id,
                 )
                 try:
                     model_resp = self._dispatch_tools(event, model_resp, trace, span)
+                    from cogito_agent.trace.redaction import RedactionHelper as _RedactionHelper
+                    _redactor = _RedactionHelper()
                     yield StreamEvent(
                         type=StreamEventType.tool_call_completed,
                         data={
                             "tool_results": [
                                 {"tool": r.get("tool", ""),
-                                 "summary": str(r.get("summary", ""))[:100]}
+                                 "summary": _redactor.redact(str(r.get("summary", ""))[:100])}
                                 for r in self._tool_results
                             ],
+                            "round": tool_round,
                         },
                         request_id=request_id,
                         trace_id=trace.id,
@@ -449,6 +478,13 @@ class RuntimeKernel:
                         decision="require_approval",
                     )
                     return
+                # Budget check is handled inside _dispatch_tools per-tool
+
+            if tool_round >= self._max_tool_rounds and model_resp.tool_intents:
+                model_resp = ModelResponse(
+                    content="Tool chain terminated: maximum tool rounds reached. "
+                            "Results from completed tools have been applied."
+                )
 
             # Compose result
             model_result = self._compose_result(event, model_resp, trace, span)
@@ -670,9 +706,6 @@ class RuntimeKernel:
             error=resp.error,
         )
 
-        if resp.tool_intents and self._cap_reg:
-            resp = self._dispatch_tools(event, resp, trace, span)
-
         return resp
 
     def _build_model_messages(
@@ -850,7 +883,12 @@ class RuntimeKernel:
                 decision="allow", reason=policy_dec.reason,
             )
 
-        if collected_results and self._model_adapter:
+        # Only do follow-up model call if at least one tool was actually invoked
+        tools_invoked = any(
+            r.get("error") is None or "Denied" not in str(r.get("error", ""))
+            for r in collected_results
+        )
+        if collected_results and self._model_adapter and tools_invoked:
             follow_up_msgs = self._build_model_messages(event, "", trace)
             follow_up_msgs.append({
                 "role": "assistant",

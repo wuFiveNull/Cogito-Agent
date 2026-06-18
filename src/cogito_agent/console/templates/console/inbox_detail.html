@@ -1,0 +1,87 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="detail-actions">
+  <a href="/console/inbox" class="btn">&larr; Back to Inbox</a>
+  {% if item.status in ('failed', 'dead_letter') %}
+  <form method="POST" action="/console/inbox/{{ item.id }}/retry" class="inline-form">
+    <button type="submit" class="btn btn-primary">Retry Delivery</button>
+  </form>
+  {% endif %}
+  {% if not item.dismissed_at %}
+  <form method="POST" action="/console/inbox/{{ item.id }}/dismiss" class="inline-form">
+    <button type="submit" class="btn btn-warning">Dismiss</button>
+  </form>
+  {% endif %}
+  {% if not item.read_at %}
+  <form method="POST" action="/console/inbox/{{ item.id }}/read" class="inline-form">
+    <button type="submit" class="btn">Mark Read</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="detail-metadata">
+  <table class="metadata-table">
+    <tr><th>ID</th><td><code>{{ item.id }}</code></td></tr>
+    {% if item.decision_id %}<tr><th>Decision ID</th><td><code>{{ item.decision_id }}</code></td></tr>{% endif %}
+    {% if item.event_id %}<tr><th>Event ID</th><td><code>{{ item.event_id }}</code></td></tr>{% endif %}
+    <tr><th>Status</th><td><span class="badge badge-{{ item.status }}">{{ item.status }}</span></td></tr>
+    <tr><th>Priority</th><td>{{ item.priority }}</td></tr>
+    <tr><th>Source</th><td>{{ item.source or "system" }}</td></tr>
+    <tr><th>Delivery Attempts</th><td>{{ item.delivery_attempts or 0 }} / 5</td></tr>
+    <tr><th>Created</th><td>{{ (item.created_at or "")[:19] }}</td></tr>
+    {% if item.delivered_at %}<tr><th>Delivered</th><td>{{ item.delivered_at[:19] }}</td></tr>{% endif %}
+    {% if item.read_at %}<tr><th>Read</th><td>{{ item.read_at[:19] }}</td></tr>{% endif %}
+    {% if item.dismissed_at %}<tr><th>Dismissed</th><td>{{ item.dismissed_at[:19] }}</td></tr>{% endif %}
+    {% if item.failed_at %}<tr><th>Failed</th><td>{{ item.failed_at[:19] }}</td></tr>{% endif %}
+    {% if item.last_error %}<tr><th>Last Error</th><td class="cell-error">{{ item.last_error }}</td></tr>{% endif %}
+    {% if item.next_retry_at %}<tr><th>Next Retry</th><td>{{ item.next_retry_at[:19] }}</td></tr>{% endif %}
+    {% if item.trace_id %}
+    <tr><th>Trace</th><td><a href="/console/traces/{{ item.trace_id }}"><code>{{ item.trace_id[:16] }}...</code></a></td></tr>
+    {% endif %}
+  </table>
+</div>
+
+<div class="detail-content">
+  <h3>Title</h3>
+  <pre class="content-block">{{ item.title }}</pre>
+  {% if item.body %}
+  <h3>Body</h3>
+  <pre class="content-block">{{ item.body }}</pre>
+  {% endif %}
+</div>
+
+{% if raw_json %}
+<div class="raw-json" data-expanded="false">
+  <button class="btn btn-sm json-toggle" onclick="toggleJson(this)">Show Raw JSON</button>
+  <pre class="json-block hidden">{{ raw_json | safe }}</pre>
+</div>
+{% endif %}
+
+<div class="feedback-section">
+  <h3>Feedback</h3>
+  <form method="POST" action="/console/inbox/{{ item.id }}/feedback" class="feedback-form">
+    <select name="value" required>
+      <option value="">Select feedback...</option>
+      <option value="useful">Useful</option>
+      <option value="not_useful">Not Useful</option>
+      <option value="too_many">Too Many</option>
+      <option value="wrong_time">Wrong Time</option>
+      <option value="irrelevant">Irrelevant</option>
+    </select>
+    <button type="submit" class="btn btn-primary">Submit Feedback</button>
+  </form>
+</div>
+
+<script>
+function toggleJson(btn) {
+  var block = btn.nextElementSibling;
+  if (block.classList.contains('hidden')) {
+    block.classList.remove('hidden');
+    btn.textContent = 'Hide Raw JSON';
+  } else {
+    block.classList.add('hidden');
+    btn.textContent = 'Show Raw JSON';
+  }
+}
+</script>
+{% endblock %}

@@ -16,6 +16,7 @@ from .autonomy_views import autonomy_router as _autonomy_router
 from .chat_sessions import router as _chat_sessions_router
 from .config_views import config_router as _config_router
 from .doctor_views import doctor_router as _doctor_router
+from .inbox_views import inbox_router as _inbox_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
 from .status import build_status
@@ -113,7 +114,7 @@ async def chat_page(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Chat",
-        "version": "0.9.0-dev",
+        "version": "0.11.0-dev",
         "session_id": CONSOLE_SESSION_ID,
         "workspace_id": CONSOLE_WORKSPACE_ID,
         "sessions": session_list,
@@ -306,6 +307,7 @@ console_router.include_router(_audit_router, prefix="/audit")
 console_router.include_router(_autonomy_router, prefix="/autonomy")
 console_router.include_router(_config_router, prefix="/config")
 console_router.include_router(_doctor_router, prefix="/doctor")
+console_router.include_router(_inbox_router, prefix="/inbox")
 
 
 # ─── Placeholder Pages ──────────────────────────────────────────────────────

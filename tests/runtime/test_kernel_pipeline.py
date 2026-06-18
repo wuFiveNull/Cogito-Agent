@@ -154,6 +154,7 @@ def test_pipeline_tool_result_summaries(db: Database) -> None:
     )
     kernel = RuntimeKernel(
         db, model_adapter=mock_adapter, capability_registry=cap_reg,
+        max_tool_rounds=1,
     )
     result = kernel.process(_make_event("hi"))
     assert result.state == TurnState.completed
@@ -291,6 +292,7 @@ def test_tool_retry_on_failure(db: Database) -> None:
     )
     kernel = RuntimeKernel(
         db, model_adapter=adapter, capability_registry=cap_reg,
+        max_tool_rounds=1,
     )
     result = kernel.process(_make_event())
     # Should succeed after retry

@@ -115,6 +115,24 @@ v0.9.0-dev (Multi-Session Chat + History Recovery, current):
 - 32 new tests, 1043 tests passing, ruff clean, mypy clean (91 source files)
 - docs/18_V0_9_MULTI_SESSION_CHAT_PLAN.md created
 
+v0.10.0-dev (Core Runtime Hardening):
+- Hybrid Memory Search: EmbeddingService fallback to MockEmbeddingService (deterministic hash), HybridRetriever with full hybrid scoring (BM25 + semantic + recency + confidence + pinned boost), MemoryRetriever.search() tries hybrid first
+- Streaming Tool Interrupt: process_stream() yields tool_call_started/tool_call_completed SSE events with redacted tool results, full governance pipeline
+- Multi-round Tool Loop: RuntimeKernel max_tool_rounds parameter (default 3), process()/process_stream() loops model→tools→model up to max rounds, _dispatch_tools skips follow-up if all tools denied
+- MockEmbeddingService: deterministic 384-dim hash-based, no external deps
+- 32 new test files (hybrid memory 16, streaming tools 8, tool loop 8), 1070 tests passing
+- ruff clean, mypy clean (91 source files)
+- docs/19_V0_10_CORE_RUNTIME_HARDENING_PLAN.md created
+
+v0.11.0-dev (Autonomy Delivery & Local Production Hardening, current):
+- Secret Store Hardening: LocalEncryptedSecretProvider (Fernet), DevSqliteSecretProvider (dev warning), security risk in Doctor page
+- DeliveryAdapter: protocol + LocalInboxDeliveryAdapter + ConsoleNotificationAdapter with standardized DeliveryResult
+- OutboxDispatcher: exponential backoff (30s-1h), 5 max retries, dead-letter, trace/audit/redaction per attempt, migration v7
+- Web Console Inbox: /console/inbox list/detail with retry/dismiss/read/feedback, stat cards, filters
+- Backup CLI: cogito backup create [--include-secrets] / restore [--dry-run], cogito export memories|traces, audit logging
+- 27 new tests, 1097 tests passing, ruff clean, mypy clean (95 source files)
+- docs/20_V0_11_AUTONOMY_DELIVERY_HARDENING_PLAN.md created
+
 ## Verification Status
 
 - **1043 tests passing** (`pytest` clean)

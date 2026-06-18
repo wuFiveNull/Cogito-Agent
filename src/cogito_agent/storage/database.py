@@ -32,6 +32,17 @@ register_migration(4, """
 register_migration(5, """
     ALTER TABLE skill_run_logs ADD COLUMN resume_data_json TEXT;
 """)
+register_migration(7, """
+    ALTER TABLE outbox_messages ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE outbox_messages ADD COLUMN last_error TEXT;
+    ALTER TABLE outbox_messages ADD COLUMN next_retry_at TEXT;
+    ALTER TABLE outbox_messages ADD COLUMN delivered_at TEXT;
+    ALTER TABLE outbox_messages ADD COLUMN read_at TEXT;
+    ALTER TABLE outbox_messages ADD COLUMN dismissed_at TEXT;
+    ALTER TABLE outbox_messages ADD COLUMN failed_at TEXT;
+    ALTER TABLE outbox_messages ADD COLUMN updated_at TEXT;
+    ALTER TABLE inbox_items ADD COLUMN decision_id TEXT DEFAULT '';
+""")
 register_migration(6, """
     CREATE TABLE IF NOT EXISTS notification_decisions (
         id TEXT PRIMARY KEY,

@@ -82,7 +82,7 @@ def _check(
 def _core_checks() -> CheckList:
     checks: CheckList = []
     try:
-        version = os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev")
+        version = os.environ.get("COGITO_CONSOLE_VERSION", "0.11.0-dev")
         checks.append(_check("core", "app_version", "ok", f"v{version}"))
         checks.append(_check("core", "python_version", "ok", sys.version.split()[0]))
         checks.append(_check("core", "platform", "ok", sys.platform))
@@ -264,6 +264,18 @@ def _secrets_checks() -> CheckList:
     service_name = cfg.get("secrets.service_name", "cogito-agent")
     checks.append(_check("secrets", "service_name", "ok", service_name))
 
+    risk_map = {
+        "env": "low (env vars can leak in process listings)",
+        "local_encrypted": "low (Fernet-encrypted SQLite, key file must be protected)",
+        "keychain": "low (OS keychain)",
+        "local": "HIGH (plaintext SQLite - NOT for production)",
+        "dev_sqlite": "HIGH (plaintext SQLite - dev only)",
+    }
+    risk_level = risk_map.get(backend, "unknown")
+    checks.append(_check("secrets", "security_risk", "ok" if "low" in risk_level else "warning",
+        f"backend={backend} risk={risk_level}",
+    ))
+
     if backend == "local":
         local_path = cfg.get("secrets.local_path", "")
         if not local_path:
@@ -281,6 +293,16 @@ def _secrets_checks() -> CheckList:
             checks.append(_check("secrets", "keychain", "warning", redact_html(str(exc))))
     elif backend == "env":
         checks.append(_check("secrets", "env_provider", "ok", "EnvSecretProvider"))
+    elif backend == "local_encrypted":
+        try:
+            from cogito_agent.security import LocalEncryptedSecretProvider
+            LocalEncryptedSecretProvider()
+            checks.append(_check("secrets", "encrypted_provider", "ok", "available"))
+        except Exception as exc:
+            checks.append(_check("secrets", "encrypted_provider", "warning", redact_html(str(exc))))
+    elif backend == "dev_sqlite":
+        checks.append(_check("secrets", "dev_sqlite_provider", "warning",
+            "DevSqliteSecretProvider: plaintext SQLite, NOT for production"))
 
     try:
         env_secrets_count = len([k for k in os.environ if k.startswith("COGITO_")])
@@ -476,7 +498,7 @@ async def doctor_page(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Doctor",
-        "version": "0.9.0-dev",
+        "version": "0.11.0-dev",
         "overall": overall,
         "sections": sections_map,
         "checks_raw": checks,
@@ -495,7 +517,7 @@ async def doctor_api(request: Request, live: str = Query("")) -> JSONResponse:
             status_code=501,
             content={
                 "status": "error",
-                "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.11.0-dev"),
                 "checks": [{
                     "section": "provider",
                     "name": "live_check",
@@ -510,7 +532,7 @@ async def doctor_api(request: Request, live: str = Query("")) -> JSONResponse:
     overall = _overall_status(checks)
     return JSONResponse({
         "status": overall,
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.11.0-dev"),
         "checks": checks,
         "limitations": [
             "No real Telegram/Feishu delivery for outbox",

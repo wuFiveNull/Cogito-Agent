@@ -299,34 +299,55 @@ def run_cli() -> None:
 
     sub.add_parser("doctor", help="Check system health")
 
-    export_parser = sub.add_parser("export", help="Export workspace data")
+    backup_parser = sub.add_parser("backup", help="Create or restore system backups")
+    backup_sub = backup_parser.add_subparsers(dest="backup_action", help="Backup command")
+    backup_create = backup_sub.add_parser("create", help="Create a system backup")
+    backup_create.add_argument("--out", dest="out_path", default="", help="Output ZIP path")
+    backup_create.add_argument("--db", dest="db_path", default="", help="SQLite database path")
+    backup_create.add_argument("--include-secrets", dest="include_secrets", action="store_true",
+                               help="Include secrets in backup (EXPLICIT FLAG REQUIRED)")
+    restore_create = backup_sub.add_parser("restore", help="Restore from a backup")
+    restore_create.add_argument("backup_path", help="Backup ZIP path")
+    restore_create.add_argument("--db", dest="db_path", default="", help="SQLite database path")
+    restore_create.add_argument("--dry-run", dest="dry_run", action="store_true",
+                                help="Preflight validation without restoring")
+
+    export_parser = sub.add_parser("export", help="Export workspace data or specific sections")
     export_parser.set_defaults(db_path=None)
     export_parser.add_argument(
         "--db", dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     export_parser.add_argument(
+        "--out", dest="output_path", default=None,
+        help="Output file path (default: stdout)",
+    )
+    export_sub = export_parser.add_subparsers(dest="export_action", help="Export type")
+    export_data_parser = export_sub.add_parser("data", help="Export full workspace data")
+    export_data_parser.add_argument(
         "--workspace", dest="workspace_name", default="default",
         help="Workspace name or ID to export (default: default)",
     )
-    export_parser.add_argument(
+    export_data_parser.add_argument(
         "--format", dest="export_format", default="json",
         choices=["json"],
         help="Output format (default: json)",
     )
-    export_parser.add_argument(
-        "--out", dest="output_path", default=None,
-        help="Output file path (default: stdout)",
-    )
-    export_parser.add_argument(
+    export_data_parser.add_argument(
         "--include", dest="include", action="append", default=[],
         choices=["traces", "memories", "audit"],
         help="Sections to include (repeatable, default: all)",
     )
-    export_parser.add_argument(
+    export_data_parser.add_argument(
         "--no-redact", dest="redact", action="store_false", default=True,
         help="Disable secret redaction",
     )
+    export_memories_parser = export_sub.add_parser("memories", help="Export memories")
+    export_memories_parser.add_argument(
+        "--out", dest="memories_out", default="", help="Output path"
+    )
+    export_traces_parser = export_sub.add_parser("traces", help="Export traces")
+    export_traces_parser.add_argument("--out", dest="traces_out", default="", help="Output path")
 
     daemon_parser = sub.add_parser("daemon", help="Run or query the background daemon")
     daemon_sub = daemon_parser.add_subparsers(dest="daemon_action", help="Daemon command")
@@ -615,48 +636,144 @@ def run_cli() -> None:
             db_path=db_path, task=args.task,
             workspace_id=args.workspace_id, days=args.days,
         ))
+    elif args.command == "backup":
+        from cogito_agent.cli.backup import create_backup, restore_backup
+        from cogito_agent.governance import AuditLogger
+
+        _adb = Database(args.db_path or db_path)
+        _adb.initialize()
+        _aaudit = AuditLogger(_adb)
+
+        if args.backup_action == "create":
+            manifest = create_backup(
+                out_path=args.out_path,
+                db_path=args.db_path or db_path,
+                include_secrets=args.include_secrets,
+            )
+            _aaudit.log(
+                actor_id="cli", action="backup.create",
+                resource=f"backup:{manifest.get('path', '')}",
+                workspace_id="*",
+                decision="allow",
+                reason=f"size={manifest.get('size_bytes', 0)}",
+                details=f'{{"include_secrets":{args.include_secrets}}}',
+                redact_details=True,
+            )
+            print(f"Backup created: {manifest['path']}")
+            print(f"  Size: {manifest.get('size_bytes', 0)} bytes")
+            print(f"  Files: {', '.join(manifest.get('files', []))}")
+            if not manifest.get("include_secrets"):
+                print("  NOTE: Secrets are NOT included in this backup.")
+                print("  Use --include-secrets to include them (EXPLICIT FLAG REQUIRED).")
+        elif args.backup_action == "restore":
+            result = restore_backup(
+                backup_path=args.backup_path,
+                db_path=args.db_path or db_path,
+                dry_run=args.dry_run,
+            )
+            _aaudit.log(
+                actor_id="cli", action="backup.restore",
+                resource=f"backup:{args.backup_path}",
+                workspace_id="*",
+                decision="allow" if not result.get("errors") else "error",
+                reason=f"dry_run={args.dry_run}, files={len(result.get('files_found', []))}",
+                redact_details=True,
+            )
+            if result.get("errors"):
+                for e in result["errors"]:
+                    print(f"ERROR: {e}")
+                _adb.close()
+                return
+            print(f"Backup manifest: v{result.get('manifest', {}).get('version', '?')}")
+            print(f"  Created: {result.get('manifest', {}).get('created_at', '?')}")
+            print(f"  Files: {len(result.get('files_found', []))}")
+            for action in result.get("actions", []):
+                print(f"  {action}")
+            for warn in result.get("warnings", []):
+                print(f"  WARNING: {warn}")
+            if args.dry_run:
+                print("Dry-run complete. No changes made.")
+            else:
+                print("Restore complete.")
+        _adb.close()
     elif args.command == "export":
-        from cogito_agent.storage.repositories import WorkspaceRepository
+        export_action = getattr(args, "export_action", None)
+        from cogito_agent.governance import AuditLogger
 
-        from .export import export_workspace, format_export
+        _eaudit = AuditLogger(Database(args.db_path or db_path))
+        if export_action == "memories":
+            from cogito_agent.cli.backup import export_data
+            out = args.memories_out or "memories_export.json"
+            result = export_data(out, db_path=args.db_path or db_path, sections=["memories"])
+            _eaudit.log(
+                actor_id="cli", action="export.memories",
+                resource=f"file:{out}",
+                workspace_id="*", decision="allow",
+                reason=f"count={len(result.get('sections', {}).get('memories', []))}",
+            )
+            mem_cnt = len(result.get('sections', {}).get('memories', []))
+            print(f"Exported {mem_cnt} memories to {out}")
+        elif export_action == "traces":
+            from cogito_agent.cli.backup import export_data
+            out = args.traces_out or "traces_export.json"
+            result = export_data(out, db_path=args.db_path or db_path, sections=["traces"])
+            _eaudit.log(
+                actor_id="cli", action="export.traces",
+                resource=f"file:{out}",
+                workspace_id="*", decision="allow",
+                reason=f"count={len(result.get('sections', {}).get('traces', []))}",
+            )
+            print(f"Exported {len(result.get('sections', {}).get('traces', []))} traces to {out}")
+        elif export_action == "data":
+            from cogito_agent.storage.repositories import WorkspaceRepository
 
-        db = Database(db_path)
-        db.initialize()
-        ws_repo = WorkspaceRepository(db)
-        ws_list = ws_repo.list_all()
-        target = args.workspace_name
-        ws_id: str | None = None
-        for w in ws_list:
-            if w["id"] == target or w.get("name") == target:
-                ws_id = str(w["id"])
-                break
-        if ws_id is None and ws_list:
-            ws_id = str(ws_list[0]["id"])
+            from .export import export_workspace, format_export
 
-        if ws_id is None:
-            print(f"Workspace '{args.workspace_name}' not found.")
-            db.close()
-            return
+            edb = Database(args.db_path or db_path)
+            edb.initialize()
+            ws_repo = WorkspaceRepository(edb)
+            ws_list = ws_repo.list_all()
+            target = args.workspace_name
+            ws_id: str | None = None
+            for w in ws_list:
+                if w["id"] == target or w.get("name") == target:
+                    ws_id = str(w["id"])
+                    break
+            if ws_id is None and ws_list:
+                ws_id = str(ws_list[0]["id"])
 
-        include_traces = not args.include or "traces" in args.include
-        include_memories = not args.include or "memories" in args.include
-        include_audit = not args.include or "audit" in args.include
+            if ws_id is None:
+                print(f"Workspace '{args.workspace_name}' not found.")
+                edb.close()
+                return
 
-        data = export_workspace(
-            db, ws_id,
-            include_traces=include_traces,
-            include_memories=include_memories,
-            include_audit=include_audit,
-            redact=args.redact,
-        )
-        output = format_export(data, args.export_format)
-        if args.output_path:
-            with open(args.output_path, "w", encoding="utf-8") as f:
-                f.write(output)
-            print(f"Exported to {args.output_path}")
+            include_traces = not args.include or "traces" in args.include
+            include_memories = not args.include or "memories" in args.include
+            include_audit = not args.include or "audit" in args.include
+
+            data = export_workspace(
+                edb, ws_id,
+                include_traces=include_traces,
+                include_memories=include_memories,
+                include_audit=include_audit,
+                redact=args.redact,
+            )
+            output = format_export(data, args.export_format)
+            if args.output_path:
+                with open(args.output_path, "w", encoding="utf-8") as f:
+                    f.write(output)
+                print(f"Exported to {args.output_path}")
+            else:
+                print(output)
+            _eaudit.log(
+                actor_id="cli", action="export.data",
+                resource=f"workspace:{ws_id}",
+                workspace_id=ws_id, decision="allow",
+                reason=f"sections={include_traces},{include_memories},{include_audit}",
+            )
+            edb.close()
         else:
-            print(output)
-        db.close()
+            print("Usage: cogito export data|memories|traces [--out <path>]")
     elif args.command == "daemon":
         from cogito_agent.autonomy import (
             DecisionStore,
