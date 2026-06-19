@@ -129,6 +129,7 @@ register_migration(9, """
     CREATE INDEX IF NOT EXISTS idx_art_trace ON artifacts(trace_id);
     CREATE INDEX IF NOT EXISTS idx_art_type ON artifacts(artifact_type);
 """)
+register_migration(11, _load_migration_sql("0011_approval_tool_call.sql"))
 register_migration(10, """
     CREATE TABLE IF NOT EXISTS drift_runs (
         id TEXT PRIMARY KEY,

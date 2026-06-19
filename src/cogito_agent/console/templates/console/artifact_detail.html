@@ -1,0 +1,51 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="detail-header">
+  <h3>{{ artifact.title }}</h3>
+  <div class="detail-actions">
+    <a href="/console/artifacts/{{ artifact.id }}/download" class="btn btn-secondary">Download</a>
+    <form method="post" action="/console/artifacts/{{ artifact.id }}/delete" style="display:inline" onsubmit="return confirm('Delete this artifact?')">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </div>
+</div>
+
+<div class="metadata-grid">
+  <div class="metadata-item">
+    <span class="label">Type</span>
+    <span class="badge badge-type">{{ artifact.artifact_type }}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Source</span>
+    <span>{{ artifact.source_type }}{% if artifact.source_id %} / {{ artifact.source_id }}{% endif %}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Size</span>
+    <span>{{ artifact.size_bytes }} bytes</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Created</span>
+    <span>{{ artifact.created_at }}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">MIME</span>
+    <span>{{ artifact.mime_type }}</span>
+  </div>
+  {% if artifact.trace_id %}
+  <div class="metadata-item">
+    <span class="label">Trace</span>
+    <a href="/console/traces/{{ artifact.trace_id }}">{{ artifact.trace_id[:16] }}...</a>
+  </div>
+  {% endif %}
+  {% if artifact.created_by %}
+  <div class="metadata-item">
+    <span class="label">Created By</span>
+    <span>{{ artifact.created_by }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="artifact-content">
+  {{ html_content|safe }}
+</div>
+{% endblock %}

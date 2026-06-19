@@ -1,4 +1,4 @@
-from .adapter import ModelAdapter, ModelResponse, StreamGenerator
+from .adapter import ModelAdapter, ModelResponse, StreamGenerator, ToolIntent
 from .openai_adapter import OpenAICompatibleAdapter
 from .registry import ProviderConfig, get_adapter, list_providers, register_provider
 
@@ -20,6 +20,7 @@ __all__ = [
     "ModelAdapter",
     "ModelResponse",
     "StreamGenerator",
+    "ToolIntent",
     "OpenAICompatibleAdapter",
     "ProviderConfig",
     "get_adapter",

@@ -819,16 +819,27 @@ class ApprovalRepository:
         resource: str = "",
         reason: str = "",
         session_id: str = "",
+        tool_call_json: str = "",
     ) -> dict[str, object]:
         aid = str(uuid.uuid4())
-        self._db.connection.execute(
-            "INSERT INTO approval_records"
-            " (id, workspace_id, session_id, actor_id, capability_name,"
-            " operation, resource, reason, status)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
-            (aid, workspace_id, session_id, actor_id, capability_name,
-             operation, resource, reason),
-        )
+        try:
+            self._db.connection.execute(
+                "INSERT INTO approval_records"
+                " (id, workspace_id, session_id, actor_id, capability_name,"
+                " operation, resource, reason, status, tool_call_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+                (aid, workspace_id, session_id, actor_id, capability_name,
+                 operation, resource, reason, tool_call_json),
+            )
+        except Exception:
+            self._db.connection.execute(
+                "INSERT INTO approval_records"
+                " (id, workspace_id, session_id, actor_id, capability_name,"
+                " operation, resource, reason, status)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+                (aid, workspace_id, session_id, actor_id, capability_name,
+                 operation, resource, reason),
+            )
         self._db.connection.commit()
         cur = self._db.connection.execute(
             "SELECT * FROM approval_records WHERE id = ?", (aid,)
@@ -840,6 +851,21 @@ class ApprovalRepository:
             "SELECT * FROM approval_records WHERE id = ?", (aid,)
         )
         return _row_to_dict(cur.fetchone())
+
+    def get_pending_tool_call(self, aid: str) -> str | None:
+        try:
+            cur = self._db.connection.execute(
+                "SELECT tool_call_json FROM approval_records"
+                " WHERE id = ? AND status = 'pending'",
+                (aid,),
+            )
+            row = cur.fetchone()
+            if row:
+                val = row["tool_call_json"]
+                return str(val) if val else None
+        except Exception:
+            pass
+        return None
 
     def resolve(
         self, aid: str, decision: str, decided_by: str = ""

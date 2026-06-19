@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Generator
@@ -7,10 +8,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from cogito_agent.capability import CapabilityRegistry
-from cogito_agent.context import ContextEngine, ContextItem
+from cogito_agent.capability.schemas import (
+    filter_available_tools,
+    manifest_to_tool_schema,
+)
+from cogito_agent.context import ContextEngine, ContextItem, PromptBuilder
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.memory import CandidateExtractor, MemoryRetriever
-from cogito_agent.models import ModelAdapter, ModelResponse, StreamGenerator
+from cogito_agent.models import ModelAdapter, ModelResponse, StreamGenerator, ToolIntent
 from cogito_agent.shared import (
     DecisionType,
     EventType,
@@ -98,6 +103,7 @@ class RuntimeKernel:
         self._tool_results: list[dict[str, object]] = []
         self._sources: list[dict[str, object]] = []
         self._max_tool_rounds = max_tool_rounds
+        self._prompt_builder = PromptBuilder()
 
     @property
     def state(self) -> TurnState:
@@ -119,6 +125,13 @@ class RuntimeKernel:
                     delay = base_delay * (2 ** attempt)
                     time.sleep(delay)
         raise last_error  # type: ignore[misc]
+
+    def _get_tool_schemas(self, actor: str = "assistant") -> list[dict[str, object]]:
+        if not self._cap_reg:
+            return []
+        manifests = self._cap_reg.list_tools()
+        available = filter_available_tools(manifests, actor=actor)
+        return [manifest_to_tool_schema(m) for m in available]
 
     def process(self, event: RuntimeEvent) -> TurnResult:
         terminal = {TurnState.completed, TurnState.failed, TurnState.denied,
@@ -169,7 +182,6 @@ class RuntimeKernel:
                 # Budget check is handled inside _dispatch_tools per-tool
 
             if tool_round >= self._max_tool_rounds and model_resp.tool_intents:
-                # Cap reached — return safe summary
                 model_resp = ModelResponse(
                     content="Tool chain terminated: maximum tool rounds reached. "
                             "Results from completed tools have been applied."
@@ -255,15 +267,11 @@ class RuntimeKernel:
     def _stream_generate_reply(
         self, event: RuntimeEvent, message: str,
         trace: object, span: object,
+        ctx: list[ContextItem] | None = None,
+        tool_schemas: list[dict[str, object]] | None = None,
         streaming_enabled: bool = True,
         max_retries: int = 2,
     ) -> Generator[StreamEvent, None, ModelResponse]:
-        """Yield delta events for each token, return the final ModelResponse.
-
-        Retry strategy: retry up to max_retries times if the stream fails
-        BEFORE the first token. Once a token has been yielded, do NOT retry
-        —  emit an error event instead (no token replay).
-        """
         if not message.strip():
             yield StreamEvent(
                 type=StreamEventType.delta,
@@ -271,12 +279,13 @@ class RuntimeKernel:
             )
             return ModelResponse(content="I didn't receive any message.")
 
-        msgs = self._build_model_messages(event, message, trace)
+        msgs = self._build_model_messages(event, message, trace, ctx=ctx)
         call_start = datetime.now(UTC)
 
         echo = f"You said: {message}" if self._model_adapter is None else ""
         gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
-                              streaming_enabled=streaming_enabled)
+                              streaming_enabled=streaming_enabled,
+                              tool_schemas=tool_schemas)
 
         attempt = 0
         first_delta_yielded = False
@@ -288,17 +297,16 @@ class RuntimeKernel:
                         type=StreamEventType.delta,
                         data={"delta": chunk},
                     )
-                break  # completed successfully
+                break
             except Exception:
                 if first_delta_yielded:
-                    # After first delta: do not retry, let error propagate
                     raise
                 attempt += 1
                 if attempt > max_retries:
-                    raise  # all retries exhausted
-                # Re-create generator for retry
+                    raise
                 gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
-                                      streaming_enabled=streaming_enabled)
+                                      streaming_enabled=streaming_enabled,
+                                      tool_schemas=tool_schemas)
 
         latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
         self._model_call_count += 1
@@ -321,16 +329,16 @@ class RuntimeKernel:
             error=None,
         )
 
-        if not resp.tool_intents and self._cap_reg:
-            tool_intents = self._detect_tool_intents(resp.content)
-            if tool_intents:
-                resp.tool_intents = tool_intents
+        if not resp.tool_intents:
+            legacy = self._detect_tool_intents(resp.content)
+            if legacy:
+                resp.tool_intents = ModelResponse.from_legacy_dicts(legacy)
 
         return resp
 
     @staticmethod
     def _detect_tool_intents(text: str) -> list[dict[str, object]]:
-        """Parse tool intents from model output (simple heuristic)."""
+        """Parse tool intents from model output (legacy XML fallback)."""
         import re
         intents: list[dict[str, object]] = []
         for match in re.finditer(
@@ -339,7 +347,6 @@ class RuntimeKernel:
         ):
             raw = match.group(0)
             try:
-                import json
                 obj = json.loads(raw.replace("<tool_call>", "").replace("</tool_call>", ""))
                 intents.append({"name": obj.get("name", ""), "arguments": obj.get("arguments", {})})
             except Exception:
@@ -370,7 +377,6 @@ class RuntimeKernel:
         span.input_summary = f"event={event.type.value}, actor={event.actor_id}, stream"
         self._start_time = datetime.now(UTC)
 
-        # Yield metadata (single event with all fields)
         meta_data: dict[str, object] = {
             "trace_id": trace.id,
             "session_id": event.session_id,
@@ -407,9 +413,11 @@ class RuntimeKernel:
             )
             text = str(raw_text) if raw_text is not None else ""
 
-            # Stream delta events during model inference
+            tool_schemas = self._get_tool_schemas(actor=event.actor_id)
+
             delta_gen = self._stream_generate_reply(
                 event, text, trace, span,
+                ctx=ctx, tool_schemas=tool_schemas,
                 streaming_enabled=streaming_enabled,
                 max_retries=max_retries,
             )
@@ -424,7 +432,6 @@ class RuntimeKernel:
 
             self._transition(TurnState.planning_tool)
 
-            # Multi-round tool loop in streaming
             tool_round = 0
             while (
                 model_resp.tool_intents
@@ -478,7 +485,6 @@ class RuntimeKernel:
                         decision="require_approval",
                     )
                     return
-                # Budget check is handled inside _dispatch_tools per-tool
 
             if tool_round >= self._max_tool_rounds and model_resp.tool_intents:
                 model_resp = ModelResponse(
@@ -486,7 +492,6 @@ class RuntimeKernel:
                             "Results from completed tools have been applied."
                 )
 
-            # Compose result
             model_result = self._compose_result(event, model_resp, trace, span)
             output_text = model_result.content
 
@@ -674,19 +679,38 @@ class RuntimeKernel:
         )
         return ctx_items
 
+    def _build_model_messages(
+        self, event: RuntimeEvent, message: str, trace: object,
+        ctx: list[ContextItem] | None = None,
+    ) -> list[dict[str, object]]:
+        if ctx is None:
+            ctx = self._build_context(event)
+        return self._prompt_builder.build(
+            ctx_items=ctx,
+            current_message=message,
+            tool_results=self._tool_results,
+        )
+
     def _generate_reply(
         self, event: RuntimeEvent, message: str,
         trace: object, span: object,
+        ctx: list[ContextItem] | None = None,
         max_retries: int = 2,
     ) -> ModelResponse:
         if not message.strip():
             return ModelResponse(content="I didn't receive any message.")
         if self._model_adapter is None:
             return ModelResponse(content=f"You said: {message}")
-        msgs = self._build_model_messages(event, message, trace)
+        msgs = self._build_model_messages(event, message, trace, ctx=ctx)
+        tool_schemas = self._get_tool_schemas(actor=event.actor_id)
+
+        kwargs: dict[str, object] = {}
+        if tool_schemas:
+            kwargs["tools"] = tool_schemas
+
         call_start = datetime.now(UTC)
         resp: ModelResponse = self._retry_with_backoff(
-            lambda: self._model_adapter.chat(msgs),
+            lambda: self._model_adapter.chat(msgs, **kwargs),
             max_retries=max_retries,
         )
         latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
@@ -708,36 +732,13 @@ class RuntimeKernel:
 
         return resp
 
-    def _build_model_messages(
-        self, event: RuntimeEvent, message: str, trace: object,
-    ) -> list[dict[str, str]]:
-        msgs: list[dict[str, str]] = []
-        system_prompt = (
-            "You are a helpful personal assistant running in Cogito-Agent, "
-            "a local-first personal agent runtime. You have access to tools, "
-            "long-term memory, and governed capabilities. "
-            "Respond concisely and helpfully."
-        )
-        msgs.append({"role": "system", "content": system_prompt})
-        recent = self._msg_repo.list_by_session(
-            event.session_id, event.workspace_id
-        )
-        for msg in recent[-6:]:
-            role = str(msg.get("role", "user"))
-            content = str(msg.get("content", ""))
-            if role == "tool":
-                content = wrap_untrusted(content)
-            msgs.append({"role": role, "content": content})
-        msgs.append({"role": "user", "content": message})
-        return msgs
-
     def _dispatch_tools(
         self, event: RuntimeEvent, resp: ModelResponse,
         trace: object, span: object,
     ) -> ModelResponse:
         collected_results: list[dict[str, object]] = []
         for intent in resp.tool_intents:
-            capability_name = str(intent.get("name", ""))
+            capability_name = intent.capability_name
             if not capability_name:
                 continue
             manifest = (
@@ -794,7 +795,7 @@ class RuntimeKernel:
             )
             if needs_approval:
                 approval_id = self._create_approval(
-                    event, capability_name, policy_req, policy_dec
+                    event, capability_name, intent, policy_req, policy_dec
                 )
                 self._audit.log(
                     actor_id=event.actor_id, action="call_tool",
@@ -811,11 +812,7 @@ class RuntimeKernel:
                 )
 
             self._check_budget_tool()
-            raw_args = intent.get("arguments", {})
-            if isinstance(raw_args, dict):
-                args: dict[str, object] = {str(k): v for k, v in raw_args.items()}
-            else:
-                args = {}
+            args = dict(intent.arguments) if intent.arguments else {}
             tool_start = datetime.now(UTC)
 
             def _do_invoke() -> object | None:
@@ -883,24 +880,39 @@ class RuntimeKernel:
                 decision="allow", reason=policy_dec.reason,
             )
 
-        # Only do follow-up model call if at least one tool was actually invoked
         tools_invoked = any(
             r.get("error") is None or "Denied" not in str(r.get("error", ""))
             for r in collected_results
         )
         if collected_results and self._model_adapter and tools_invoked:
-            follow_up_msgs = self._build_model_messages(event, "", trace)
+            event_with_text = RuntimeEvent(
+                workspace_id=event.workspace_id,
+                session_id=event.session_id,
+                actor_id=event.actor_id,
+                source=event.source,
+                type=EventType.tool_result,
+                payload={"text": ""},
+            )
+            follow_up_msgs = self._build_model_messages(
+                event_with_text, "", trace,
+            )
             follow_up_msgs.append({
                 "role": "assistant",
                 "content": str(resp.content),
             })
             for r in collected_results:
                 raw = str(r.get("summary", "") or r.get("error", ""))
+                tool_call_id = intent.tool_call_id if hasattr(intent, 'tool_call_id') else ""
                 follow_up_msgs.append({
                     "role": "tool",
+                    "tool_call_id": tool_call_id,
                     "content": wrap_untrusted(raw),
                 })
-            follow_up = self._model_adapter.chat(follow_up_msgs)
+            tool_schemas = self._get_tool_schemas(actor=event.actor_id)
+            kwargs: dict[str, object] = {}
+            if tool_schemas:
+                kwargs["tools"] = tool_schemas
+            follow_up = self._model_adapter.chat(follow_up_msgs, **kwargs)
             self._model_call_count += 1
             return follow_up
 
@@ -908,7 +920,7 @@ class RuntimeKernel:
 
     def _create_approval(
         self, event: RuntimeEvent, capability_name: str,
-        policy_req: PolicyRequest, policy_dec: object,
+        intent: ToolIntent, policy_req: PolicyRequest, policy_dec: object,
     ) -> str:
         repo = ApprovalRepository(self._db)
         reason = (
@@ -916,6 +928,11 @@ class RuntimeKernel:
             if hasattr(policy_dec, "reason")
             else "require_approval"
         )
+        tool_call_json = json.dumps({
+            "capability_name": capability_name,
+            "arguments": intent.arguments,
+            "tool_call_id": intent.tool_call_id,
+        })
         record = repo.create(
             workspace_id=event.workspace_id,
             actor_id=event.actor_id,
@@ -924,6 +941,7 @@ class RuntimeKernel:
             resource=str(policy_req.resource),
             reason=reason,
             session_id=event.session_id,
+            tool_call_json=tool_call_json,
         )
         return str(record.get("id", ""))
 
@@ -962,7 +980,6 @@ class RuntimeKernel:
         if user_text.strip():
             mid = str(uuid.uuid4())
             self._msg_repo.create(mid, event.workspace_id, event.session_id, "user", user_text)
-            # Auto-set title from first user message
             self._db.connection.execute(
                 "UPDATE sessions SET title = CASE"
                 " WHEN title IS NULL OR title = '' THEN ? ELSE title END,"

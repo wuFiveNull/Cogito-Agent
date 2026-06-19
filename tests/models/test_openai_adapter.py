@@ -53,7 +53,8 @@ def test_chat_tool_intent(mock_urlopen: MagicMock) -> None:
     adapter = OpenAICompatibleAdapter(api_key="test-key", model="gpt-4o-mini")
     resp = adapter.chat([{"role": "user", "content": "Read a file"}])
     assert len(resp.tool_intents) == 1
-    assert resp.tool_intents[0]["function"] == "read_file"
+    assert resp.tool_intents[0].capability_name == "read_file"
+    assert resp.tool_intents[0].tool_call_id == "call_1"
     assert resp.stop_reason == "tool_calls"
 
 

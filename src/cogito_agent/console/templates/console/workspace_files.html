@@ -1,0 +1,61 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="toolbar">
+  <div class="filter-bar">
+    <form method="get" action="/console/workspace/files" class="filter-form">
+      <select name="root_id" onchange="this.form.submit()">
+        <option value="">All roots</option>
+        {% for r in roots %}
+        <option value="{{ r.id }}" {% if r.id == cur_root_id %}selected{% endif %}>{{ r.label or r.root_path }}</option>
+        {% endfor %}
+      </select>
+      <select name="status" onchange="this.form.submit()">
+        <option value="">All status</option>
+        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active ({{ counts.active }})</option>
+        <option value="deleted" {% if status_filter == 'deleted' %}selected{% endif %}>Deleted ({{ counts.deleted }})</option>
+        <option value="ignored" {% if status_filter == 'ignored' %}selected{% endif %}>Ignored ({{ counts.ignored }})</option>
+        <option value="error" {% if status_filter == 'error' %}selected{% endif %}>Error ({{ counts.error }})</option>
+      </select>
+    </form>
+  </div>
+  <form method="post" action="/console/workspace/files/scan" style="display:inline">
+    <input type="hidden" name="root_id" value="{{ cur_root_id }}">
+    <button type="submit" class="btn btn-primary">Scan Now</button>
+  </form>
+</div>
+
+{% if files %}
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>File Name</th>
+      <th>Path</th>
+      <th>Type</th>
+      <th>Size</th>
+      <th>Status</th>
+      <th>Modified</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in files %}
+    <tr class="status-{{ f.status }}">
+      <td><a href="/console/workspace/files/{{ f.id }}">{{ f.file_name }}</a></td>
+      <td class="path-cell">{{ f.relative_path }}</td>
+      <td>{{ f.mime_type }}</td>
+      <td>{{ f.size_bytes }} B</td>
+      <td><span class="badge badge-{{ f.status }}">{{ f.status }}</span></td>
+      <td>{{ f.modified_at[:10] if f.modified_at else '' }}</td>
+      <td class="actions-cell">
+        <a href="/console/workspace/files/{{ f.id }}" class="btn-small">View</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+  <p>No files indexed. Click "Scan Now" to index your workspace root.</p>
+</div>
+{% endif %}
+{% endblock %}

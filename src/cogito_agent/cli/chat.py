@@ -260,7 +260,7 @@ def _handle_stream(
         return
 
     adapter = get_adapter(provider=provider)
-    messages = [{"role": "user", "content": user_input}]
+    messages: list[dict[str, object]] = [{"role": "user", "content": user_input}]
     print("Agent: ", end="", flush=True)
     full = ""
     for token in adapter.stream_chat(messages):

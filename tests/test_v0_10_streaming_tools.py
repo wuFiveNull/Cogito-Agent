@@ -31,7 +31,10 @@ def db() -> Database:
     _db.migrate()
     yield _db
     _db.connection.close()
-    os.unlink(path)
+    try:
+        os.unlink(path)
+    except Exception:
+        pass
 
 
 def _ensure_ws_and_session(db: Database, ws_id: str = "default",

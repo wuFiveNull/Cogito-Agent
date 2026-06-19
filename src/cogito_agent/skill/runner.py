@@ -628,7 +628,7 @@ class SkillRunner:
             if mapped:
                 prompt = prompt.format(**mapped)
             return f"[llm stub] {prompt[:200]}"
-        messages: list[dict[str, str]] = [{"role": "user", "content": step.prompt}]
+        messages: list[dict[str, object]] = [{"role": "user", "content": step.prompt}]
         response = self._model_adapter.chat(messages)
         return response.content or ""
 

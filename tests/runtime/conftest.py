@@ -9,4 +9,5 @@ from cogito_agent.storage import Database
 def db() -> Database:
     database = Database(":memory:")
     database.initialize()
+    database.migrate()
     return database

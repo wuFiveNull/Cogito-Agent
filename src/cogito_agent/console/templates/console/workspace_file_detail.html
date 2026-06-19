@@ -1,0 +1,71 @@
+{% extends "console/base.html" %}
+{% block content %}
+<div class="detail-header">
+  <h3>{{ file.file_name }}</h3>
+  <div class="detail-actions">
+    <form method="post" action="/console/workspace/files/{{ file.id }}/reindex" style="display:inline">
+      <button type="submit" class="btn btn-secondary">Reindex</button>
+    </form>
+    <form method="post" action="/console/workspace/files/{{ file.id }}/remove" style="display:inline" onsubmit="return confirm('Remove this file from index?')">
+      <button type="submit" class="btn btn-danger">Remove</button>
+    </form>
+  </div>
+</div>
+
+<div class="metadata-grid">
+  <div class="metadata-item">
+    <span class="label">Path</span>
+    <span>{{ file.relative_path }}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">MIME Type</span>
+    <span>{{ file.mime_type }}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Size</span>
+    <span>{{ file.size_bytes }} bytes</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">SHA256</span>
+    <span class="mono">{{ file.sha256[:16] }}...</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Status</span>
+    <span class="badge badge-{{ file.status }}">{{ file.status }}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Modified</span>
+    <span>{{ file.modified_at or 'N/A' }}</span>
+  </div>
+  <div class="metadata-item">
+    <span class="label">Indexed</span>
+    <span>{{ file.indexed_at or 'N/A' }}</span>
+  </div>
+  {% if file.error_message %}
+  <div class="metadata-item error">
+    <span class="label">Error</span>
+    <span>{{ file.error_message }}</span>
+  </div>
+  {% endif %}
+</div>
+
+{% if chunks %}
+<h4>Chunks ({{ chunks|length }})</h4>
+<div class="chunk-list">
+  {% for chunk in chunks %}
+  <div class="chunk-card">
+    <div class="chunk-header">
+      <span class="chunk-index">Chunk {{ chunk.chunk_index }}</span>
+      <span class="chunk-lines">Lines {{ chunk.start_line }}-{{ chunk.end_line }}</span>
+      <span class="chunk-tokens">{{ chunk.token_count }} tokens</span>
+    </div>
+    <pre class="chunk-text"><code>{{ chunk.text[:500] }}{% if chunk.text|length > 500 %}...{% endif %}</code></pre>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No chunks. Reindex this file to generate chunks.</p>
+</div>
+{% endif %}
+{% endblock %}

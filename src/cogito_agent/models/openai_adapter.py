@@ -8,7 +8,42 @@ import urllib.request
 from collections.abc import Iterator
 from urllib.parse import urljoin
 
-from .adapter import ModelResponse
+from .adapter import ModelResponse, ToolIntent
+
+
+def _merge_streaming_tool_calls(
+    existing: list[ToolIntent],
+    delta_tc: dict[str, object],
+) -> list[ToolIntent]:
+    raw_idx = delta_tc.get("index", 0)
+    idx = int(raw_idx) if isinstance(raw_idx, (int, float, str)) else 0
+    raw_fn = delta_tc.get("function", {})
+    delta_fn = raw_fn if isinstance(raw_fn, dict) else {}
+    tc_id = str(delta_tc.get("id", ""))
+
+    while len(existing) <= idx:
+        existing.append(ToolIntent(tool_call_id="", capability_name="", arguments={}))
+
+    current = existing[idx]
+    if tc_id:
+        current.tool_call_id = tc_id
+    fn_name = str(delta_fn.get("name", ""))
+    if fn_name:
+        current.capability_name = fn_name
+    args_delta = str(delta_fn.get("arguments", ""))
+    if args_delta:
+        current_args_raw = (
+            json.dumps(current.arguments, ensure_ascii=False)
+            if current.arguments else ""
+        )
+        merged = current_args_raw + args_delta
+        try:
+            parsed = json.loads(merged)
+            if isinstance(parsed, dict):
+                current.arguments = {str(k): v for k, v in parsed.items()}
+        except (json.JSONDecodeError, TypeError):
+            current.arguments = {"_partial": current_args_raw + args_delta}
+    return existing
 
 
 class OpenAICompatibleAdapter:
@@ -33,7 +68,7 @@ class OpenAICompatibleAdapter:
         }
 
     def _build_body(
-        self, messages: list[dict[str, str]], **kwargs: object
+        self, messages: list[dict[str, object]], **kwargs: object
     ) -> dict[str, object]:
         body: dict[str, object] = {
             "model": self.model,
@@ -49,7 +84,27 @@ class OpenAICompatibleAdapter:
             body["stream"] = True
         return body
 
-    def chat(self, messages: list[dict[str, str]], **kwargs: object) -> ModelResponse:
+    def _parse_tool_calls(
+        self, raw_tool_calls: list[dict[str, object]],
+    ) -> list[ToolIntent]:
+        intents: list[ToolIntent] = []
+        for tc in raw_tool_calls:
+            fn_data = tc.get("function", {})
+            fn_dict = fn_data if isinstance(fn_data, dict) else {}
+            args_raw = fn_dict.get("arguments", "{}")
+            args_str = str(args_raw) if args_raw else "{}"
+            try:
+                args = json.loads(args_str)
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            intents.append(ToolIntent(
+                tool_call_id=str(tc.get("id", "")),
+                capability_name=str(fn_dict.get("name", "")),
+                arguments={str(k): v for k, v in args.items()} if isinstance(args, dict) else {},
+            ))
+        return intents
+
+    def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
         url = urljoin(self.base_url, "chat/completions")
         body = self._build_body(messages, **kwargs)
         data = json.dumps(body).encode("utf-8")
@@ -84,14 +139,9 @@ class OpenAICompatibleAdapter:
         content = message.get("content") or ""
         tool_calls_raw = message.get("tool_calls")
 
-        tool_intents: list[dict[str, object]] = []
+        tool_intents: list[ToolIntent] = []
         if tool_calls_raw:
-            for tc in tool_calls_raw:
-                tool_intents.append({
-                    "id": tc.get("id", ""),
-                    "function": tc.get("function", {}).get("name", ""),
-                    "arguments": tc.get("function", {}).get("arguments", "{}"),
-                })
+            tool_intents = self._parse_tool_calls(tool_calls_raw)
 
         usage = result.get("usage", {})
         stop_reason = choice.get("finish_reason", "")
@@ -108,7 +158,7 @@ class OpenAICompatibleAdapter:
         )
 
     def stream_chat(
-        self, messages: list[dict[str, str]], **kwargs: object
+        self, messages: list[dict[str, object]], **kwargs: object
     ) -> Iterator[str]:
         url = urljoin(self.base_url, "chat/completions")
         body = self._build_body(messages, stream=True, **kwargs)
@@ -118,16 +168,18 @@ class OpenAICompatibleAdapter:
             url, data=data, headers=self._headers, method="POST"
         )
 
+        accumulated: dict[int, dict[str, object]] = {}
+
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
-                buffer = ""
+                buf = ""
                 while True:
                     chunk = resp.read(1)
                     if not chunk:
                         break
-                    buffer += chunk.decode("utf-8", errors="replace")
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
+                    buf += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
                         line = line.strip()
                         if not line or line.startswith(":"):
                             continue
@@ -137,15 +189,84 @@ class OpenAICompatibleAdapter:
                                 return
                             try:
                                 data_obj = json.loads(payload)
-                                choices = data_obj.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    token = delta.get("content", "")
-                                    if token:
-                                        yield token
                             except json.JSONDecodeError:
                                 continue
+                            choices = data_obj.get("choices", [])
+                            if not choices:
+                                continue
+                            choice = choices[0]
+                            delta = choice.get("delta", {})
+                            finish = choice.get("finish_reason", "")
+
+                            token = delta.get("content", "")
+                            if token:
+                                yield token
+
+                            delta_tcs = delta.get("tool_calls")
+                            if delta_tcs:
+                                for dtc in delta_tcs:
+                                    raw_idx = dtc.get("index", 0)
+                                    idx = (
+                                        int(raw_idx)
+                                        if isinstance(raw_idx, (int, float, str))
+                                        else 0
+                                    )
+                                    raw_fn = dtc.get("function", {})
+                                    fn_data = raw_fn if isinstance(raw_fn, dict) else {}
+                                    args_raw = str(fn_data.get("arguments", ""))
+
+                                    if idx not in accumulated:
+                                        accumulated[idx] = {
+                                            "id": str(dtc.get("id", "")),
+                                            "function": {
+                                                "name": str(fn_data.get("name", "")),
+                                                "arguments": args_raw,
+                                            },
+                                        }
+                                    else:
+                                        entry = accumulated[idx]
+                                        existing_id = dtc.get("id")
+                                        if existing_id:
+                                            entry["id"] = str(existing_id)
+                                        fn_name = fn_data.get("name")
+                                        if isinstance(fn_name, str) and fn_name:
+                                            raw_sub = entry.get("function", {})
+                                            sub = raw_sub if isinstance(raw_sub, dict) else {}
+                                            sub["name"] = fn_name
+                                            entry["function"] = sub
+                                        raw_sub2 = entry.get("function", {})
+                                        sub2 = raw_sub2 if isinstance(raw_sub2, dict) else {}
+                                        old_args = str(sub2.get("arguments", ""))
+                                        sub2["arguments"] = old_args + args_raw
+                                        entry["function"] = sub2
+
+                            if finish:
+                                if finish == "tool_calls":
+                                    yield "[TOOL_CALLS]"
+                                return
         except urllib.error.HTTPError as e:
             yield f"[stream error: HTTP {e.code}]"
         except Exception as e:
             yield f"[stream error: {e}]"
+
+    def get_tool_calls_from_stream(
+        self, accumulated: dict[int, dict[str, object]] | None = None,
+    ) -> list[ToolIntent]:
+        if not accumulated:
+            return []
+        intents: list[ToolIntent] = []
+        for idx in sorted(accumulated.keys()):
+            entry = accumulated[idx]
+            raw_fn = entry.get("function", {})
+            fn_data = raw_fn if isinstance(raw_fn, dict) else {}
+            args_raw = str(fn_data.get("arguments", ""))
+            try:
+                args = json.loads(args_raw) if args_raw else {}
+            except (json.JSONDecodeError, TypeError):
+                args = {"_raw": args_raw}
+            intents.append(ToolIntent(
+                tool_call_id=str(entry.get("id", "")),
+                capability_name=str(fn_data.get("name", "")),
+                arguments={str(k): v for k, v in args.items()} if isinstance(args, dict) else {},
+            ))
+        return intents
