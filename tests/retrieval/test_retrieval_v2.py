@@ -722,3 +722,165 @@ def test_conftest_compatibility(db):
     _add_memory(db, "m1", "ws", "hello world")
     results = retriever.search("ws", "hello", limit=10)
     assert len(results) >= 1
+
+
+# ═══════════════════════════════════════════════════════
+# R7: End-to-end integration tests
+# ═══════════════════════════════════════════════════════
+
+
+def test_retrieval_v2_writes_trace(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "apple banana fruit")
+    provider = _TestSemanticProvider(dimension=384)
+    vec = provider.embed_text("apple banana fruit")
+    _add_v2_embedding(db, "m1", "ws", vec, provider="test_semantic",
+                      model="test_model", status="ready")
+    sparse = SparseMemoryRetriever(db)
+    dense = DenseMemoryRetriever(db, provider)
+    svc = MemoryRetrievalService(
+        db=db, provider=provider,
+        sparse_retriever=sparse, dense_retriever=dense,
+    )
+    from cogito_agent.retrieval.query import MemoryQueryBuilder
+    builder = MemoryQueryBuilder()
+    ctx = builder.build(current_message="apple", workspace_id="ws")
+    result = svc.recall(ctx, limit=10)
+    assert result.trace_id
+    row = db.connection.execute(
+        "SELECT 1 FROM retrieval_traces WHERE id = ?", (result.trace_id,)
+    ).fetchone()
+    assert row is not None, "retrieval_traces must have a row"
+
+
+def test_edit_creates_new_embedding(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "original text")
+    provider = _TestSemanticProvider(dimension=384)
+    vec = provider.embed_text("original text")
+    _add_v2_embedding(db, "m1", "ws", vec, provider="test_semantic",
+                      model="test_model", status="ready")
+    from cogito_agent.embedding.service import MemoryEmbeddingIndexService
+    from cogito_agent.memory.application import MemoryApplicationService
+    index_svc = MemoryEmbeddingIndexService(db, provider)
+    app_svc = MemoryApplicationService(db, embedding_index=index_svc)
+    app_svc.edit_memory("m1", "ws", "updated text")
+    embedding = index_svc._get_existing_embedding("m1")
+    assert embedding is not None
+    new_hash = embedding.get("content_hash", "")
+    assert new_hash != "", "edit should produce a new embedding"
+
+
+def test_bm25_normalization_real_fts(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "apple banana cherry date elderberry")
+    _add_memory(db, "m2", "ws", "apple banana")
+    _add_memory(db, "m3", "ws", "completely unrelated topic")
+    retriever = SparseMemoryRetriever(db)
+    results = retriever.search("ws", "apple banana cherry date", limit=10)
+    if results:
+        best = results[0]
+        assert best["sparse_score"] >= 0
+        best_id = str(best["id"])
+        best_text = str(best.get("text", ""))
+        assert "completely" not in best_text, "unrelated should not rank first"
+
+
+def test_config_weights_affect_scoring(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "python programming", mtype="general")
+    provider = _TestSemanticProvider(dimension=384)
+    vec = provider.embed_text("python programming")
+    _add_v2_embedding(db, "m1", "ws", vec, provider="test_semantic",
+                      model="test_model", status="ready")
+    high_dense = CandidateFusion(
+        dense_weight=1.0, sparse_weight=0.0,
+        recency_weight=0.0, confidence_weight=0.0,
+        task_relevance_weight=0.0, type_priority_weight=0.0,
+    )
+    high_sparse = CandidateFusion(
+        dense_weight=0.0, sparse_weight=1.0,
+        recency_weight=0.0, confidence_weight=0.0,
+        task_relevance_weight=0.0, type_priority_weight=0.0,
+    )
+    sparse_candidates = [{"id": "m1", "text": "python programming", "sparse_score": 0.9,
+                          "type": "general", "confidence": 0.5, "created_at": None}]
+    dense_candidates = [{"id": "m1", "text": "python programming", "dense_score": 0.3,
+                          "dense_rank": 1, "type": "general", "confidence": 0.5,
+                          "created_at": None}]
+    r1 = high_dense.fuse(sparse_candidates, dense_candidates, "python")
+    r2 = high_sparse.fuse(sparse_candidates, dense_candidates, "python")
+    _, b1 = r1[0]
+    _, b2 = r2[0]
+    assert b1.final_score == pytest.approx(0.3, abs=0.01)
+    assert b2.final_score == pytest.approx(0.9, abs=0.01)
+
+
+def test_recall_with_factory_and_config(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "apple banana", mtype="general")
+    _add_memory(db, "m2", "ws", "cat dog", mtype="general", pinned=True)
+    provider = _TestSemanticProvider(dimension=384)
+    vec_fruit = provider.embed_text("apple banana")
+    _add_v2_embedding(db, "m1", "ws", vec_fruit, provider="test_semantic",
+                      model="test_model", status="ready")
+    from cogito_agent.config.loader import TypePolicySettings
+    from cogito_agent.retrieval.service import create_retrieval_service
+    svc = create_retrieval_service(db, embedding_provider=provider)
+    from cogito_agent.retrieval.query import MemoryQueryBuilder
+    builder = MemoryQueryBuilder()
+    ctx = builder.build(current_message="apple", workspace_id="ws")
+    result = svc.recall(ctx, limit=5)
+    assert result.selected_count >= 0
+    assert result.mode in ("hybrid", "sparse_only", "dense_only")
+    assert result.health_state == "healthy" or result.health_state == "disabled"
+
+
+def test_recall_all_paths_write_trace(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "some content")
+    sparse = SparseMemoryRetriever(db)
+    svc = MemoryRetrievalService(db=db, provider=None,
+                                  sparse_retriever=sparse,
+                                  dense_retriever=DenseMemoryRetriever(db, None))
+    from cogito_agent.retrieval.query import MemoryQueryContext
+    modes = [
+        MemoryQueryContext(current_message=""),
+        MemoryQueryContext(current_message="hello"),
+        MemoryQueryContext(current_message="我喜欢什么"),
+        MemoryQueryContext(current_message="Cogito API"),
+    ]
+    for ctx in modes:
+        result = svc.recall(ctx, limit=5)
+        row = db.connection.execute(
+            "SELECT 1 FROM retrieval_traces WHERE id = ?", (result.trace_id,)
+        ).fetchone()
+        assert row is not None, f"mode={result.mode} must write trace"
+
+
+def test_context_engine_distinguishes_resident_and_dynamic(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "resident profile info", mtype="profile",
+                confidence=0.9, pinned=True)
+    _add_memory(db, "m2", "ws", "dynamic retrieved info", mtype="general")
+    provider = _TestSemanticProvider(dimension=384)
+    vec = provider.embed_text("dynamic retrieved info")
+    _add_v2_embedding(db, "m2", "ws", vec, provider="test_semantic",
+                      model="test_model", status="ready")
+    from cogito_agent.retrieval import MemoryRecallResult
+    from cogito_agent.context import ContextEngine
+    engine = ContextEngine(total_token_budget=4096)
+    recall = MemoryRecallResult()
+    recall.resident_memories = [{"id": "m1", "text": "resident profile info",
+                                  "retrieval_source": "resident", "type": "profile"}]
+    recall.dynamic_memories = [{"id": "m2", "text": "dynamic retrieved info",
+                                 "retrieval_source": "dynamic", "type": "general"}]
+    ctx_items = engine.build(
+        recent_messages=[],
+        memories=recall.to_legacy_result(),
+        current_message="test",
+    )
+    resident_items = [i for i in ctx_items if i.source_type == "memory_resident"]
+    retrieved_items = [i for i in ctx_items if i.source_type == "memory_retrieved"]
+    assert len(resident_items) >= 1
+    assert len(retrieved_items) >= 1

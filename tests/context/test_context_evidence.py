@@ -22,8 +22,8 @@ def test_context_items_include_quality_evidence_and_stable_refs() -> None:
         current_message="Question",
     )
 
-    memory = next(item for item in items if item.source_type == "memory")
-    assert memory.stable_ref == "memory:memory-1"
+    memory = next(item for item in items if item.source_type in ("memory", "memory_retrieved", "memory_resident"))
+    assert memory.stable_ref == "memory_retrieved:memory-1"
     assert memory.trust_score == 0.9
     assert memory.freshness_score == 0.8
     assert memory.evidence == [{"source_message_id": "message-1"}]
@@ -65,7 +65,7 @@ def test_context_evidence_fields_are_persisted() -> None:
     )
 
     row = db.connection.execute(
-        "SELECT * FROM context_items WHERE stable_ref = 'memory:memory-1'"
+        "SELECT * FROM context_items WHERE source_id = 'memory-1'"
     ).fetchone()
     assert row is not None
     assert row["trust_score"] == 0.7
