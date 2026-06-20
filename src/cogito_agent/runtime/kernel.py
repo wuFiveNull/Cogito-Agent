@@ -21,6 +21,8 @@ from cogito_agent.context import (
 )
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.memory import CandidateExtractor, MemoryRetriever
+from cogito_agent.retrieval import MemoryRecallResult, MemoryRetrievalService
+from cogito_agent.retrieval.query import MemoryQueryBuilder, MemoryQueryContext
 from cogito_agent.models import (
     ModelAdapter,
     ModelResponse,
@@ -112,6 +114,7 @@ class RuntimeKernel:
         policy_engine: PolicyEngine | None = None,
         context_engine: ContextEngine | None = None,
         memory_retriever: MemoryRetriever | None = None,
+        memory_retrieval_service: MemoryRetrievalService | None = None,
         candidate_extractor: CandidateExtractor | None = None,
         max_tool_rounds: int = 3,
     ) -> None:
@@ -126,6 +129,8 @@ class RuntimeKernel:
         self._policy = policy_engine or PolicyEngine()
         self._ctx_engine = context_engine or ContextEngine()
         self._mem_retriever = memory_retriever
+        self._mem_retrieval_service = memory_retrieval_service
+        self._query_builder_for_retrieval = MemoryQueryBuilder()
         self._cand_extractor = candidate_extractor
         self._sess_repo = SessionRepository(db)
         self._msg_repo = MessageRepository(db)
@@ -139,6 +144,10 @@ class RuntimeKernel:
         self._result_composer = ResultComposer()
         self._compression = SessionCompressionService(db)
         self._extra_content: list[ContentPart] = []
+        self._current_memories: list[dict[str, object]] = []
+        self._current_recall_result: MemoryRecallResult | None = None
+        self._current_retrieval_trace_id: str = ""
+        self._current_ctx: list[ContextItem] | None = None
         self._multimodal_coordinator: MultimodalCoordinator | None = None
         self._vision_service: VisionObservationService | None = None
         self._meme_service: Any = None
@@ -349,7 +358,7 @@ class RuntimeKernel:
         try:
             self._sm.transition(TurnState.loading_session)
             self._transition(TurnState.building_context)
-            ctx = self._build_context(event)
+            ctx = self._build_context(event, trace_id=trace.id)
             self._sources = [
                 {"type": c.source_type, "id": c.source_id, "text": c.text}
                 for c in ctx if isinstance(c, ContextItem) and c.included
@@ -364,7 +373,7 @@ class RuntimeKernel:
                 else ""
             )
             text = str(raw_text) if raw_text is not None else ""
-            model_resp = self._generate_reply(event, text, trace, span)
+            model_resp = self._generate_reply(event, text, trace, span, ctx=ctx)
 
             self._transition(TurnState.planning_tool)
 
@@ -605,7 +614,7 @@ class RuntimeKernel:
         try:
             self._sm.transition(TurnState.loading_session)
             self._transition(TurnState.building_context)
-            ctx = self._build_context(event)
+            ctx = self._build_context(event, trace_id=trace.id)
             self._sources = [
                 {"type": c.source_type, "id": c.source_id, "text": c.text}
                 for c in ctx if isinstance(c, ContextItem) and c.included
@@ -861,48 +870,100 @@ class RuntimeKernel:
             )
             raise PolicyDeniedError(f"Model call denied: {decision.reason}")
 
-    def _build_context(self, event: RuntimeEvent) -> list[ContextItem]:
+    def _build_context(
+        self, event: RuntimeEvent, trace_id: str = "",
+    ) -> list[ContextItem]:
         messages_raw = self._msg_repo.list_by_session(
             event.session_id, event.workspace_id
         )
         recent_messages: list[dict[str, object]] = [
             dict(m) for m in messages_raw[-6:]
         ]
-        memories: list[dict[str, object]] = []
-        if self._mem_retriever:
-            try:
-                raw = event.payload.get("text", "")
-                query = str(raw) if raw is not None else ""
-                if not query.strip():
-                    content_raw = event.payload.get("content", [])
-                    if isinstance(content_raw, list):
-                        text_from_content = " ".join(
-                            str(c.get("text", ""))
-                            for c in content_raw
-                            if isinstance(c, dict) and c.get("text")
-                        )
-                        query = text_from_content if text_from_content.strip() else ""
-                memories = self._mem_retriever.search(
-                    event.workspace_id, query
-                )
-            except Exception:
-                memories = self._mem_retriever.list_recent(event.workspace_id)
         text_projection = str(event.payload.get("text", "") or "")
+        self._load_context_memories(event, recent_messages, text_projection, trace_id)
         ctx_items = self._ctx_engine.build(
             recent_messages=recent_messages,
-            memories=memories,
+            memories=self._current_memories,
             current_message=text_projection,
             db=self._db,
-            trace_id="",
+            trace_id=trace_id,
             workspace_id=event.workspace_id,
             session_summary=self._compression.get_latest(
                 event.workspace_id, event.session_id
             ),
         )
-        # Store extra content for multimodal routing
         raw = event.payload.get("content", [])
         self._extra_content = raw if isinstance(raw, list) else []
+        self._current_ctx = ctx_items
         return ctx_items
+
+    def _load_context_memories(
+        self, event: RuntimeEvent,
+        recent_messages: list[dict[str, object]],
+        current_message: str,
+        trace_id: str,
+    ) -> None:
+        """Load memories via Retrieval V2 or fallback, building MemoryRecallResult."""
+        self._current_recall_result = None
+        memories: list[dict[str, object]] = []
+
+        if self._memory_retrieval_service is not None:
+            try:
+                query = current_message
+                if not query.strip():
+                    content_raw = event.payload.get("content", [])
+                    if isinstance(content_raw, list):
+                        texts = [
+                            str(c.get("text", ""))
+                            for c in content_raw
+                            if isinstance(c, dict) and c.get("text")
+                        ]
+                        query = " ".join(texts) if texts else ""
+
+                user_msgs = [
+                    str(m.get("content", ""))
+                    for m in recent_messages
+                    if m.get("role") == "user"
+                ]
+
+                session_summary = self._compression.get_latest(
+                    event.workspace_id, event.session_id,
+                )
+                summary_text = str(session_summary.get("summary", "")) if session_summary else ""
+
+                qctx = self._query_builder_for_retrieval.build(
+                    current_message=query,
+                    recent_user_messages=user_msgs,
+                    session_topic_summary=summary_text,
+                    workspace_id=event.workspace_id,
+                    session_id=event.session_id,
+                )
+                qctx.trace_id = trace_id
+
+                recall_result = self._memory_retrieval_service.recall(
+                    query_context=qctx,
+                    limit=10,
+                )
+                self._current_recall_result = recall_result
+                self._current_retrieval_trace_id = recall_result.trace_id
+
+                memories_from_recall: list[dict[str, object]] = []
+                for mem in recall_result.resident_memories:
+                    entry = dict(mem)
+                    entry.setdefault("retrieval_source", "resident")
+                    memories_from_recall.append(entry)
+                for mem in recall_result.dynamic_memories:
+                    entry = dict(mem)
+                    entry.setdefault("retrieval_source", "dynamic")
+                    memories_from_recall.append(entry)
+                memories = memories_from_recall
+            except Exception:
+                logger.exception("Retrieval V2 failed")
+                memories = []
+        elif self._mem_retriever is not None:
+            memories = self._mem_retriever.list_recent(event.workspace_id)
+
+        self._current_memories = memories
 
     def _update_session_summary(self, event: RuntimeEvent) -> None:
         try:
@@ -916,7 +977,8 @@ class RuntimeKernel:
         ctx: list[ContextItem] | None = None,
     ) -> list[dict[str, object]]:
         if ctx is None:
-            ctx = self._build_context(event)
+            t_id = str(getattr(trace, "id", ""))
+            ctx = self._build_context(event, trace_id=t_id)
         extra_content = self._get_extra_content(event)
         span = getattr(trace, "_current_span", None) or trace
 

@@ -61,19 +61,19 @@ class MemoryRetriever:
         self._db = db
         self._service = service
 
+    def _ensure_service(self):
+        if self._service is None:
+            from cogito_agent.retrieval.service import create_retrieval_service
+            self._service = create_retrieval_service(self._db)
+
     def search(
         self, workspace_id: str, query: str, limit: int = 10,
         include_archived: bool = False,
     ) -> list[dict[str, object]]:
-        if self._service is not None:
-            return self._service.search_compat(
-                workspace_id, query, limit=limit,
-                include_archived=include_archived,
-            )
-
-        raise RuntimeError(
-            "MemoryRetriever has no retrieval service. "
-            "Use build_application_services() to create a properly configured instance."
+        self._ensure_service()
+        return self._service.search_compat(
+            workspace_id, query, limit=limit,
+            include_archived=include_archived,
         )
 
     def search_with_lineage(
