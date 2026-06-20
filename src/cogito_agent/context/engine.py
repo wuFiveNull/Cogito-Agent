@@ -16,6 +16,8 @@ class ContextItem(BaseModel):
     token_estimate: int = 0
     included: bool = True
     reason: str = ""
+    role: str = ""
+    tool_call_id: str = ""
     freshness_score: float = 0.5
     trust_score: float = 0.5
     evidence: list[dict[str, Any]] = Field(default_factory=list)
@@ -108,12 +110,15 @@ class ContextEngine:
 
         for i, msg in enumerate(recent_messages):
             text = str(msg.get("content", ""))
+            raw_role = msg.get("role", "")
+            role = str(raw_role) if isinstance(raw_role, str) else ""
             items.append(ContextItem(
                 source_type="message",
                 source_id=str(msg.get("id", "")),
                 text=text,
                 rank=i + 1,
                 token_estimate=self._estimate_tokens(text),
+                role=role,
                 reason="recent_history",
                 freshness_score=self._score(msg, "freshness_score", 1.0),
                 trust_score=self._score(msg, "trust_score", 0.8),

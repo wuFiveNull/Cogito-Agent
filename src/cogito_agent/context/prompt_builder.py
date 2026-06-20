@@ -105,7 +105,7 @@ class PromptBuilder:
             })
 
         # 2. Build memory context block
-        memory_items = [c for c in included if c.source_type == "memory"]
+        memory_items = [c for c in included if c.source_type in ("memory", "memory_retrieved", "memory_resident")]
         if memory_items:
             memory_block = "\n\n".join(
                 f"[Memory: {c.source_id}] {c.text}"
@@ -147,8 +147,9 @@ class PromptBuilder:
             and c.source_id != "current"
         ]
         for item in history_items:
+            role = item.role if item.role in ("user", "assistant", "tool") else "user"
             msgs.append({
-                "role": "user",
+                "role": role,
                 "content": item.text,
             })
 
