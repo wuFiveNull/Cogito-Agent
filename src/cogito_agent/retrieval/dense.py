@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import enum
 import heapq
 import logging
 import math
+from dataclasses import dataclass, field
+from typing import Any
 
 from cogito_agent.embedding.interface import EmbeddingProvider
 from cogito_agent.storage import Database
@@ -10,6 +13,21 @@ from cogito_agent.storage import Database
 logger = logging.getLogger(__name__)
 
 _EMBEDDING_VERSION = "2"
+
+
+class DenseHealthState(str, enum.Enum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    DISABLED = "disabled"
+
+
+@dataclass
+class DenseRetrievalResult:
+    candidates: list[dict[str, object]] = field(default_factory=list)
+    health_state: DenseHealthState = DenseHealthState.DISABLED
+    error_code: str = ""
+    error_message: str = ""
+    latency_ms: float = 0.0
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -45,19 +63,44 @@ class DenseMemoryRetriever:
         query: str,
         limit: int = 40,
         include_archived: bool = False,
-    ) -> list[dict[str, object]]:
-        if not self._provider or not self._provider.is_semantic:
-            return []
+    ) -> DenseRetrievalResult:
+        import time
+        t0 = time.time()
+        result = DenseRetrievalResult()
 
-        query_vec = self._embed_query(query)
-        if not query_vec:
-            return []
+        if self._provider is None:
+            result.health_state = DenseHealthState.DISABLED
+            result.error_code = "embedding_disabled"
+            return result
 
-        candidates = self._load_workspace_vectors(
-            workspace_id, include_archived,
-        )
+        if not self._provider.is_semantic:
+            result.health_state = DenseHealthState.DISABLED
+            result.error_code = "embedding_not_semantic"
+            return result
+
+        try:
+            query_vec = self._provider.embed_text(query)
+        except Exception as e:
+            result.health_state = DenseHealthState.DEGRADED
+            result.error_code = self._classify_error(e)
+            result.error_message = str(e)[:200]
+            result.latency_ms = (time.time() - t0) * 1000
+            return result
+
+        try:
+            candidates = self._load_workspace_vectors(workspace_id, include_archived)
+        except Exception as e:
+            result.health_state = DenseHealthState.DEGRADED
+            result.error_code = "db_load_failed"
+            result.error_message = str(e)[:200]
+            result.latency_ms = (time.time() - t0) * 1000
+            return result
+
         if not candidates:
-            return []
+            result.health_state = DenseHealthState.HEALTHY
+            result.candidates = []
+            result.latency_ms = (time.time() - t0) * 1000
+            return result
 
         scored: list[tuple[float, int, dict[str, object]]] = []
         for i, (mid, doc_vec) in enumerate(candidates):
@@ -74,7 +117,7 @@ class DenseMemoryRetriever:
 
         top_n = heapq.nsmallest(limit, scored)
         top_n.sort(key=lambda x: x[0])
-        results: list[dict[str, object]] = []
+        dense_results: list[dict[str, object]] = []
         for rank, (neg_sim, _, entry) in enumerate(top_n):
             entry["dense_rank"] = rank + 1
             mid = str(entry["memory_id"])
@@ -86,9 +129,43 @@ class DenseMemoryRetriever:
                 mem = dict(mem_row)
                 mem["dense_score"] = entry["dense_score"]
                 mem["dense_rank"] = entry["dense_rank"]
-                results.append(mem)
 
-        return results
+                dense_results.append(mem)
+
+        result.health_state = DenseHealthState.HEALTHY
+        result.candidates = dense_results
+        result.latency_ms = (time.time() - t0) * 1000
+        return result
+
+    @staticmethod
+    def _classify_error(e: Exception) -> str:
+        from cogito_agent.embedding.exceptions import (
+            EmbeddingAPIError,
+            EmbeddingAuthenticationError,
+            EmbeddingDimensionMismatchError,
+            EmbeddingRateLimitError,
+            EmbeddingResponseError,
+            EmbeddingTimeoutError,
+        )
+        if isinstance(e, EmbeddingAuthenticationError):
+            return "embedding_auth_failed"
+        if isinstance(e, EmbeddingRateLimitError):
+            return "embedding_rate_limited"
+        if isinstance(e, EmbeddingTimeoutError):
+            return "embedding_timeout"
+        if isinstance(e, EmbeddingDimensionMismatchError):
+            return "embedding_dimension_mismatch"
+        if isinstance(e, EmbeddingResponseError):
+            return "embedding_invalid_response"
+        if isinstance(e, EmbeddingAPIError):
+            code = getattr(e, "status_code", 0)
+            if code == 403:
+                return "embedding_forbidden"
+            return "embedding_api_error"
+        msg = str(e).lower()
+        if "connect" in msg or "connection" in msg:
+            return "embedding_connection_failed"
+        return "embedding_internal_error"
 
     def _embed_query(self, query: str) -> list[float] | None:
         if not self._provider:

@@ -66,57 +66,15 @@ class MemoryRetriever:
         include_archived: bool = False,
     ) -> list[dict[str, object]]:
         if self._service is not None:
-            try:
-                return self._service.search_compat(
-                    workspace_id, query, limit=limit,
-                    include_archived=include_archived,
-                )
-            except Exception as e:
-                logger.debug("New retrieval service failed, falling back: %s", e)
-
-        try:
-            from cogito_agent.memory.vector import HybridRetriever
-            hybrid = HybridRetriever(self._db)
-            hybrid_results = hybrid.search(workspace_id, query, limit, include_archived)
-            if hybrid_results:
-                return hybrid_results
-        except Exception:
-            pass
-
-        archived_clause = "" if include_archived else " AND m.archived_at IS NULL"
-        fts_results: list[dict[str, object]] = []
-        try:
-            cur = self._db.connection.execute(
-                "SELECT m.* FROM memories m"
-                " JOIN memories_fts fts ON m.rowid = fts.rowid"
-                " WHERE m.workspace_id = ? AND m.deleted_at IS NULL"
-                + archived_clause
-                + " AND memories_fts MATCH ?"
-                " ORDER BY rank LIMIT ?",
-                (workspace_id, query, limit),
+            return self._service.search_compat(
+                workspace_id, query, limit=limit,
+                include_archived=include_archived,
             )
-            fts_results = [dict(r) for r in cur.fetchall()]
-        except Exception:
-            pass
 
-        like_results: list[dict[str, object]] = []
-        if not fts_results:
-            cur = self._db.connection.execute(
-                "SELECT * FROM memories WHERE workspace_id = ?"
-                " AND deleted_at IS NULL"
-                + archived_clause.replace("m.", "")
-                + " AND (text LIKE ? OR summary LIKE ?)"
-                " ORDER BY confidence DESC, created_at DESC LIMIT ?",
-                (workspace_id, f"%{query}%", f"%{query}%", limit),
-            )
-            like_results = [dict(r) for r in cur.fetchall()]
-
-        combined = fts_results or like_results
-        scored = [
-            (m, _score_memory(m, query)) for m in combined
-        ]
-        scored.sort(key=lambda x: -x[1])
-        return [m for m, _ in scored[:limit]]
+        raise RuntimeError(
+            "MemoryRetriever has no retrieval service. "
+            "Use build_application_services() to create a properly configured instance."
+        )
 
     def search_with_lineage(
         self, workspace_id: str, query: str, limit: int = 10,

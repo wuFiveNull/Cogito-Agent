@@ -10,7 +10,7 @@ from typing import Any
 from cogito_agent.storage import Database
 
 from ..embedding.interface import EmbeddingProvider
-from .dense import DenseMemoryRetriever
+from .dense import DenseHealthState, DenseMemoryRetriever
 from .fusion import CandidateFusion
 from .gate import RetrievalGate, RetrievalGateResult
 from .query import MemoryQueryBuilder, MemoryQueryContext
@@ -220,7 +220,6 @@ class MemoryRetrievalService:
                 logger.warning("Sparse retrieval failed: %s", e)
                 sparse_candidates = []
 
-        dense_attempted = False
         if use_dense:
             if self._dense.provider is None:
                 result.health_state = "disabled"
@@ -231,31 +230,29 @@ class MemoryRetrievalService:
                 result.health_state = "disabled"
                 result.mode = "sparse_only"
             else:
-                dense_attempted = True
-                try:
-                    t1 = time.time()
-                    dense_candidates = self._dense.search(
-                        query_context.workspace_id, query,
-                        limit=dense_candidate_limit,
-                        include_archived=include_archived,
-                    )
-                    result.latencies["dense"] = (time.time() - t1) * 1000
-                except Exception as e:
+                t1 = time.time()
+                dense_result = self._dense.search(
+                    query_context.workspace_id, query,
+                    limit=dense_candidate_limit,
+                    include_archived=include_archived,
+                )
+                result.latencies["dense"] = dense_result.latency_ms
+                if dense_result.health_state == DenseHealthState.HEALTHY:
+                    dense_candidates = dense_result.candidates
+                else:
                     result.health_state = "degraded"
-                    if result.mode != "degraded":
-                        result.mode = "degraded"
-                    result.degraded_code = "embedding_api_error"
-                    result.degraded_reason = _code_to_reason("embedding_api_error")
+                    result.degraded_code = dense_result.error_code
+                    result.degraded_reason = _code_to_reason(dense_result.error_code)
                     dense_candidates = []
 
         result.sparse_candidate_count = len(sparse_candidates)
         result.dense_candidate_count = len(dense_candidates)
 
-        if result.health_state == "healthy" and not use_dense:
+        if result.health_state == "healthy" and result.mode in ("degraded",):
             result.mode = "sparse_only"
-        elif result.health_state == "healthy" and not dense_candidates and dense_attempted:
+        elif result.health_state == "healthy" and len(dense_candidates) == 0 and use_dense:
             result.mode = "sparse_only"
-        elif result.health_state == "healthy" and not sparse_candidates and dense_candidates:
+        elif result.health_state == "healthy" and len(sparse_candidates) == 0 and dense_candidates:
             result.mode = "dense_only"
 
         if not sparse_candidates and not dense_candidates:
@@ -411,6 +408,7 @@ class MemoryRetrievalService:
         limit: int = 10,
         include_archived: bool = False,
         recent_user_messages: list[str] | None = None,
+        force_mode: str | None = None,
     ) -> list[dict[str, object]]:
         ctx = self._query_builder.build(
             current_message=query,
@@ -419,14 +417,12 @@ class MemoryRetrievalService:
         )
         recall_result = self.recall(
             ctx, limit=limit, include_archived=include_archived,
-            force_mode="hybrid",
+            force_mode=force_mode or "",
         )
         results = recall_result.to_legacy_result()
-        trace_id = recall_result.trace_id
-        mode = recall_result.mode
         for r in results:
-            r["_retrieval_trace_id"] = trace_id
-            r["_retrieval_mode"] = mode
+            r["_retrieval_trace_id"] = recall_result.trace_id
+            r["_retrieval_mode"] = recall_result.mode
         return results
 
     def _get_config(self) -> dict[str, Any]:

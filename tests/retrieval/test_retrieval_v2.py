@@ -233,22 +233,22 @@ class TestDenseMemoryRetriever:
                           model="test_model", status="ready")
 
         retriever = DenseMemoryRetriever(db, provider)
-        results = retriever.search("ws", "公司的差旅支出应该怎么处理？", limit=10)
-        ids = [str(r["id"]) for r in results]
+        dense_result = retriever.search("ws", "公司的差旅支出应该怎么处理？", limit=10)
+        ids = [str(r["id"]) for r in dense_result.candidates]
         assert "m1" in ids
 
     def test_dense_retrieval_no_provider(self, db):
         retriever = DenseMemoryRetriever(db, None)
-        results = retriever.search("ws", "test", limit=10)
-        assert len(results) == 0
+        dense_result = retriever.search("ws", "test", limit=10)
+        assert len(dense_result.candidates) == 0
 
     def test_dense_retrieval_no_embeddings(self, db):
         _ensure_workspace(db, "ws")
         _add_memory(db, "m1", "ws", "test content")
         provider = _TestSemanticProvider()
         retriever = DenseMemoryRetriever(db, provider)
-        results = retriever.search("ws", "test", limit=10)
-        assert len(results) == 0
+        dense_result = retriever.search("ws", "test", limit=10)
+        assert len(dense_result.candidates) == 0
 
     def test_dense_retrieval_stale_embeddings_excluded(self, db):
         _ensure_workspace(db, "ws")
@@ -258,8 +258,8 @@ class TestDenseMemoryRetriever:
         _add_v2_embedding(db, "m1", "ws", vec, provider="test_semantic",
                           model="test_model", status="stale")
         retriever = DenseMemoryRetriever(db, provider)
-        results = retriever.search("ws", "test", limit=10)
-        assert len(results) == 0
+        dense_result = retriever.search("ws", "test", limit=10)
+        assert len(dense_result.candidates) == 0
 
     def test_workspace_isolation(self, db):
         _ensure_workspace(db, "ws-a")
@@ -270,10 +270,10 @@ class TestDenseMemoryRetriever:
         _add_v2_embedding(db, "m1", "ws-a", vec, provider="test_semantic",
                           model="test_model", status="ready")
         retriever = DenseMemoryRetriever(db, provider)
-        results_a = retriever.search("ws-a", "secret", limit=10)
-        assert len(results_a) >= 1
-        results_b = retriever.search("ws-b", "secret", limit=10)
-        assert len(results_b) == 0
+        dense_result_a = retriever.search("ws-a", "secret", limit=10)
+        assert len(dense_result_a.candidates) >= 1
+        dense_result_b = retriever.search("ws-b", "secret", limit=10)
+        assert len(dense_result_b.candidates) == 0
 
     def test_has_ready_embeddings(self, db):
         _ensure_workspace(db, "ws")
@@ -519,11 +519,11 @@ def test_dense_only_recall_semantic_match(db):
                       model="test_model", status="ready")
 
     retriever = DenseMemoryRetriever(db, provider)
-    results = retriever.search(
+    dense_result = retriever.search(
         "ws", "公司的差旅支出应该怎么处理？", limit=10,
     )
-    assert len(results) >= 1
-    assert results[0]["id"] == "m1"
+    assert len(dense_result.candidates) >= 1
+    assert dense_result.candidates[0]["id"] == "m1"
 
 
 def test_hybrid_service_works(db):
@@ -711,16 +711,18 @@ def test_old_v1_embeddings_isolated_from_v2(db):
 
     provider = MockEmbeddingProvider(dimension=384)
     retriever = DenseMemoryRetriever(db, provider)
-    results = retriever.search("ws", "legacy", limit=10)
-    assert len(results) == 0
+    dense_result = retriever.search("ws", "legacy", limit=10)
+    assert len(dense_result.candidates) == 0
 
 
 def test_conftest_compatibility(db):
     _ensure_workspace(db, "ws")
     from cogito_agent.memory import MemoryRetriever
-    retriever = MemoryRetriever(db)
-    _add_memory(db, "m1", "ws", "hello world")
-    results = retriever.search("ws", "hello", limit=10)
+    from cogito_agent.retrieval.service import create_retrieval_service
+    svc = create_retrieval_service(db)
+    retriever = MemoryRetriever(db, service=svc)
+    _add_memory(db, "m1", "ws", "apple banana fruit")
+    results = retriever.search("ws", "apple banana", limit=10)
     assert len(results) >= 1
 
 
