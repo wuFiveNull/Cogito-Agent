@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime, timezone
+from typing import Optional
 
 from pydantic import BaseModel, Field
+
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 
 
 class EventSource(StrEnum):
@@ -31,5 +39,5 @@ class RuntimeEvent(BaseModel):
     source: EventSource
     type: EventType
     payload: dict[str, object]
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    parent_trace_id: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    parent_trace_id: Optional[str] = None

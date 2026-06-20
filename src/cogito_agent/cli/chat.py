@@ -27,7 +27,10 @@ def run_cli(db_path: str = ":memory:") -> None:
 
     cfg = get_config()
     current_provider = cfg.get("model.provider", "mock")
-    adapter = build_model_adapter_from_config()
+    from cogito_agent.config_loader import build_multimodel_adapter, load_config as load_yaml_config
+    adapter = build_multimodel_adapter(load_yaml_config())
+    if adapter is None:
+        adapter = build_model_adapter_from_config()
     kernel = RuntimeKernel(db, model_adapter=adapter) if adapter else RuntimeKernel(db)
 
     print("Cogito-Agent CLI  (type 'exit' to quit, '/help' for commands)")

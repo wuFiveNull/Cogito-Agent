@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import mimetypes
 import os
 from pathlib import Path
 
@@ -54,6 +56,13 @@ def _resolve_safe_path(requested: str) -> Path | None:
         return None
 
 
+_IMAGE_MIME_PREFIXES = {"image/", "application/octet-stream"}
+
+
+def _is_image_mime(mime: str) -> bool:
+    return mime.startswith("image/")
+
+
 def _read_file(path: str = "") -> ToolResult:
     if not path:
         return ToolResult(
@@ -73,6 +82,23 @@ def _read_file(path: str = "") -> ToolResult:
                 status="error",
                 summary=f"File not found: {path}",
                 error="File not found",
+            )
+        mime_type, _ = mimetypes.guess_type(str(safe))
+        if mime_type and _is_image_mime(mime_type):
+            raw = safe.read_bytes()
+            b64_data = base64.b64encode(raw).decode("ascii")
+            data_uri = f"data:{mime_type};base64,{b64_data}"
+            return ToolResult(
+                status="ok",
+                summary=f"Read image ({len(raw)} bytes, {mime_type})",
+                data={
+                    "content": f"[Image: {safe.name}]",
+                    "size": len(raw),
+                    "mime_type": mime_type,
+                    "image_b64": data_uri,
+                },
+                artifacts=[{"path": str(safe), "type": "image"}],
+                lineage=[{"source": str(safe), "tool": "local.file_read"}],
             )
         content = safe.read_text(encoding="utf-8")
         return ToolResult(

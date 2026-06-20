@@ -13,6 +13,8 @@ class ProviderErrorCode(StrEnum):
     RATE_LIMITED = "PROVIDER_RATE_LIMITED"
     AUTH_FAILED = "PROVIDER_AUTH_FAILED"
     MODEL_UNAVAILABLE = "PROVIDER_MODEL_UNAVAILABLE"
+    UNSUPPORTED_MODALITY = "UNSUPPORTED_MODALITY"
+    NO_VISION_MODEL = "NO_VISION_MODEL_AVAILABLE"
     UNKNOWN_ERROR = "PROVIDER_UNKNOWN_ERROR"
 
 
@@ -69,6 +71,13 @@ def safe_provider_error_message(
         ),
         ProviderErrorCode.MODEL_UNAVAILABLE: (
             f"Model not available for provider '{provider}'"
+        ),
+        ProviderErrorCode.UNSUPPORTED_MODALITY: (
+            f"Provider '{provider}' does not support modality: {safe_detail}"
+        ),
+        ProviderErrorCode.NO_VISION_MODEL: (
+            "No vision-capable model is available. "
+            "Please configure a vision model (e.g., Gemini, Qwen-VL, vLLM)."
         ),
         ProviderErrorCode.UNKNOWN_ERROR: (
             f"Provider '{provider}' error: {safe_detail}" if safe_detail

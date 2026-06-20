@@ -89,18 +89,26 @@ class StreamGenerator:
         echo_text: str = "",
         streaming_enabled: bool = True,
         tool_schemas: list[dict[str, object]] | None = None,
+        has_image: bool = False,
+        route_role: str = "",
     ) -> None:
         self._adapter = adapter
         self._messages = messages
         self._echo_text = echo_text
         self._streaming_enabled = streaming_enabled
         self._tool_schemas = tool_schemas
+        self._has_image = has_image
+        self._route_role = route_role
         self.response: ModelResponse | None = None
 
     def __iter__(self) -> Iterator[str]:
         kwargs: dict[str, object] = {}
         if self._tool_schemas:
             kwargs["tools"] = self._tool_schemas
+        if self._has_image:
+            kwargs["_has_image"] = True
+        if self._route_role:
+            kwargs["_route_role"] = self._route_role
 
         if self._adapter is None:
             if self._echo_text:

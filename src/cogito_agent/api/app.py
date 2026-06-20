@@ -15,7 +15,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
@@ -367,10 +367,19 @@ def get_mcp_manager() -> MCPServerManager:
     return _mcp_manager
 
 
+class ContentItem(BaseModel):
+    type: str = "text"
+    text: str | None = None
+    uri: str | None = None
+    mime_type: str | None = None
+
+
 class ChatRequest(BaseModel):
-    text: str
+    text: str | None = None
     session_id: str
     workspace_id: str
+    content: list[ContentItem] = Field(default_factory=list)
+    preferred_role: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -427,8 +436,11 @@ def get_kernel() -> RuntimeKernel:
     global _kernel
     if _kernel is None:
         db = get_db()
-        from cogito_agent.cli.config_manager import build_model_adapter_from_config
-        adapter = build_model_adapter_from_config()
+        from cogito_agent.config_loader import build_multimodel_adapter, load_config as load_yaml_config
+        adapter = build_multimodel_adapter(load_yaml_config())
+        if adapter is None:
+            from cogito_agent.cli.config_manager import build_model_adapter_from_config
+            adapter = build_model_adapter_from_config()
         _kernel = RuntimeKernel(db, model_adapter=adapter) if adapter else RuntimeKernel(db)
     return _kernel
 
@@ -445,13 +457,25 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
             request.state.request_id, status_code=404,
         )
 
+    text = req.text or ""
+    payload: dict[str, object] = {
+        "text": text,
+        "_request_id": request.state.request_id,
+    }
+    if req.content:
+        payload["content"] = [
+            c.model_dump(exclude_none=True) for c in req.content
+        ]
+    if req.preferred_role:
+        payload["_preferred_role"] = req.preferred_role
+
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
         session_id=req.session_id,
         actor_id="user",
         source=EventSource.api,
         type=EventType.user_message,
-        payload={"text": req.text, "_request_id": request.state.request_id},
+        payload=payload,
     )
     result = kernel.process(event)
     return ChatResponse(
@@ -575,9 +599,10 @@ def action_candidate(req: CandidateAction, request: Request) -> dict[str, object
 
 
 class ChatStreamRequest(BaseModel):
-    text: str
+    text: str | None = None
     session_id: str
     workspace_id: str
+    content: list[ContentItem] = Field(default_factory=list)
 
 
 class SkillInstallRequest(BaseModel):
@@ -606,17 +631,23 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
             request.state.request_id, status_code=404,
         )
 
+    text = req.text or ""
+    payload: dict[str, object] = {
+        "text": text,
+        "_request_id": request.state.request_id,
+        "channel": "api_stream",
+    }
+    if req.content:
+        payload["content"] = [
+            c.model_dump(exclude_none=True) for c in req.content
+        ]
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
         session_id=req.session_id,
         actor_id="user",
         source=EventSource.api,
         type=EventType.user_message,
-        payload={
-            "text": req.text,
-            "_request_id": request.state.request_id,
-            "channel": "api_stream",
-        },
+        payload=payload,
     )
 
     def event_stream() -> Generator[str, None, None]:

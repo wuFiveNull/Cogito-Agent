@@ -1,11 +1,32 @@
 from __future__ import annotations
 
+from __future__ import annotations
+
 import time
 from collections.abc import Callable, Iterable, Iterator
-from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, Tuple
 
 from pydantic import BaseModel, Field
+
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
+
+
+def _default_capabilities() -> set[str]:
+    return {"chat"}
+
+
+def _default_roles() -> frozenset[str]:
+    return frozenset({"chat"})
+
+
+def _default_modalities() -> frozenset[str]:
+    return frozenset({"text"})
 
 from .adapter import ModelAdapter, ModelResponse
 
@@ -17,8 +38,31 @@ class ProviderHealthStatus(StrEnum):
     probing = "probing"
 
 
+class ModelRole(StrEnum):
+    router = "router"
+    vision_worker = "vision_worker"
+    planner = "planner"
+    executor = "executor"
+    coder = "coder"
+    summarizer = "summarizer"
+    reviewer = "reviewer"
+    chat = "chat"
+
+
+COMMON_CAPABILITIES: set[str] = {
+    "chat", "vision", "ocr", "tools", "json", "reasoning",
+    "code", "long_context", "streaming",
+}
+
+COMMON_MODALITIES: set[str] = {"text", "image", "file"}
+
+
 class ModelRouteRequest(BaseModel):
-    required_capabilities: set[str] = Field(default_factory=set)
+    required_capabilities: set[str] = Field(default_factory=_default_capabilities)
+    required_input_modalities: set[str] = Field(default_factory=_default_modalities)
+    required_output_formats: set[str] = Field(default_factory=set)
+    role: str = ""
+    task_kind: str = ""
     estimated_input_tokens: int = 0
     max_output_tokens: int = 0
     min_quality_score: float = 0.0
@@ -26,12 +70,16 @@ class ModelRouteRequest(BaseModel):
     max_cost_usd: float | None = None
     preferred_provider: str = ""
     preferred_model: str = ""
+    preferred_candidates: Tuple[str, ...] = Field(default_factory=tuple)
 
 
 class ModelCandidate(BaseModel):
     provider: str
     model: str
-    capabilities: set[str] = Field(default_factory=set)
+    capabilities: set[str] = Field(default_factory=_default_capabilities)
+    roles: frozenset[str] = Field(default_factory=_default_roles)
+    input_modalities: frozenset[str] = Field(default_factory=_default_modalities)
+    output_formats: frozenset[str] = Field(default_factory=set)
     context_window: int = 8192
     quality_score: float = 0.5
     expected_latency_ms: int = 1000
@@ -187,6 +235,14 @@ class ModelRouter:
         missing = request.required_capabilities - candidate.capabilities
         if missing:
             return "missing_capability", ", ".join(sorted(missing))
+        missing_modalities = request.required_input_modalities - candidate.input_modalities
+        if missing_modalities and request.required_input_modalities != {"text"}:
+            return "missing_modality", ", ".join(sorted(missing_modalities))
+        if request.role and request.role not in candidate.roles:
+            if candidate.roles != frozenset({"chat"}):
+                return "role_mismatch", f"required role '{request.role}' not in candidate roles"
+        if request.preferred_candidates and candidate.id not in request.preferred_candidates:
+            pass
         required_context = request.estimated_input_tokens + request.max_output_tokens
         if required_context > candidate.context_window:
             detail = f"requires {required_context}, supports {candidate.context_window}"
@@ -227,9 +283,15 @@ class ModelRouter:
             ProviderHealthStatus.degraded: 2,
             ProviderHealthStatus.unhealthy: 3,
         }[health.status]
+        # Penalize candidates with extra modalities/capabilities beyond the request
+        # so text-only models are preferred for text-only tasks.
+        extra_modalities = len(candidate.input_modalities - request.required_input_modalities)
+        extra_capabilities = len(candidate.capabilities - request.required_capabilities)
         return (
             not preferred_model,
             not preferred_provider,
+            extra_modalities,
+            extra_capabilities,
             health_rank,
             candidate.priority,
             -candidate.quality_score,
@@ -389,15 +451,49 @@ class RoutedModelAdapter:
         explicit = kwargs.get("route_request")
         if isinstance(explicit, ModelRouteRequest):
             return explicit
-        text_size = sum(len(str(message.get("content", ""))) for message in messages)
-        capabilities = {"chat"}
+        text_size = 0
+        capabilities: set[str] = {"chat"}
+        modalities: set[str] = {"text"}
+        role = kwargs.pop("_route_role", "")
+        task_kind = kwargs.pop("_route_task_kind", "")
+
+        for message in messages:
+            content = message.get("content", "")
+            if isinstance(content, str):
+                text_size += len(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        ptype = part.get("type", "text")
+                        if ptype == "image":
+                            modalities.add("image")
+                            capabilities.add("vision")
+                        elif ptype == "file":
+                            modalities.add("file")
+                        elif ptype == "text":
+                            text_size += len(str(part.get("text", "")))
         if kwargs.get("tools"):
             capabilities.add("tools")
         max_output = kwargs.get("max_tokens", 4000)
+
+        explicit_role = kwargs.pop("_route_role", role) or role
+        explicit_task = kwargs.pop("_route_task_kind", task_kind) or task_kind
+
+        pref_candidates_raw = kwargs.pop("_route_preferred_candidates", ())
+        pref_candidates: tuple[str, ...] = (
+            tuple(pref_candidates_raw)
+            if isinstance(pref_candidates_raw, (list, tuple))
+            else ()
+        )
+
         return ModelRouteRequest(
             required_capabilities=capabilities,
+            required_input_modalities=modalities,
+            role=explicit_role,
+            task_kind=explicit_task,
             estimated_input_tokens=max(1, text_size // 4),
             max_output_tokens=int(max_output) if isinstance(max_output, int) else 4000,
+            preferred_candidates=pref_candidates,
         )
 
     def _observe(self, decision: ModelRouteDecision) -> None:

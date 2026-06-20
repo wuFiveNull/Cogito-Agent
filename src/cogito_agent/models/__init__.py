@@ -4,6 +4,7 @@ from .registry import ProviderConfig, get_adapter, list_providers, register_prov
 from .router import (
     ModelCandidate,
     ModelExclusion,
+    ModelRole,
     ModelRouteDecision,
     ModelRouteEvent,
     ModelRouteEventType,
@@ -14,6 +15,22 @@ from .router import (
     ProviderHealthStatus,
     RoutedModelAdapter,
 )
+from .codec import (
+    ProviderMessageCodec,
+    TextOnlyCodec,
+    OpenAICompatibleCodec,
+    GeminiCodec,
+    UnsupportedModalityError,
+    get_codec_for_provider,
+)
+from .vision import VisionObservation, analyze_image, render_observation_as_text
+from .orchestrator import (
+    TaskKind,
+    ExecutionStep,
+    OrchestrationPlan,
+    TaskOrchestrator,
+)
+from .provider_errors import ProviderError, ProviderErrorCode
 
 try:
     import tiktoken
@@ -40,6 +57,7 @@ __all__ = [
     "list_providers",
     "ModelCandidate",
     "ModelExclusion",
+    "ModelRole",
     "ModelRouteDecision",
     "ModelRouteEvent",
     "ModelRouteEventType",
@@ -51,4 +69,19 @@ __all__ = [
     "RoutedModelAdapter",
     "register_provider",
     "token_count",
+    "ProviderMessageCodec",
+    "TextOnlyCodec",
+    "OpenAICompatibleCodec",
+    "GeminiCodec",
+    "UnsupportedModalityError",
+    "get_codec_for_provider",
+    "VisionObservation",
+    "analyze_image",
+    "render_observation_as_text",
+    "TaskKind",
+    "ExecutionStep",
+    "OrchestrationPlan",
+    "TaskOrchestrator",
+    "ProviderError",
+    "ProviderErrorCode",
 ]

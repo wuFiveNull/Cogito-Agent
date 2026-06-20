@@ -5,12 +5,48 @@ app:
   default_entrypoint: "cli"
 
 model:
-  provider: "mock"
-  base_url: null
+  provider: "deepseek"
+  base_url: "https://api.deepseek.com/v1"
   api_key_ref: null
-  model: "mock-chat"
+  model: "deepseek-v4-flash"
   timeout_seconds: 60
   max_retries: 2
+
+  # Multi-candidate model configuration (v0.17+)
+  candidates:
+    - id: deepseek-main
+      provider: deepseek
+      base_url: "https://api.deepseek.com/v1"
+      api_key: "sk-your-deepseek-api-key"
+      model: "deepseek-v4-flash"
+      capabilities: [chat, reasoning, tools, json, code, long_context]
+      roles: [planner, coder, executor]
+      input_modalities: [text]
+      output_formats: [text, json]
+      context_window: 65536
+      priority: 100
+
+    - id: qwen-vision
+      provider: qwen-vl
+      base_url: "https://api.siliconflow.cn/v1"
+      api_key: "sk-your-siliconflow-api-key"
+      model: "Qwen/Qwen3.6-27B"
+      capabilities: [chat, vision, ocr, json]
+      roles: [vision_worker]
+      input_modalities: [text, image]
+      output_formats: [text, json]
+      priority: 90
+
+  routes:
+    vision_understanding:
+      required_capabilities: [chat, vision, json]
+      preferred_candidates: ["qwen-vision"]
+    planning:
+      required_capabilities: [chat, reasoning]
+      preferred_candidates: [deepseek-main]
+    coding:
+      required_capabilities: [chat, reasoning, code]
+      preferred_candidates: [deepseek-main]
 
 runtime:
   max_turn_steps: 12

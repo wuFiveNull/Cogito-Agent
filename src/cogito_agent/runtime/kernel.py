@@ -121,6 +121,7 @@ class RuntimeKernel:
         self._prompt_builder = PromptBuilder()
         self._result_composer = ResultComposer()
         self._compression = SessionCompressionService(db)
+        self._extra_content: list = []
 
     @property
     def state(self) -> TurnState:
@@ -291,7 +292,7 @@ class RuntimeKernel:
         streaming_enabled: bool = True,
         max_retries: int = 2,
     ) -> Generator[StreamEvent, None, ModelResponse]:
-        if not message.strip():
+        if not message.strip() and not event.payload.get("content"):
             yield StreamEvent(
                 type=StreamEventType.delta,
                 data={"delta": "I didn't receive any message."},
@@ -302,10 +303,16 @@ class RuntimeKernel:
         self._bind_route_observer(event, trace, span)
         call_start = datetime.now(UTC)
 
+        extra_content = self._get_extra_content(event)
+        has_image = any(getattr(p, 'type', None) == 'image' for p in extra_content)
+        preferred_role = event.payload.get("_preferred_role", "")
+
         echo = f"You said: {message}" if self._model_adapter is None else ""
         gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
                               streaming_enabled=streaming_enabled,
-                              tool_schemas=tool_schemas)
+                              tool_schemas=tool_schemas,
+                              has_image=has_image,
+                              route_role=preferred_role)
 
         attempt = 0
         first_delta_yielded = False
@@ -701,6 +708,8 @@ class RuntimeKernel:
                 event.workspace_id, event.session_id
             ),
         )
+        # Store extra content for multimodal routing
+        self._extra_content = event.payload.get("content", [])
         return ctx_items
 
     def _update_session_summary(self, event: RuntimeEvent) -> None:
@@ -716,11 +725,32 @@ class RuntimeKernel:
     ) -> list[dict[str, object]]:
         if ctx is None:
             ctx = self._build_context(event)
+        extra_content = self._get_extra_content(event)
         return self._prompt_builder.build(
             ctx_items=ctx,
             current_message=message,
             tool_results=self._tool_results,
+            extra_content=extra_content,
         )
+
+    def _get_extra_content(self, event: RuntimeEvent) -> list:
+        raw = event.payload.get("content", [])
+        if isinstance(raw, list):
+            result = []
+            for item in raw:
+                if isinstance(item, dict):
+                    ptype = item.get("type", "text")
+                    if ptype == "image":
+                        from cogito_agent.shared.multimodal import ImagePart
+                        result.append(ImagePart.model_validate(item))
+                    elif ptype == "file":
+                        from cogito_agent.shared.multimodal import FilePart
+                        result.append(FilePart.model_validate(item))
+                    elif ptype == "text":
+                        from cogito_agent.shared.multimodal import TextPart
+                        result.append(TextPart(text=str(item.get("text", ""))))
+            return result
+        return []
 
     def _generate_reply(
         self, event: RuntimeEvent, message: str,
@@ -728,10 +758,11 @@ class RuntimeKernel:
         ctx: list[ContextItem] | None = None,
         max_retries: int = 2,
     ) -> ModelResponse:
-        if not message.strip():
+        if not message.strip() and not event.payload.get("content"):
             return ModelResponse(content="I didn't receive any message.")
         if self._model_adapter is None:
-            return ModelResponse(content=f"You said: {message}")
+            text = message or " "
+            return ModelResponse(content=f"You said: {text}")
         msgs = self._build_model_messages(event, message, trace, ctx=ctx)
         self._bind_route_observer(event, trace, span)
         tool_schemas = self._get_tool_schemas(actor=event.actor_id)
@@ -739,6 +770,12 @@ class RuntimeKernel:
         kwargs: dict[str, object] = {}
         if tool_schemas:
             kwargs["tools"] = tool_schemas
+        extra_content = self._get_extra_content(event)
+        if any(getattr(p, 'type', None) == 'image' for p in extra_content):
+            kwargs["_has_image"] = True
+        preferred_role = event.payload.get("_preferred_role", "")
+        if preferred_role:
+            kwargs["_route_role"] = preferred_role
 
         call_start = datetime.now(UTC)
         resp: ModelResponse = self._retry_with_backoff(
@@ -952,11 +989,18 @@ class RuntimeKernel:
                 "summary": summary,
                 "error": error,
             })
-            self._tool_results.append({
+            tr_entry: dict[str, object] = {
                 "tool": capability_name,
                 "summary": summary,
                 "status": status,
-            })
+            }
+            # Propagate image data from tool result for multimodal routing
+            if tool_result and isinstance(getattr(tool_result, "data", None), dict):
+                tr_data = tool_result.data
+                if "image_b64" in tr_data:
+                    tr_entry["image_b64"] = tr_data["image_b64"]
+                    tr_entry["mime_type"] = tr_data.get("mime_type", "image/png")
+            self._tool_results.append(tr_entry)
 
             dec_value = (
                 policy_dec.decision.value
