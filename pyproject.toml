@@ -1,6 +1,6 @@
 [project]
 name = "cogito-agent"
-version = "0.9.0-dev"
+version = "0.16.0-dev"
 description = "A local-first personal Agent runtime with memory, governed capabilities, traceable execution, reusable skills, and constrained proactive behavior."
 requires-python = ">=3.12"
 dependencies = [
@@ -10,6 +10,7 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "uvicorn>=0.27",
+    "python-json-logger>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +18,12 @@ dev = [
     "pytest>=8",
     "ruff>=0.5",
     "mypy>=1.10",
+]
+e2e = [
+    "playwright>=1.50",
+]
+windows-service = [
+    "pywin32>=306; platform_system == 'Windows'",
 ]
 vector = [
     "sentence-transformers>=3.0",
@@ -42,14 +49,18 @@ disallow_any_unimported = false
 [project.scripts]
 cogito = "cogito_agent.cli:run_cli"
 cogito-demo = "cogito_agent.cli.e2e_demo:run_e2e_demo"
-cogito-daemon = "cogito_agent.cli.daemon:run_daemon"
+cogito-daemon = "cogito_agent.cli.daemon:main"
 
 [tool.setuptools.package-data]
 cogito_agent = [
     "console/templates/**/*.html",
     "console/static/*",
+    "storage/migrations/*.sql",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "browser_e2e: real-browser Console tests requiring the e2e extra and Chromium",
+]

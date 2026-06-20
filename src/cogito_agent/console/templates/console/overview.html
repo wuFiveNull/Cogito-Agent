@@ -1,0 +1,213 @@
+{% extends "console/base.html" %}
+{% from "console/components/_macros.html" import stat_card, badge, button, card, page_header, empty_state, stat_row %}
+
+{% block content %}
+
+{# ─── Attention Queue ───────────────────────────────────────────────── ─#}
+<section class="ov-section" aria-label="Attention queue">
+  <h3>Attention Queue</h3>
+  {% if overview.attention.total_issues > 0 %}
+  <div class="ov-attention-items">
+    {% if overview.attention.pending_approvals > 0 %}
+    <a href="/console/approval" class="ov-attention-item ov-attention-warn">
+      <span class="ov-attention-count">{{ overview.attention.pending_approvals }}</span>
+      <span class="ov-attention-label">Pending approvals</span>
+    </a>
+    {% endif %}
+    {% if overview.attention.failed_deliveries > 0 %}
+    <a href="/console/inbox?status=failed" class="ov-attention-item ov-attention-err">
+      <span class="ov-attention-count">{{ overview.attention.failed_deliveries }}</span>
+      <span class="ov-attention-label">Failed deliveries</span>
+    </a>
+    {% endif %}
+    {% if overview.attention.pending_candidates > 0 %}
+    <a href="/console/memory?status=pending" class="ov-attention-item ov-attention-warn">
+      <span class="ov-attention-count">{{ overview.attention.pending_candidates }}</span>
+      <span class="ov-attention-label">Pending memory candidates</span>
+    </a>
+    {% endif %}
+    {% if overview.attention.failed_drift_runs > 0 %}
+    <a href="/console/drift" class="ov-attention-item ov-attention-err">
+      <span class="ov-attention-count">{{ overview.attention.failed_drift_runs }}</span>
+      <span class="ov-attention-label">Failed drift runs (24h)</span>
+    </a>
+    {% endif %}
+  </div>
+  {% else %}
+  {{ empty_state("All clear — no items need attention", "check") }}
+  {% endif %}
+</section>
+
+{# ─── Runtime Health ────────────────────────────────────────────────── ─#}
+<section class="ov-section" aria-label="Runtime health">
+  <h3>Runtime Health</h3>
+  <div class="ov-health-grid">
+    <div class="ov-health-item{% if overview.health.db_ok %} ov-health-ok{% else %} ov-health-err{% endif %}">
+      <span class="ov-health-dot"></span>
+      <span class="ov-health-label">Database</span>
+      <span class="ov-health-value">v{{ overview.health.db_migration }}</span>
+    </div>
+    <div class="ov-health-item ov-health-ok">
+      <span class="ov-health-dot"></span>
+      <span class="ov-health-label">Provider</span>
+      <span class="ov-health-value">{{ overview.health.provider }}</span>
+    </div>
+    <div class="ov-health-item{% if overview.health.secrets_available %} ov-health-ok{% else %} ov-health-warn{% endif %}">
+      <span class="ov-health-dot"></span>
+      <span class="ov-health-label">Secrets</span>
+      <span class="ov-health-value">{{ overview.health.secrets_backend }}</span>
+    </div>
+    <div class="ov-health-item{% if overview.health.drift_ok %} ov-health-ok{% else %} ov-health-warn{% endif %}">
+      <span class="ov-health-dot"></span>
+      <span class="ov-health-label">Drift</span>
+      <span class="ov-health-value">{{ overview.health.drift_message }}</span>
+    </div>
+    <div class="ov-health-item ov-health-warn">
+      <span class="ov-health-dot"></span>
+      <span class="ov-health-label">Scheduler</span>
+      <span class="ov-health-value">{{ overview.health.scheduler_message }}</span>
+    </div>
+  </div>
+</section>
+
+{# ─── Quick Actions ─────────────────────────────────────────────────── ─#}
+<section class="ov-section" aria-label="Quick actions">
+  <h3>Quick Actions</h3>
+  <div class="ov-actions">
+    {% for action in overview.quick_actions %}
+    {% if action.soon %}
+    <span class="ov-action ov-action-soon">
+      <span class="ov-action-label">{{ action.label }}</span>
+      <span class="ov-action-desc">{{ action.desc }}</span>
+      <span class="badge badge-default">soon</span>
+    </span>
+    {% else %}
+    <a href="{{ action.href }}" class="ov-action">
+      <span class="ov-action-label">{{ action.label }}</span>
+      <span class="ov-action-desc">{{ action.desc }}</span>
+    </a>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+
+{# ─── Activity Stream ───────────────────────────────────────────────── ─#}
+<section class="ov-section" aria-label="Activity stream">
+  <h3>Activity Stream <a href="/console/traces" class="ov-view-all">View all</a></h3>
+  {% if overview.activity %}
+  <div class="ov-timeline">
+    {% for event in overview.activity[:20] %}
+    <a href="{{ event.url }}" class="ov-timeline-item">
+      <span class="ov-timeline-dot ov-timeline-{{ event.type }}"></span>
+      <span class="ov-timeline-body">
+        <span class="ov-timeline-summary">{{ event.summary }}</span>
+        <span class="ov-timeline-meta">
+          {% if event.timestamp %}{{ event.timestamp[:19] }}{% endif %}
+          <span class="ov-timeline-type">{{ event.type }}</span>
+        </span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ empty_state("No recent activity", "") }}
+  {% endif %}
+</section>
+
+{# ─── Usage Snapshot ────────────────────────────────────────────────── ─#}
+<section class="ov-section" aria-label="Usage snapshot">
+  <h3>Usage Snapshot</h3>
+  {{ stat_row([
+    {"value": overview.usage.model_calls_24h, "label": "Model Calls (24h)"},
+    {"value": overview.usage.model_calls_7d, "label": "Model Calls (7d)"},
+    {"value": overview.usage.tool_calls_24h, "label": "Tool Calls (24h)"},
+  ]) }}
+  {{ stat_row([
+    {"value": overview.usage.tool_calls_7d, "label": "Tool Calls (7d)"},
+    {"value": overview.usage.total_traces_24h, "label": "Traces (24h)"},
+    {"value": overview.usage.total_traces_7d, "label": "Traces (7d)"},
+  ]) }}
+  {{ stat_row([
+    {"value": overview.usage.avg_latency_24h ~ "ms", "label": "Avg Latency (24h)"},
+    {"value": overview.usage.failure_rate_24h ~ "%", "label": "Failure Rate (24h)"},
+    {"value": overview.usage.decisions_24h, "label": "Decisions (24h)"},
+  ]) }}
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<style>
+.ov-section { margin-bottom: 1.5rem; }
+.ov-section h3 { display: flex; align-items: center; gap: 0.5rem; }
+
+/* ─── Attention Queue ─────────────────────────────────────────────── */
+.ov-attention-items { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.ov-attention-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; border-radius: 6px;
+  border: 1px solid; font-size: 0.85rem; text-decoration: none;
+  min-width: 160px;
+}
+.ov-attention-item:hover { text-decoration: none; filter: brightness(0.95); }
+.ov-attention-warn { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+.ov-attention-err { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+.ov-attention-count { font-weight: 700; font-size: 1.1rem; min-width: 24px; text-align: center; }
+.ov-attention-label { font-size: 0.8rem; }
+
+/* ─── Runtime Health ──────────────────────────────────────────────── */
+.ov-health-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.ov-health-item {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 0.7rem; border: 1px solid #e0e4ea;
+  border-radius: 6px; background: #fff; font-size: 0.85rem;
+  min-width: 140px;
+}
+.ov-health-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.ov-health-ok .ov-health-dot { background: #059669; }
+.ov-health-warn .ov-health-dot { background: #d97706; }
+.ov-health-err .ov-health-dot { background: #dc2626; }
+.ov-health-label { font-weight: 600; }
+.ov-health-value { margin-left: auto; font-size: 0.75rem; color: #6b7280; }
+
+/* ─── Quick Actions ───────────────────────────────────────────────── */
+.ov-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.ov-action {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.6rem 0.8rem; border: 1px solid #e0e4ea;
+  border-radius: 6px; background: #fff; text-decoration: none;
+  min-width: 140px; flex: 1;
+}
+.ov-action:hover { border-color: #3b82f6; text-decoration: none; }
+.ov-action-soon { opacity: 0.6; cursor: default; display: flex; flex-direction: column; gap: 0.15rem;
+  padding: 0.6rem 0.8rem; border: 1px solid #e0e4ea;
+  border-radius: 6px; background: #f9fafb; min-width: 140px; flex: 1; }
+.ov-action-label { font-weight: 600; font-size: 0.85rem; color: #1a1a2e; }
+.ov-action-desc { font-size: 0.7rem; color: #6b7280; }
+.ov-action-soon .ov-action-label { color: #9ca3af; }
+.ov-action-soon .badge { align-self: flex-start; margin-top: 0.15rem; }
+
+/* ─── Activity Stream ─────────────────────────────────────────────── */
+.ov-timeline { display: flex; flex-direction: column; gap: 0.35rem; max-height: 400px; overflow-y: auto; }
+.ov-timeline-item {
+  display: flex; align-items: flex-start; gap: 0.5rem;
+  padding: 0.4rem 0.6rem; border-radius: 4px; text-decoration: none;
+}
+.ov-timeline-item:hover { background: #f0f2f5; text-decoration: none; }
+.ov-timeline-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  margin-top: 0.35rem;
+}
+.ov-timeline-trace .ov-timeline-dot { background: #3b82f6; }
+.ov-timeline-drift .ov-timeline-dot { background: #8b5cf6; }
+.ov-timeline-decision .ov-timeline-dot { background: #f59e0b; }
+.ov-timeline-artifact .ov-timeline-dot { background: #10b981; }
+.ov-timeline-body { flex: 1; min-width: 0; }
+.ov-timeline-summary { font-size: 0.8rem; color: #1a1a2e; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-timeline-meta { font-size: 0.65rem; color: #9ca3af; display: flex; gap: 0.4rem; }
+.ov-timeline-type { font-size: 0.6rem; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; text-transform: uppercase; }
+.ov-view-all { font-size: 0.75rem; font-weight: 400; }
+</style>
+{% endblock %}

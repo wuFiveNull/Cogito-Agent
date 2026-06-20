@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -138,7 +139,7 @@ async def audit_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Audit",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "actor": actor,
         "operation": operation,
@@ -188,7 +189,7 @@ async def audit_detail(request: Request, audit_id: str) -> HTMLResponse:
     detail_ctx: dict[str, object] = {
         "request": request,
         "title": "Audit Detail",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "item": item,
         "details_redacted": details_redacted,
         "menu": _menu_items(),

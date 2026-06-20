@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 _SCHEMA_VERSION = 1
@@ -130,6 +132,32 @@ register_migration(9, """
     CREATE INDEX IF NOT EXISTS idx_art_type ON artifacts(artifact_type);
 """)
 register_migration(11, _load_migration_sql("0011_approval_tool_call.sql"))
+register_migration(12, """
+    ALTER TABLE context_items ADD COLUMN freshness_score REAL NOT NULL DEFAULT 0.5;
+    ALTER TABLE context_items ADD COLUMN trust_score REAL NOT NULL DEFAULT 0.5;
+    ALTER TABLE context_items ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE context_items ADD COLUMN stable_ref TEXT NOT NULL DEFAULT '';
+    ALTER TABLE context_items ADD COLUMN exclusion_reason TEXT NOT NULL DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_context_stable_ref ON context_items(stable_ref);
+""")
+register_migration(13, """
+    CREATE TABLE IF NOT EXISTS session_summaries (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        parent_summary_id TEXT,
+        strategy TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        source_message_count INTEGER NOT NULL,
+        through_message_id TEXT NOT NULL,
+        derived INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (parent_summary_id) REFERENCES session_summaries(id),
+        FOREIGN KEY (session_id) REFERENCES sessions(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_summary_session
+        ON session_summaries(workspace_id, session_id, created_at);
+""")
 register_migration(10, """
     CREATE TABLE IF NOT EXISTS drift_runs (
         id TEXT PRIMARY KEY,
@@ -220,10 +248,12 @@ register_migration(6, """
 
 class Database:
     def __init__(self, path: str = ":memory:") -> None:
+        self._path = path
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA busy_timeout=5000")
 
     def initialize(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
@@ -243,10 +273,58 @@ class Database:
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
+    def backup_to(self, destination: str) -> str:
+        """Create a transactionally consistent SQLite backup."""
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        backup_conn = sqlite3.connect(str(target))
+        try:
+            self._conn.backup(backup_conn)
+        finally:
+            backup_conn.close()
+        return str(target)
+
+    def quick_check(self) -> tuple[bool, str]:
+        row = self._conn.execute("PRAGMA quick_check").fetchone()
+        message = str(row[0]) if row else "quick_check returned no result"
+        return message == "ok", message
+
+    def maintain(self, *, auto_vacuum: bool = False) -> dict[str, Any]:
+        """Run safe SQLite maintenance and return an auditable result."""
+        ok, message = self.quick_check()
+        result: dict[str, Any] = {
+            "integrity_ok": ok,
+            "integrity_message": message,
+            "wal_checkpoint": None,
+            "optimized": False,
+            "vacuumed": False,
+        }
+        if not ok:
+            return result
+        checkpoint = self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        result["wal_checkpoint"] = tuple(checkpoint) if checkpoint else None
+        self._conn.execute("PRAGMA optimize")
+        result["optimized"] = True
+        if auto_vacuum:
+            self._conn.execute("PRAGMA auto_vacuum=FULL")
+            self._conn.execute("VACUUM")
+            result["vacuumed"] = True
+        self._conn.commit()
+        return result
+
+    def _backup_before_migration(self, current: int, target: int) -> str | None:
+        if self._path == ":memory:" or not Path(self._path).exists():
+            return None
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+        backup_path = f"{self._path}.pre-migrate.v{current}-to-v{target}.{timestamp}.bak"
+        return self.backup_to(backup_path)
+
     def migrate(self) -> list[int]:
         applied: list[int] = []
         current = self.current_version()
         pending = sorted(v for v in _MIGRATIONS if v > current)
+        if pending:
+            self._backup_before_migration(current, pending[-1])
         for version in pending:
             sql = _MIGRATIONS[version]
             self._conn.executescript(sql)

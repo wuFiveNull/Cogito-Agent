@@ -12,10 +12,22 @@ from cogito_agent.capability.schemas import (
     filter_available_tools,
     manifest_to_tool_schema,
 )
-from cogito_agent.context import ContextEngine, ContextItem, PromptBuilder
+from cogito_agent.context import (
+    ContextEngine,
+    ContextItem,
+    PromptBuilder,
+    SessionCompressionService,
+)
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.memory import CandidateExtractor, MemoryRetriever
-from cogito_agent.models import ModelAdapter, ModelResponse, StreamGenerator, ToolIntent
+from cogito_agent.models import (
+    ModelAdapter,
+    ModelResponse,
+    ModelRouteEvent,
+    ModelRouteEventType,
+    StreamGenerator,
+    ToolIntent,
+)
 from cogito_agent.shared import (
     DecisionType,
     EventType,
@@ -32,6 +44,7 @@ from cogito_agent.storage.repositories import ApprovalRepository
 from cogito_agent.trace import SourceLineage, Tracer
 
 from .budget import TurnBudget
+from .result_composer import ComposedResult, ResultComposer
 
 
 class TurnResult:
@@ -45,6 +58,7 @@ class TurnResult:
         approval_pending: bool = False,
         approval_id: str | None = None,
         trace_id: str | None = None,
+        composed_result: ComposedResult | None = None,
     ) -> None:
         self.state = state
         self.output = output
@@ -54,6 +68,7 @@ class TurnResult:
         self.approval_pending = approval_pending
         self.approval_id = approval_id
         self.trace_id = trace_id
+        self.composed_result = composed_result
 
 
 class BudgetError(Exception):
@@ -104,6 +119,8 @@ class RuntimeKernel:
         self._sources: list[dict[str, object]] = []
         self._max_tool_rounds = max_tool_rounds
         self._prompt_builder = PromptBuilder()
+        self._result_composer = ResultComposer()
+        self._compression = SessionCompressionService(db)
 
     @property
     def state(self) -> TurnState:
@@ -192,9 +209,10 @@ class RuntimeKernel:
 
             self._transition(TurnState.composing_result)
             self._transition(TurnState.extracting_memory)
-            output_text = model_result.content
+            output_text = model_result.render_text()
             self._persist_user_message(event)
-            self._persist(event, output_text)
+            self._persist(event, output_text, trace.id)
+            self._update_session_summary(event)
             self._candidate_extract(event, output_text)
 
             self._audit.log(
@@ -215,6 +233,7 @@ class RuntimeKernel:
                 tool_summaries=tool_summaries,
                 sources=self._sources,
                 trace_id=trace.id,
+                composed_result=model_result,
             )
 
         except BudgetError as exc:
@@ -280,6 +299,7 @@ class RuntimeKernel:
             return ModelResponse(content="I didn't receive any message.")
 
         msgs = self._build_model_messages(event, message, trace, ctx=ctx)
+        self._bind_route_observer(event, trace, span)
         call_start = datetime.now(UTC)
 
         echo = f"You said: {message}" if self._model_adapter is None else ""
@@ -493,12 +513,13 @@ class RuntimeKernel:
                 )
 
             model_result = self._compose_result(event, model_resp, trace, span)
-            output_text = model_result.content
+            output_text = model_result.render_text()
 
             self._transition(TurnState.composing_result)
             self._transition(TurnState.extracting_memory)
             self._persist_user_message(event)
-            self._persist(event, output_text)
+            self._persist(event, output_text, trace.id)
+            self._update_session_summary(event)
             self._candidate_extract(event, output_text)
 
             self._audit.log(
@@ -676,8 +697,18 @@ class RuntimeKernel:
             db=self._db,
             trace_id="",
             workspace_id=event.workspace_id,
+            session_summary=self._compression.get_latest(
+                event.workspace_id, event.session_id
+            ),
         )
         return ctx_items
+
+    def _update_session_summary(self, event: RuntimeEvent) -> None:
+        try:
+            self._compression.update_summary(event.workspace_id, event.session_id)
+        except Exception:
+            # Compression is a derived optimization and must not fail a turn.
+            return
 
     def _build_model_messages(
         self, event: RuntimeEvent, message: str, trace: object,
@@ -702,6 +733,7 @@ class RuntimeKernel:
         if self._model_adapter is None:
             return ModelResponse(content=f"You said: {message}")
         msgs = self._build_model_messages(event, message, trace, ctx=ctx)
+        self._bind_route_observer(event, trace, span)
         tool_schemas = self._get_tool_schemas(actor=event.actor_id)
 
         kwargs: dict[str, object] = {}
@@ -731,6 +763,82 @@ class RuntimeKernel:
         )
 
         return resp
+
+    def _bind_route_observer(
+        self, event: RuntimeEvent, trace: object, parent_span: object
+    ) -> None:
+        """Attach turn-scoped routing telemetry through an optional protocol hook."""
+        if self._model_adapter is None:
+            return
+        setter = getattr(self._model_adapter, "set_route_observer", None)
+        if not callable(setter):
+            return
+
+        trace_id = str(getattr(trace, "id", ""))
+        parent_span_id = str(getattr(parent_span, "id", "")) or None
+
+        def observe(route_event: ModelRouteEvent) -> None:
+            candidate = route_event.candidate
+            candidate_id = candidate.id if candidate is not None else ""
+            selected = route_event.decision.selected
+            details: dict[str, object] = {
+                "event_type": route_event.type.value,
+                "selected": selected.id if selected is not None else None,
+                "fallback_order": [
+                    item.id for item in route_event.decision.fallback_order
+                ],
+                "exclusions": [
+                    exclusion.model_dump()
+                    for exclusion in route_event.decision.exclusions
+                ],
+                "candidate": candidate_id or None,
+                "attempt_index": route_event.attempt_index,
+                "remaining_candidates": route_event.remaining_candidates,
+            }
+            if route_event.error:
+                details["error"] = route_event.error
+
+            if route_event.type == ModelRouteEventType.decision:
+                action = "model_route_decided"
+                decision = "allow" if selected is not None else "deny"
+                span_name = "model.route"
+                span_status = "completed" if selected is not None else "failed"
+                reason = route_event.decision.reason
+            elif route_event.type == ModelRouteEventType.attempt_failed:
+                action = "model_route_attempt_failed"
+                decision = (
+                    "fallback" if route_event.remaining_candidates else "fail"
+                )
+                span_name = "model.route.attempt"
+                span_status = "failed"
+                reason = "model candidate failed"
+            else:
+                action = "model_route_selected"
+                decision = "allow"
+                span_name = "model.route.attempt"
+                span_status = "completed"
+                reason = "model candidate completed"
+
+            route_span = self._tracer.create_span(
+                trace_id,
+                span_name,
+                SpanKind.model,
+                parent_span_id=parent_span_id,
+            )
+            self._tracer.end_span(route_span, span_status)
+            self._audit.log(
+                actor_id=event.actor_id,
+                action=action,
+                resource="model_router",
+                workspace_id=event.workspace_id,
+                session_id=event.session_id,
+                trace_id=trace_id,
+                decision=decision,
+                reason=reason,
+                details=json.dumps(details, ensure_ascii=False, sort_keys=True),
+            )
+
+        setter(observe)
 
     def _dispatch_tools(
         self, event: RuntimeEvent, resp: ModelResponse,
@@ -948,10 +1056,12 @@ class RuntimeKernel:
     def _compose_result(
         self, event: RuntimeEvent, resp: ModelResponse,
         trace: object, span: object,
-    ) -> ModelResponse:
-        if resp.error:
-            return ModelResponse(content=f"Model error: {resp.error}")
-        return resp
+    ) -> ComposedResult:
+        return self._result_composer.compose(
+            resp,
+            sources=self._sources,
+            tool_summaries=self._tool_results,
+        )
 
     def _candidate_extract(self, event: RuntimeEvent, output: str) -> None:
         if not self._cand_extractor or not output.strip():
@@ -989,12 +1099,20 @@ class RuntimeKernel:
             )
             self._db.connection.commit()
 
-    def _persist(self, event: RuntimeEvent, output: str) -> None:
+    def _persist(self, event: RuntimeEvent, output: str, trace_id: str = "") -> None:
         mid = str(uuid.uuid4())
         self._db.connection.execute(
-            "INSERT INTO messages (id, workspace_id, session_id, role, content)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (mid, event.workspace_id, event.session_id, "assistant", output),
+            "INSERT INTO messages"
+            " (id, workspace_id, session_id, role, content, metadata_json)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                mid,
+                event.workspace_id,
+                event.session_id,
+                "assistant",
+                output,
+                json.dumps({"trace_id": trace_id}) if trace_id else "{}",
+            ),
         )
         self._db.connection.execute(
             "UPDATE sessions SET updated_at = datetime('now')"

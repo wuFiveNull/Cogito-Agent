@@ -56,6 +56,17 @@ class PromptBuilder:
             system_parts.append(f"\nSkill Context:\n{skill_instruction}")
         msgs.append({"role": "system", "content": "\n".join(system_parts)})
 
+        summary_items = [
+            c for c in included if c.source_type == "session_summary"
+        ]
+        if summary_items:
+            msgs.append({
+                "role": "system",
+                "content": wrap_untrusted(
+                    "Conversation Summary:\n" + summary_items[-1].text
+                ),
+            })
+
         # 2. Build memory context block
         memory_items = [c for c in included if c.source_type == "memory"]
         if memory_items:

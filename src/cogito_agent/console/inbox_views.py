@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -140,7 +141,7 @@ async def inbox_list(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Inbox",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "items": [_redact_item(i) for i in items],
         "stats": stats,
         "status_filter": status,
@@ -213,7 +214,7 @@ async def inbox_detail(request: Request, item_id: str) -> HTMLResponse:
     detail_ctx: dict[str, object] = {
         "request": request,
         "title": "Inbox Detail",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "item": redacted,
         "source": source,
         "raw_json": raw_json,

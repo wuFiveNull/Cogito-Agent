@@ -1,0 +1,66 @@
+<div class="inspector-header">
+  <div>
+    <span class="panel-kicker">Flight recorder</span>
+    <h3>Turn Inspector</h3>
+  </div>
+  <span class="inspector-status status-{{ inspector.trace.status | e }}">
+    {{ inspector.trace.status | e }}
+  </span>
+</div>
+
+<dl class="inspector-facts">
+  <div><dt>Trace</dt><dd><code>{{ inspector.trace.id | e }}</code></dd></div>
+  <div><dt>Started</dt><dd>{{ inspector.trace.started_at[:19] | e }}</dd></div>
+  <div><dt>Spans</dt><dd>{{ inspector.spans | length }}</dd></div>
+</dl>
+
+{% if inspector.model_calls %}
+<section class="inspector-section">
+  <h4>Model route</h4>
+  {% for call in inspector.model_calls %}
+  <div class="inspector-record">
+    <strong>{{ call.provider | e }} / {{ call.model | e }}</strong>
+    <span>{{ call.latency_ms | e }} ms</span>
+    <small>{{ call.input_token_count | e }} in · {{ call.output_token_count | e }} out</small>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="inspector-section">
+  <h4>Timeline</h4>
+  <ol class="inspector-timeline">
+    {% for span in inspector.spans %}
+    <li class="timeline-{{ span.status | e }}">
+      <span>{{ span.kind | e }}</span><strong>{{ span.name | e }}</strong>
+      <small>{{ span.status | e }}</small>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+
+{% if inspector.tool_calls %}
+<section class="inspector-section">
+  <h4>Capabilities</h4>
+  {% for call in inspector.tool_calls %}
+  <div class="inspector-record">
+    <strong>{{ call.capability_name | e }}</strong>
+    <span>{{ call.status | e }}</span>
+    <small>{{ call.decision | e }} · {{ call.latency_ms | e }} ms</small>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="inspector-section">
+  <h4>Governance</h4>
+  {% for audit in inspector.audits %}
+  <div class="audit-row"><span>{{ audit.decision | e }}</span>{{ audit.action | e }}</div>
+  {% else %}
+  <p class="inspector-muted">No audit events recorded.</p>
+  {% endfor %}
+</section>
+
+<a class="inspector-trace-link" href="/console/traces/{{ inspector.trace.id | e }}">
+  Open full trace
+</a>

@@ -9,6 +9,8 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+from cogito_agent.version import APP_VERSION
+
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
 
@@ -82,7 +84,7 @@ def _check(
 def _core_checks() -> CheckList:
     checks: CheckList = []
     try:
-        version = os.environ.get("COGITO_CONSOLE_VERSION", "0.11.0-dev")
+        version = os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION)
         checks.append(_check("core", "app_version", "ok", f"v{version}"))
         checks.append(_check("core", "python_version", "ok", sys.version.split()[0]))
         checks.append(_check("core", "platform", "ok", sys.platform))
@@ -498,7 +500,7 @@ async def doctor_page(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Doctor",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "overall": overall,
         "sections": sections_map,
         "checks_raw": checks,
@@ -517,7 +519,7 @@ async def doctor_api(request: Request, live: str = Query("")) -> JSONResponse:
             status_code=501,
             content={
                 "status": "error",
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.11.0-dev"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
                 "checks": [{
                     "section": "provider",
                     "name": "live_check",
@@ -532,7 +534,7 @@ async def doctor_api(request: Request, live: str = Query("")) -> JSONResponse:
     overall = _overall_status(checks)
     return JSONResponse({
         "status": overall,
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.11.0-dev"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
         "checks": checks,
         "limitations": [
             "No real Telegram/Feishu delivery for outbox",

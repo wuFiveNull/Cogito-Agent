@@ -12,7 +12,7 @@
             </span>
         </p>
         <p><strong>Started:</strong> {{ run.started_at|default:run.created_at }}</p>
-        <p><strong>Completed:</strong> {{ run.completed_at|default:"-" }}</p>
+        <p><strong>Completed:</strong> {{ run.completed_at|default("-") }}</p>
         {% if run.error_message %}
         <p><strong>Error:</strong> <span class="text-danger">{{ run.error_message }}</span></p>
         {% endif %}

@@ -1,44 +1,25 @@
 {% extends "console/base.html" %}
+{% from "console/components/_macros.html" import stat_card, info_table %}
 {% block content %}
 <div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.memories }}</div>
-    <div class="stat-label">Memories</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.memory_candidates_pending }}</div>
-    <div class="stat-label">Pending Candidates</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.approvals_pending }}</div>
-    <div class="stat-label">Pending Approvals</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.autonomy_outbox_pending }}</div>
-    <div class="stat-label">Outbox Pending</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.autonomy_decisions_24h }}</div>
-    <div class="stat-label">Decisions (24h)</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.audit_events_24h }}</div>
-    <div class="stat-label">Audit Events (24h)</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">{{ stats.traces_24h }}</div>
-    <div class="stat-label">Traces (24h)</div>
-  </div>
+  {{ stat_card(stats.memories, "Memories") }}
+  {{ stat_card(stats.memory_candidates_pending, "Pending Candidates") }}
+  {{ stat_card(stats.approvals_pending, "Pending Approvals") }}
+  {{ stat_card(stats.autonomy_outbox_pending, "Outbox Pending") }}
+  {{ stat_card(stats.autonomy_decisions_24h, "Decisions (24h)") }}
+  {{ stat_card(stats.audit_events_24h, "Audit Events (24h)") }}
+  {{ stat_card(stats.traces_24h, "Traces (24h)") }}
 </div>
 
 <h3>System</h3>
-<table class="info-table">
-  <tr><td>DB</td><td>{% if status.db.ok %}<span class="badge-ok">OK</span>{% else %}<span class="badge-err">ERR</span>{% endif %} v{{ status.db.migration_version }}</td></tr>
-  <tr><td>Provider</td><td>{{ status.model.provider }}</td></tr>
-  <tr><td>Streaming</td><td>{% if status.model.streaming_enabled %}enabled{% else %}disabled{% endif %}</td></tr>
-  <tr><td>Timeout</td><td>{{ status.model.timeout_seconds }}s</td></tr>
-  <tr><td>Secrets Backend</td><td>{{ status.secrets.backend }}{% if status.secrets.available %}&nbsp;<span class="badge-ok">available</span>{% endif %}</td></tr>
-</table>
+{{ info_table([
+  {"label": "DB", "value": '<span class="badge-ok">OK</span>' if status.db.ok else '<span class="badge-err">ERR</span>'},
+  {"label": "Migration", "value": "v" ~ status.db.migration_version},
+  {"label": "Provider", "value": status.model.provider},
+  {"label": "Streaming", "value": "enabled" if status.model.streaming_enabled else "disabled"},
+  {"label": "Timeout", "value": status.model.timeout_seconds ~ "s"},
+  {"label": "Secrets Backend", "value": status.secrets.backend ~ (" <span class=\"badge-ok\">available</span>" if status.secrets.available else "")},
+]) }}
 
 <h3>Quick Links</h3>
 <div class="quick-links">

@@ -1,9 +1,12 @@
 {% extends "console/base.html" %}
 {% block content %}
-<div class="chat-layout">
+<div class="chat-workspace" data-stream-state="idle">
   <div class="chat-sidebar" id="chat-sidebar">
     <div class="sidebar-header">
-      <h3>Sessions</h3>
+      <div>
+        <span class="panel-kicker">Workspace</span>
+        <h3>Sessions</h3>
+      </div>
       <button class="btn-new-chat"
               hx-post="/console/chat/sessions"
               hx-target="#session-list"
@@ -43,17 +46,32 @@
       {% else %}
       <div class="session-empty">No sessions yet.</div>
       {% endif %}
+      {% if has_more_sessions %}
+      <button class="session-load-more"
+              hx-get="/console/chat/sessions?page=2"
+              hx-target="this"
+              hx-swap="outerHTML">Load more</button>
+      {% endif %}
     </div>
   </div>
 
   <div class="chat-main">
+    <header class="chat-toolbar">
+      <div>
+        <span class="panel-kicker">Active dialogue</span>
+        <strong id="active-session-title">Console Chat</strong>
+      </div>
+      <div class="stream-status" id="stream-status" role="status" aria-live="polite">
+        <span class="stream-status-dot"></span><span>Ready</span>
+      </div>
+    </header>
     <div id="chat-messages" class="chat-messages"
          hx-get="/console/chat/sessions/{{ session_id | e }}"
          hx-trigger="load"
          hx-swap="innerHTML"
          hx-indicator="#global-spinner">
       <div class="chat-empty" id="chat-empty">
-        <p>Loading messages...</p>
+        <p>Loading the conversation ledger...</p>
       </div>
     </div>
 
@@ -76,9 +94,22 @@
           <span class="btn-label">Send</span>
           <span id="chat-spinner" class="spinner htmx-indicator"></span>
         </button>
+        <button type="button" class="btn-stop" id="stop-turn" onclick="stopTurn()" disabled>
+          Stop
+        </button>
       </form>
+      <div class="composer-hint">Enter to send · Shift+Enter for a new line · outputs are locally audited</div>
     </div>
   </div>
+
+  <aside class="turn-inspector" id="turn-inspector" aria-label="Turn inspector">
+    <div class="inspector-empty">
+      <span class="panel-kicker">Flight recorder</span>
+      <h3>Turn Inspector</h3>
+      <p>Select <strong>Inspect</strong> on an assistant turn to review routing, model usage,
+         tools, policy decisions and timing.</p>
+    </div>
+  </aside>
 </div>
 {% endblock %}
 
@@ -101,6 +132,7 @@ function switchSession(sessionId) {
     el.classList.toggle('active', el.dataset.sessionId === sessionId);
   });
   scrollChat();
+  document.getElementById('turn-inspector').innerHTML = '<div class="inspector-empty"><span class="panel-kicker">Flight recorder</span><h3>Turn Inspector</h3><p>Select a completed turn to inspect its execution record.</p></div>';
 }
 
 function newSession(event) {
@@ -121,5 +153,34 @@ function updateSessionList() {
     swap: 'innerHTML',
   });
 }
+
+function setTurnState(running) {
+  var workspace = document.querySelector('.chat-workspace');
+  var status = document.getElementById('stream-status');
+  var stop = document.getElementById('stop-turn');
+  if (workspace) workspace.dataset.streamState = running ? 'running' : 'idle';
+  if (status) status.lastElementChild.textContent = running ? 'Running' : 'Ready';
+  if (stop) stop.disabled = !running;
+}
+
+function stopTurn() {
+  var form = document.getElementById('chat-form');
+  if (form) htmx.trigger(form, 'htmx:abort');
+  setTurnState(false);
+}
+
+document.addEventListener('htmx:beforeRequest', function(event) {
+  if (event.target && event.target.id === 'chat-form') setTurnState(true);
+});
+document.addEventListener('htmx:afterRequest', function(event) {
+  if (event.target && event.target.id === 'chat-form') setTurnState(false);
+});
+
+document.getElementById('chat-input')?.addEventListener('keydown', function(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    if (this.value.trim()) this.form.requestSubmit();
+  }
+});
 </script>
 {% endblock %}

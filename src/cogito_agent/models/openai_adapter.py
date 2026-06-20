@@ -47,6 +47,8 @@ def _merge_streaming_tool_calls(
 
 
 class OpenAICompatibleAdapter:
+    supports_streaming = True
+
     def __init__(
         self,
         api_key: str | None = None,

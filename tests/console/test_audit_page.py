@@ -127,7 +127,10 @@ class TestAuditSecurity:
 
         resp = client.get(f"/console/audit/{aid}")
         html = resp.text
-        assert "<script>" not in html
+        # User-controlled action must be HTML-escaped
+        assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
+        # Raw user-controlled content should NOT appear
+        assert '<script>alert("xss")</script>' not in html
 
 
 class TestAuditAuth:

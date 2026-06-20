@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -64,7 +65,7 @@ async def drift_dashboard(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Drift Runtime",
-        "version": "0.14.0-dev",
+        "version": APP_VERSION,
         "menu": _menu_items(),
         "status": status,
         "runs": runs,
@@ -111,7 +112,7 @@ async def drift_run_detail(request: Request, run_id: str) -> HTMLResponse:
     detail_ctx: dict[str, object] = {
         "request": request,
         "title": f"Drift Run: {run.get('skill_name', 'Unknown')}",
-        "version": "0.14.0-dev",
+        "version": APP_VERSION,
         "menu": _menu_items(),
         "run": item,
     }

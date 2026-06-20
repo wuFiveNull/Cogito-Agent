@@ -1,4 +1,4 @@
-<div class="session-item active" data-session-id="{{ session.id | e }}">
+<div class="session-item" data-session-id="{{ session.id | e }}">
   <a href="#" class="session-link"
      hx-get="/console/chat/sessions/{{ session.id | e }}"
      hx-target="#chat-messages"
@@ -11,6 +11,12 @@
     </div>
   </a>
   <div class="session-actions">
+    <button class="btn-icon" type="button"
+            onclick="this.closest('.session-item').querySelector('.session-rename').toggleAttribute('hidden')"
+            title="Rename">Edit</button>
+    <button class="btn-icon"
+            hx-post="/console/chat/sessions/{{ session.id | e }}/branch"
+            hx-target="#session-list" hx-swap="beforeend" title="Branch">Fork</button>
     <button class="btn-icon btn-archive"
             hx-post="/console/chat/sessions/{{ session.id | e }}/archive"
             hx-confirm="Archive this session?"
@@ -18,4 +24,11 @@
             hx-swap="outerHTML"
             title="Archive">X</button>
   </div>
+  <form class="session-rename" hidden
+        hx-post="/console/chat/sessions/{{ session.id | e }}/rename"
+        hx-target="closest .session-item" hx-swap="outerHTML">
+    <label class="sr-only" for="rename-{{ session.id | e }}">Session title</label>
+    <input id="rename-{{ session.id | e }}" name="title"
+           value="{{ session.title | e }}" maxlength="80" required>
+  </form>
 </div>

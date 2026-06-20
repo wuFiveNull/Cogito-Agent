@@ -1,9 +1,15 @@
+{% if has_older %}
+<button class="history-load-older"
+        hx-get="/console/chat/sessions/{{ session.id | e }}?page={{ next_page }}"
+        hx-target="#chat-messages"
+        hx-swap="innerHTML">Load older messages</button>
+{% endif %}
 {% for m in messages %}
 {% if m.role == "user" %}
 <div class="message message-user" id="msg-{{ m.id | e }}">
   <div class="msg-bubble">
     <div class="msg-meta">You</div>
-    <div class="msg-text">{{ m.content | e }}</div>
+    <div class="msg-text markdown-body">{{ m.content_html | safe }}</div>
     <div class="msg-timestamp">{{ m.created_at[:19] | e }}</div>
   </div>
 </div>
@@ -11,8 +17,14 @@
 <div class="message message-assistant" id="msg-{{ m.id | e }}">
   <div class="msg-bubble">
     <div class="msg-meta">Assistant</div>
-    <div class="msg-text">{{ m.content | e }}</div>
+    <div class="msg-text markdown-body">{{ m.content_html | safe }}</div>
     <div class="msg-timestamp">{{ m.created_at[:19] | e }}</div>
+    {% if m.trace_id %}
+    <button class="turn-inspect-button"
+            hx-get="/console/chat/turns/{{ m.trace_id | e }}"
+            hx-target="#turn-inspector"
+            hx-swap="innerHTML">Inspect</button>
+    {% endif %}
   </div>
 </div>
 {% endif %}
@@ -21,3 +33,13 @@
   <p>Send a message to start chatting.</p>
 </div>
 {% endfor %}
+
+{% if last_user_message %}
+<form class="turn-retry-form" hx-post="/console/chat/send" hx-target="#chat-messages"
+      hx-swap="beforeend">
+  <input type="hidden" name="session_id" value="{{ session.id | e }}">
+  <input type="hidden" name="workspace_id" value="{{ workspace_id | e }}">
+  <input type="hidden" name="message" value="{{ last_user_message | e }}">
+  <button type="submit">Retry last turn</button>
+</form>
+{% endif %}

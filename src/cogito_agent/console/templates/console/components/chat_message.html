@@ -9,11 +9,29 @@
   <div class="message message-assistant">
     <div class="msg-bubble">
       <div class="msg-meta">Assistant</div>
-      <div class="msg-text">{{ assistant_message | e }}</div>
+      <div class="msg-text markdown-body">{{ assistant_html | safe }}</div>
+      {% for tool in tool_summaries %}
+      <section class="turn-card tool-card">
+        <span class="turn-card-label">Tool</span>
+        <strong>{{ tool.tool | default('capability') | e }}</strong>
+        <p>{{ tool.summary | default(tool.error) | default('No summary') | e }}</p>
+      </section>
+      {% endfor %}
+      {% if approval_pending %}
+      <section class="turn-card approval-card">
+        <span class="turn-card-label">Approval required</span>
+        <strong>Execution paused</strong>
+        <a href="/console/approval">Review approval {{ approval_id | e }}</a>
+      </section>
+      {% endif %}
       {% if trace_id %}
       <div class="msg-trace">
         Trace: <code>{{ trace_id | e }}</code>
         &middot; <a href="/console/traces/{{ trace_id | e }}">View Trace</a>
+        &middot; <button class="link-button"
+                        hx-get="/console/chat/turns/{{ trace_id | e }}"
+                        hx-target="#turn-inspector"
+                        hx-swap="innerHTML">Inspect</button>
         &middot; State: {{ state | e }}
       </div>
       {% endif %}
@@ -23,21 +41,5 @@
     </div>
   </div>
 </div>
-
-<form hx-swap-oob="true" id="chat-form"
-      hx-post="/console/chat/send"
-      hx-target="#chat-messages"
-      hx-swap="beforeend"
-      hx-indicator="#chat-spinner"
-      hx-on::before-request="document.getElementById('chat-empty')?.remove()"
-      hx-on::after-request="this.reset(); scrollChat()">
-  <input type="hidden" name="session_id" value="{{ session_id }}">
-  <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
-  <textarea name="message" id="chat-input" rows="2" placeholder="Type your message..." required></textarea>
-  <button type="submit" class="btn-send">
-    <span class="btn-label">Send</span>
-    <span id="chat-spinner" class="spinner htmx-indicator"></span>
-  </button>
-</form>
 
 <script>scrollChat();</script>

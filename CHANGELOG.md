@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.16.0-dev (2026-06-19)
+
+### Baseline stabilization
+
+- Centralized application version reporting in `cogito_agent.version.APP_VERSION`; API, Console,
+  Doctor, status and backup manifests now report `0.16.0-dev` consistently.
+- File logging falls back to structured stdout when the local log directory is not writable.
+- Fixed the remaining Django-only `yesno` filters in the Drift Jinja template and restored the
+  Dashboard migration status row.
+- Added optional real-browser Console smoke-test scaffolding and documented the verified project
+  baseline in `docs/26_PROJECT_BASELINE_AUDIT.md`.
+- Verified locally: 1433 tests passed, 4 skipped; Ruff clean; Mypy clean for 134 source files.
+- Added validated `cogito config init`, wheel resource contract tests, and a Windows/Linux/macOS
+  Python 3.12/3.13 CI matrix.
+- Hardened `cogito-daemon` with persistent configuration, atomic PID locking, graceful signals,
+  systemd/launchd definitions, and optional pywin32 service support.
+- Added checksum-verified backup/restore, restore safety copies, migration pre-backups,
+  scheduled SQLite maintenance/backups, and redacted diagnostic bundles.
+- Added the provider-neutral Model Router and RoutedModelAdapter with deterministic constraints,
+  fallback ordering, health cache, circuit breaker, recovery probe, and streaming safeguards.
+- Wired configured providers through ModelRouter and persisted route decisions, exclusions,
+  failed attempts, fallback selection, and successful selection to Trace/Audit with redaction.
+- Added evidence-aware ContextItems, migration-backed context metadata, immutable incremental
+  session summaries, and a structured ResultComposer integrated into Runtime turns.
+- Added the three-column Chat Workspace, paginated sessions/messages, allowlisted Markdown,
+  Tool/Approval cards, stop/retry controls, audited rename/branch operations, and a workspace-scoped
+  Turn Inspector for trace, model, tool and governance records.
+
+### **Console Architecture Foundation (Phase 0)**
+
+- **ConsolePageContext TypedDict**: Unified typed context for all console pages with `Breadcrumb`, `FlashMessage`, `MenuItem`, `SystemStatusSummary`, `WorkspaceSummary` subtypes. `src/cogito_agent/console/context.py`.
+- **BaseConsoleService**: Abstract service boundary with `build_page_context()` interface, ensuring all pages share consistent ViewModel construction. `src/cogito_agent/console/services/base.py`.
+- **DashboardService**: Concrete implementation migrating dashboard from raw `dict[str, object]` to typed `ConsolePageContext`. Router now delegates context building to service. `src/cogito_agent/console/services/dashboard.py`.
+- **Static Resource Versioning**: `?v={sha256[:12]}` appended to `console.css` and `htmx.min.js` URLs via new `static_version.py` module and `static_version` Jinja2 global. Cache-busting on every static file change.
+- **22 new tests**: TypedDict conformance, DashboardService unit, static version determinism, integration (dashboard route serves versioned CSS/JS). `tests/test_v0_16_phase0.py`.
+
+### **Design System (Phase 1)**
+
+- **Design Tokens CSS**: 85-line `design-tokens.css` with color palette (bg/surface/primary/success/warning/danger/info/accent), typography (display/body/mono), spacing (4/8/12/16/24/32/48/64), radius (2/6/10), elevation, motion (120/180/260ms), and layout tokens. `src/cogito_agent/console/static/design-tokens.css`.
+- **Component Macros**: `_macros.html` with `stat_card()`, `badge()`, `button()`, `card()`, `page_header()`, `empty_state()`, `stat_row()`. Used across chat, overview, and dashboard templates. `src/cogito_agent/console/templates/console/components/_macros.html`.
+- **Icon System**: Named SVG icon sprite in `components/icons.html` with `home`, `chat`, `memory`, `approval`, `trace`, `audit`, `autonomy`, `config`, `doctor`, `inbox`, `drift`, `artifact`, `workspace`, `overview` icons. `base.html` includes sprite and renders icons via `<svg><use href="#icon-{name}"/></svg>`.
+- **Base Shell Updates**: `base.html` uses design tokens CSS, responsive sidebar with RWD breakpoints, SVG icon sprite for all nav items, CSRF meta tag, security headers, flash messages via `flash_message.html` component, and 14 named menu items with active-state highlighting.
+- **Error/Empty/Status Components**: `error_banner.html`, `flash_message.html`, `status_badge.html`, `memory_success.html`, `approval_success.html` for consistent UX across all pages.
+- **33 new tests**: Design token CSS serving, icon sprite rendering, component macro rendering (stat_card, badge, button, card, page_header, empty_state, stat_row), base shell layout (sidebar, nav items, active state, mobile responsiveness, CSRF meta tag), empty state integration in all 14 pages, component HTML structure and aria attributes. `tests/test_v0_16_phase1.py`.
+
+### **Overview Page (Phase 2)**
+
+- **ConsoleOverviewService**: Full service implementing `BaseConsoleService` with 7 data aggregation methods:
+  - `_get_attention_queue()` — pending approvals, failed deliveries, pending memory candidates, failed drift runs.
+  - `_get_runtime_health()` — db_ok, provider status, streaming, secrets, drift_ok, scheduler (stub).
+  - `_get_activity_stream()` — unified timeline from traces, drift runs, autonomy decisions, artifacts.
+  - `_get_usage_snapshot()` — model calls (24h/7d), tool calls (24h/7d), avg latency, failure rate, total traces, decisions.
+  - `_get_quick_actions()` — New Chat, Run Skill, Scan Workspace, Create Backup (with `soon` badge).
+  - `build_page_context()` assembles all sections into typed `ConsolePageContext`.
+  - Uses raw SQL for tables without repository wrappers; uses existing repos where available.
+  - `src/cogito_agent/console/services/overview.py`.
+- **Overview Template**: `overview.html` extends `base.html`, uses component macros. Five sections with aria-labels: Attention Queue (color-coded items), Runtime Health (5 indicators with health dots), Quick Actions (action cards), Activity Stream (timeline with colored dots), Usage Snapshot (stat_row macro). Inline CSS (`.ov-section`, `.ov-attention-items`, `.ov-health-grid`, `.ov-actions`, `.ov-timeline`). Empty states for attention queue and activity stream. `src/cogito_agent/console/templates/console/overview.html`.
+- **Route & Navigation**: `GET /console/overview` in `router.py`, Overview link with "check" icon in sidebar `menu_items()`, SVG path for check icon in `base.html` icon sprite.
+- **Bugfix**: `drift.html` fixed `{% empty %}` (django-ism) → `{% else %}` (Jinja2) and `truncatechars:12` → `truncate(12, True)` (colon-syntax).
+- **50 new tests**: Route returns 200, HTML structure, all 5 sections present, empty states ("All clear", "No recent activity"), navigation check, runtime health indicators, quick actions with "soon" badge, activity stream timeline, usage snapshot metrics, service-level tests with seeded database (attention queue, usage snapshot, activity stream, drift health), existing 14 routes regression. `tests/test_v0_16_phase2.py`.
+- **105 tests total** across v0.16 phases (22 + 33 + 50), 1300+ full suite passing.
+
+## v0.15.0-dev (2026-06-19)
+
+### **Production Foundation**
+
+- **TOML Config File**: New `~/.cogito/config.toml` supported with priority chain: CLI args > environment variables > config file > built-in defaults. Backward compatible with existing JSON/YAML config files. `src/cogito_agent/config/loader.py`.
+- **Structured JSON Logging**: Rotating file handler writes JSON-formatted logs to `~/.cogito/logs/cogito.log`. Configurable via `logging.level`, `logging.format`, `logging.max_size`, `logging.backup_count`. Uses `python-json-logger`. `src/cogito_agent/logging/__init__.py`.
+- **Health Endpoint**: `GET /api/v1/health` returns 200 with `{"status": "ok", ...}` when database and config are healthy, returns 503 when critical dependencies fail. `src/cogito_agent/api/app.py`.
+- **SQLite WAL + busy_timeout**: All `Database()` connections now set `PRAGMA busy_timeout=5000` for reliable concurrent access. Existing WAL mode and migration compatibility preserved. `src/cogito_agent/storage/database.py`.
+- **CORS Allowlist**: Changed from wildcard `["*"]` to allowlist with localhost origins by default. Configurable via `security.cors_origins` in config file or `COGITO_CORS_ORIGINS` env var. `src/cogito_agent/api/app.py`.
+- **CSRF Protection**: New `CSRFMiddleware` protects all console state-changing endpoints. Token passed via meta tag in base template, automatically injected into htmx headers. Exempt paths for API/health endpoints. Configurable via `security.csrf_enabled`. `src/cogito_agent/api/app.py`.
+- **Security Headers**: `SecurityHeadersMiddleware` adds `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, `Content-Security-Policy` with strict defaults including `frame-ancestors 'none'`. `src/cogito_agent/api/app.py`.
+- **Request Body Size Limit**: Default 10MB limit enforced via FastAPI middleware. Configurable via `security.max_request_size`. `src/cogito_agent/api/app.py`.
+- **Version Sync**: `pyproject.toml`, `README.md`, `AGENTS.md`, `CHANGELOG.md` all synced to v0.15.0-dev.
+- **Dependency**: Added `python-json-logger>=2.0` to project dependencies.
+- **30+ new tests**: Config (TOML load, env overrides, CLI overrides, merge priority), health endpoint (200/503), logging (setup, rotation), SQLite (busy_timeout, WAL), security (CSRF, CORS allowlist, security headers, request body limit, negative tests for all). `tests/test_v0_15_production_foundation.py`.
+- **1222+ tests passing**, ruff clean, mypy clean (113 source files)
+- **docs/25_V0_16_ARCHITECTURE_CONSOLE_PLAN.md** updated (Section 20.2 item 1 complete)
+
 ## v0.14.0-dev (2026-06-18)
 
 ### **Real Skills + Drift Runtime**

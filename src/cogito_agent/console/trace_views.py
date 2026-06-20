@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -178,7 +179,7 @@ async def traces_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Traces",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "status": status,
         "kind": kind,
@@ -242,7 +243,7 @@ async def trace_detail(request: Request, trace_id: str) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Trace Detail",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "trace": trace,
         "tree": tree,
         "spans": raw_spans,

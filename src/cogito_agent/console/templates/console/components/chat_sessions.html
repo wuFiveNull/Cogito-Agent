@@ -16,6 +16,12 @@
     </div>
   </a>
   <div class="session-actions">
+    <button class="btn-icon" type="button"
+            onclick="this.closest('.session-item').querySelector('.session-rename').toggleAttribute('hidden')"
+            title="Rename">Edit</button>
+    <button class="btn-icon"
+            hx-post="/console/chat/sessions/{{ s.id | e }}/branch"
+            hx-target="#session-list" hx-swap="beforeend" title="Branch">Fork</button>
     <button class="btn-icon btn-archive"
             hx-post="/console/chat/sessions/{{ s.id | e }}/archive"
             hx-confirm="Archive this session?"
@@ -23,8 +29,21 @@
             hx-swap="outerHTML"
             title="Archive">X</button>
   </div>
+  <form class="session-rename" hidden
+        hx-post="/console/chat/sessions/{{ s.id | e }}/rename"
+        hx-target="closest .session-item" hx-swap="outerHTML">
+    <label class="sr-only" for="rename-{{ s.id | e }}">Session title</label>
+    <input id="rename-{{ s.id | e }}" name="title"
+           value="{{ s.title | e }}" maxlength="80" required>
+  </form>
 </div>
 {% endfor %}
 {% if not sessions %}
 <div class="session-empty">No sessions yet.</div>
+{% endif %}
+{% if has_more %}
+<button class="session-load-more"
+        hx-get="/console/chat/sessions?page={{ next_page }}"
+        hx-target="this"
+        hx-swap="outerHTML">Load more</button>
 {% endif %}

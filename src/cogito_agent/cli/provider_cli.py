@@ -104,6 +104,8 @@ def provider_doctor(args: Any) -> None:
             sr = cfg.get("model.secret_ref", "")
             if sr:
                 print(f"  [OK]  secret_ref: '{sr}' available")
+            elif cfg.get("model.api_key", ""):
+                print("  [OK]  model.api_key: configured in file (redacted)")
             else:
                 print("  [OK]  api_key_env: set (legacy)")
         else:
@@ -112,9 +114,8 @@ def provider_doctor(args: Any) -> None:
                 print(f"  [WARN] secret_ref: '{sr}' configured but NOT available")
                 print(f"         Set: echo -n '<value>' | cogito secrets set {sr}")
             else:
-                print("  [WARN] api_key_env: not set")
-                print("         Set: cogito config set model.secret_ref <name>")
-                print("         Or:  export MODEL_API_KEY=...")
+                print("  [WARN] model.api_key: not configured")
+                print("         Fill model.api_key in ~/.cogito/config.json")
 
     # Check streaming config
     se = cfg.get("model.streaming_enabled", "true")

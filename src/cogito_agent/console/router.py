@@ -4,11 +4,13 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+
+from cogito_agent.version import APP_VERSION
 
 from .approval import approval_router as _approval_router
 from .artifact_views import artifact_router as _artifact_router
@@ -21,8 +23,10 @@ from .drift_views import drift_router as _drift_router
 from .inbox_views import inbox_router as _inbox_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
-from .status import build_status
+from .services import ConsoleOverviewService, DashboardService
+from .static_version import STATIC_VERSION
 from .trace_views import trace_router as _trace_router
+from .utils import csrf_token_input
 from .utils import menu_items as _menu_items
 from .workspace_views import workspace_files_router as _workspace_files_router
 
@@ -30,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 HERE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
+templates.env.globals["static_version"] = STATIC_VERSION
 
 console_router = APIRouter()
 
@@ -38,12 +43,10 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _ensure_console_session() -> str:
-    from cogito_agent.storage import Database
+    from cogito_agent.api.app import get_db
     from cogito_agent.storage.repositories import SessionRepository
 
-    db = Database()
-    db.initialize()
-    db.migrate()
+    db = get_db()
     repo = SessionRepository(db)
     sess = repo.get_by_id(CONSOLE_SESSION_ID, CONSOLE_WORKSPACE_ID)
     if sess is None:
@@ -59,21 +62,33 @@ def _ensure_console_session() -> str:
 
 # ─── Dashboard ──────────────────────────────────────────────────────────────
 
+_dashboard_service = DashboardService()
+_overview_service = ConsoleOverviewService()
+
 
 @console_router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard(request: Request) -> HTMLResponse:
-    status_data = build_status()
+    status_data = _dashboard_service.get_system_status()
     stats = status_data.get("counts", {})
-    ctx: dict[str, object] = {
-        "request": request,
-        "title": "Dashboard",
-        "version": status_data.get("version", "0.0.0"),
-        "status": status_data,
-        "stats": stats,
-        "menu": _menu_items(),
-        "limitations": status_data.get("limitations", []),
-    }
+    limitations = status_data.get("limitations", [])
+    ctx = cast(
+        "dict[str, Any]",
+        _dashboard_service.build_page_context(
+            request,
+            "Dashboard",
+            extra={"status": status_data, "stats": stats, "limitations": limitations},
+        ),
+    )
     return templates.TemplateResponse(request, "console/dashboard.html", ctx)
+
+
+@console_router.get("/overview", response_class=HTMLResponse, include_in_schema=False)
+async def overview_page(request: Request) -> HTMLResponse:
+    ctx = cast(
+        "dict[str, Any]",
+        _overview_service.build_page_context(request, "Overview"),
+    )
+    return templates.TemplateResponse(request, "console/overview.html", ctx)
 
 
 # ─── Chat Page ──────────────────────────────────────────────────────────────
@@ -81,47 +96,32 @@ async def dashboard(request: Request) -> HTMLResponse:
 
 @console_router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
 async def chat_page(request: Request) -> HTMLResponse:
-    from cogito_agent.storage import Database
+    from cogito_agent.api.app import get_db
+    from cogito_agent.console.services import ChatWorkspaceService
     from cogito_agent.storage.repositories import (
-        MessageRepository,
-        SessionRepository,
         WorkspaceRepository,
     )
 
     _ensure_console_session()
 
-    db = Database()
-    db.initialize()
-    db.migrate()
-    sess_repo = SessionRepository(db)
-    msg_repo = MessageRepository(db)
+    db = get_db()
     ws_repo = WorkspaceRepository(db)
     ws_repo.get_by_id(CONSOLE_WORKSPACE_ID)
+    sessions = ChatWorkspaceService(db).list_sessions(CONSOLE_WORKSPACE_ID)
 
-    sessions_raw = sess_repo.list_by_workspace(CONSOLE_WORKSPACE_ID)
-    session_list = []
-    for s in sessions_raw:
-        sd: dict[str, object] = dict(s)
-        sid = str(sd["id"])
-        msgs = msg_repo.list_by_session(sid, CONSOLE_WORKSPACE_ID)
-        last_msg = msgs[-1] if msgs else None
-        session_list.append({
-            "id": sid,
-            "title": str(sd.get("title", "")),
-            "created_at": str(sd.get("created_at", "")),
-            "updated_at": str(sd.get("updated_at", "")),
-            "message_count": len(msgs),
-            "last_preview": str(last_msg.get("content", ""))[:60] if last_msg else "",
-        })
-
+    csrf_val = getattr(request.state, "csrf_token", "")
+    csrf_token_input_html = csrf_token_input(request)
     ctx: dict[str, object] = {
         "request": request,
         "title": "Chat",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "session_id": CONSOLE_SESSION_ID,
         "workspace_id": CONSOLE_WORKSPACE_ID,
-        "sessions": session_list,
+        "sessions": sessions["items"],
+        "has_more_sessions": sessions["has_more"],
         "menu": _menu_items(),
+        "csrf_token": csrf_val,
+        "csrf_token_input": csrf_token_input_html,
     }
     return templates.TemplateResponse(request, "console/chat.html", ctx)
 
@@ -179,6 +179,8 @@ async def chat_send(
         )
 
         result = kernel.process(event)
+        from cogito_agent.console.markdown import render_safe_markdown
+
         output = redact_html(result.output or "")
         trace_id = redact_html(result.trace_id or "")
         state = str(result.state.value) if hasattr(result.state, "value") else str(result.state)
@@ -188,6 +190,10 @@ async def chat_send(
             "title": "Chat",
             "user_message": redact_html(message),
             "assistant_message": output,
+            "assistant_html": render_safe_markdown(result.output or ""),
+            "tool_summaries": result.tool_summaries,
+            "approval_pending": result.approval_pending,
+            "approval_id": redact_html(result.approval_id or ""),
             "trace_id": trace_id,
             "request_id": rid,
             "state": state,
@@ -316,30 +322,19 @@ console_router.include_router(_workspace_files_router, prefix="/workspace/files"
 console_router.include_router(_artifact_router, prefix="/artifacts")
 
 
-# ─── Placeholder Pages ──────────────────────────────────────────────────────
-
-
-PLACEHOLDER_PAGES: list[str] = []
-
-_PHASE_MAP: dict[str, str] = {}
+# ─── Console catch-all ──────────────────────────────────────────────────────
 
 
 @console_router.get("/{page}", response_class=HTMLResponse, include_in_schema=False)
-async def placeholder_page(request: Request, page: str) -> HTMLResponse:
-    if page not in PLACEHOLDER_PAGES:
-        ctx: dict[str, object] = {
-            "request": request,
-            "title": "Not Found",
-            "message": f"Page '{page}' not found.",
-            "menu": _menu_items(),
-        }
-        return templates.TemplateResponse(request, "console/error.html", ctx, status_code=404)
-    phase = _PHASE_MAP.get(page, "N")
-    placeholder_ctx: dict[str, object] = {
+async def console_page_not_found(request: Request, page: str) -> HTMLResponse:
+    csrf_val = getattr(request.state, "csrf_token", "")
+    csrf_token_input_html = csrf_token_input(request)
+    ctx: dict[str, object] = {
         "request": request,
-        "title": page.capitalize(),
-        "page_name": page.capitalize(),
-        "phase": phase,
+        "title": "Not Found",
+        "message": f"Page '{page}' not found.",
         "menu": _menu_items(),
+        "csrf_token": csrf_val,
+        "csrf_token_input": csrf_token_input_html,
     }
-    return templates.TemplateResponse(request, "console/placeholder.html", placeholder_ctx)
+    return templates.TemplateResponse(request, "console/error.html", ctx, status_code=404)

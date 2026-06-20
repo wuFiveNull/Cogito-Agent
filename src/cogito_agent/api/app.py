@@ -20,7 +20,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from cogito_agent.cli.export import _redact_dict
+from cogito_agent.config.loader import load_config
 from cogito_agent.console import console_router, status_router
+from cogito_agent.logging import setup_logging
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import list_providers
 from cogito_agent.runtime import RuntimeKernel
@@ -36,6 +38,7 @@ from cogito_agent.storage.repositories import (
     WorkspaceSettingsRepository,
 )
 from cogito_agent.trace.redaction import RedactionHelper
+from cogito_agent.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -94,17 +97,70 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    cfg = load_config()
+    setup_logging(cfg.logging)
     get_db()
     get_kernel()
     yield
 
 
-app = FastAPI(title="Cogito-Agent API", version="0.9.0-dev", lifespan=lifespan)
+app = FastAPI(title="Cogito-Agent API", version=APP_VERSION, lifespan=lifespan)
 
 _console_static = Path(__file__).resolve().parent.parent / "console" / "static"
 app.mount("/console/static", StaticFiles(directory=str(_console_static)), name="console_static")
 app.include_router(console_router, prefix="/console")
 app.include_router(status_router, prefix="/api/v1/status")
+
+
+# ── Health Endpoint ───────────────────────────────────────────────────────────
+
+
+@app.get("/api/v1/health", include_in_schema=False)
+async def health_endpoint() -> JSONResponse:
+    status_data: dict[str, Any] = {
+        "status": "ok",
+        "version": APP_VERSION,
+        "checks": {},
+    }
+    all_healthy = True
+
+    # Check DB
+    try:
+        _db_check = Database()
+        _db_check.initialize()
+        db_ver = _db_check.current_version()
+        _db_check.close()
+        status_data["checks"]["database"] = {
+            "status": "ok",
+            "migration_version": db_ver,
+        }
+    except Exception as exc:
+        status_data["checks"]["database"] = {
+            "status": "error",
+            "message": str(exc),
+        }
+        all_healthy = False
+
+    # Check config
+    try:
+        _cfg = load_config()
+        status_data["checks"]["config"] = {
+            "status": "ok",
+            "provider": _cfg.model.provider,
+        }
+    except Exception as exc:
+        status_data["checks"]["config"] = {
+            "status": "error",
+            "message": str(exc),
+        }
+        all_healthy = False
+
+    if all_healthy:
+        return JSONResponse(status_code=200, content=status_data)
+    return JSONResponse(status_code=503, content=status_data)
+
+
+# ── Doctor endpoint ──────────────────────────────────────────────────────────
 
 
 @app.get("/api/v1/doctor", include_in_schema=False)
@@ -114,7 +170,7 @@ async def doctor_api_endpoint(live: str = Query("")) -> JSONResponse:
             status_code=501,
             content={
                 "status": "error",
-                "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
+                "version": APP_VERSION,
                 "checks": [{
                     "section": "provider",
                     "name": "live_check",
@@ -129,7 +185,7 @@ async def doctor_api_endpoint(live: str = Query("")) -> JSONResponse:
     overall = _overall_status(checks)
     return JSONResponse({
         "status": overall,
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
+        "version": APP_VERSION,
         "checks": checks,
         "limitations": [
             "No real Telegram/Feishu delivery for outbox",
@@ -139,13 +195,85 @@ async def doctor_api_endpoint(live: str = Query("")) -> JSONResponse:
     })
 
 
+# ── Security Headers Middleware ──────────────────────────────────────────────
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "form-action 'self'"
+        )
+        return response
+
+
+# ── CSRF Protection Middleware ───────────────────────────────────────────────
+
+CSRF_EXEMPT_PATHS = {
+    "/chat",
+    "/chat/stream",
+    "/api/v1/health",
+    "/api/v1/doctor",
+    "/api/v1/status",
+}
+
+CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        expected = os.environ.get("COGITO_CSRF_TOKEN", "")
+        if not expected:
+            return await call_next(request)
+        if request.method in CSRF_SAFE_METHODS:
+            return await call_next(request)
+        path = request.url.path
+        if any(path.startswith(p) for p in CSRF_EXEMPT_PATHS):
+            return await call_next(request)
+        if path.startswith("/console"):
+            token = request.headers.get("X-CSRF-Token", "")
+            if token and token == expected:
+                return await call_next(request)
+            content_type = request.headers.get("content-type", "")
+            ctype = content_type
+            if "application/x-www-form-urlencoded" in ctype or "multipart/form-data" in ctype:
+                try:
+                    body = await request.body()
+                    body_str = body.decode("utf-8", errors="replace")
+                    if f"csrf_token={expected}" in body_str:
+                        return await call_next(request)
+                except Exception:
+                    pass
+            rid = getattr(request.state, "request_id", "")
+            return _error_response(
+                "CSRF_FAILED", "CSRF validation failed", rid, status_code=403,
+            )
+        return await call_next(request)
+
+
+# ── CORS with allowlist ──────────────────────────────────────────────────────
+
+CFG = load_config()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CFG.security.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID", "X-CSRF-Token"],
 )
+
+
+# ── Exception handlers ───────────────────────────────────────────────────────
 
 
 @app.exception_handler(RequestValidationError)
@@ -167,10 +295,14 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
+# ── Middleware classes ────────────────────────────────────────────────────────
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Any:
         rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = rid
+        request.state.csrf_token = os.environ.get("COGITO_CSRF_TOKEN", rid)
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid
         return response
@@ -188,9 +320,34 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return _error_response("UNAUTHORIZED", "Unauthorized", rid, status_code=401)
 
 
-# Order: innermost first, outermost last.
-# RequestIDMiddleware must run first (outermost) so request.state.request_id is set
-# before AuthMiddleware/RateLimitMiddleware dispatch.
+# ── Request Body Size Limit ──────────────────────────────────────────────────
+
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                size = int(content_length)
+                max_size = CFG.security.max_request_size
+                if size > max_size:
+                    rid = getattr(request.state, "request_id", "")
+                    return _error_response(
+                        "PAYLOAD_TOO_LARGE",
+                        f"Request body exceeds maximum size ({max_size} bytes)",
+                        rid,
+                        status_code=413,
+                    )
+            except (ValueError, TypeError):
+                pass
+        return await call_next(request)
+
+
+# Order: outermost first, innermost last.
+# SecurityHeadersMiddleware must be outermost so all responses get security headers.
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(CSRFMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestIDMiddleware)

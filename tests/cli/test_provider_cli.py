@@ -13,6 +13,12 @@ from cogito_agent.cli.provider_cli import (
 )
 
 
+def test_api_key_can_be_resolved_from_config_file() -> None:
+    from cogito_agent.cli.config_manager import _resolve_api_key
+
+    assert _resolve_api_key({"model.api_key": "configured-key"}) == "configured-key"
+
+
 def _ns(**kwargs):
     class NS:
         pass

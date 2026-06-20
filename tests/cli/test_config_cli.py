@@ -7,15 +7,27 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cogito_agent.cli.config_manager import (
-    CONFIG_DIR,
-    CONFIG_PATH,
-    KEYS,
     DEFAULT_CONFIG,
+    KEYS,
+    doctor,
     get_config,
     get_config_key,
     set_config_key,
-    doctor,
 )
+from cogito_agent.models import ModelResponse, RoutedModelAdapter
+
+
+class _ConfiguredAdapter:
+    supports_streaming = False
+    model = "configured-model"
+
+    def chat(self, messages, **kwargs):
+        del messages, kwargs
+        return ModelResponse(content="ok")
+
+    def stream_chat(self, messages, **kwargs):
+        del messages, kwargs
+        yield "ok"
 
 
 def _isolate_config(monkeypatch: object) -> str:
@@ -24,10 +36,16 @@ def _isolate_config(monkeypatch: object) -> str:
         import pytest
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr("cogito_agent.cli.config_manager.CONFIG_DIR", tmp)
-        monkeypatch.setattr("cogito_agent.cli.config_manager.CONFIG_PATH", os.path.join(tmp, "config.json"))
+        monkeypatch.setattr(
+            "cogito_agent.cli.config_manager.CONFIG_PATH",
+            os.path.join(tmp, "config.json"),
+        )
         return tmp
     monkeypatch.setattr("cogito_agent.cli.config_manager.CONFIG_DIR", tmp)
-    monkeypatch.setattr("cogito_agent.cli.config_manager.CONFIG_PATH", os.path.join(tmp, "config.json"))
+    monkeypatch.setattr(
+        "cogito_agent.cli.config_manager.CONFIG_PATH",
+        os.path.join(tmp, "config.json"),
+    )
     return tmp
 
 
@@ -37,6 +55,7 @@ def test_get_config_defaults(monkeypatch) -> None:
     assert cfg["model.provider"] == "mock"
     assert cfg["model.base_url"] == ""
     assert cfg["model.model"] == ""
+    assert cfg["model.api_key"] == ""
     assert cfg["model.api_key_env"] == "MODEL_API_KEY"
 
 
@@ -60,11 +79,13 @@ def test_set_all_keys(monkeypatch) -> None:
     set_config_key("model.provider", "ollama")
     set_config_key("model.base_url", "http://localhost:11434/v1")
     set_config_key("model.model", "llama3.2")
+    set_config_key("model.api_key", "test-key")
     set_config_key("model.api_key_env", "OLLAMA_API_KEY")
     cfg = get_config()
     assert cfg["model.provider"] == "ollama"
     assert cfg["model.base_url"] == "http://localhost:11434/v1"
     assert cfg["model.model"] == "llama3.2"
+    assert cfg["model.api_key"] == "test-key"
     assert cfg["model.api_key_env"] == "OLLAMA_API_KEY"
 
 
@@ -137,3 +158,23 @@ def test_config_survives_corrupted_file(monkeypatch) -> None:
         f.write("not valid json")
     cfg = get_config()
     assert cfg["model.provider"] == "mock"
+
+
+def test_configured_provider_is_wrapped_by_model_router(monkeypatch) -> None:
+    _isolate_config(monkeypatch)
+    set_config_key("model.provider", "deepseek")
+    set_config_key("model.model", "configured-model")
+    set_config_key("model.api_key", "test-secret")
+    monkeypatch.setattr(
+        "cogito_agent.cli.config_manager.get_adapter",
+        lambda **_kwargs: _ConfiguredAdapter(),
+    )
+
+    from cogito_agent.cli.config_manager import build_model_adapter_from_config
+
+    adapter = build_model_adapter_from_config()
+
+    assert isinstance(adapter, RoutedModelAdapter)
+    response = adapter.chat([{"role": "user", "content": "hello"}])
+    assert response.provider == "deepseek"
+    assert response.model == "configured-model"

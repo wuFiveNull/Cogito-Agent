@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -10,6 +11,48 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from cogito_agent.version import APP_VERSION
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sqlite_copy(source: str, target: str) -> None:
+    """Create a transactionally consistent SQLite copy, including WAL state."""
+    source_conn = sqlite3.connect(source)
+    target_conn = sqlite3.connect(target)
+    try:
+        source_conn.backup(target_conn)
+    finally:
+        target_conn.close()
+        source_conn.close()
+
+
+def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
+    root = destination.resolve()
+    for member in archive.infolist():
+        target = (destination / member.filename).resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"Unsafe backup member path: {member.filename}")
+        archive.extract(member, destination)
+
+
+def _check_database(path: Path) -> str | None:
+    try:
+        conn = sqlite3.connect(str(path))
+        result = conn.execute("PRAGMA quick_check").fetchone()
+        conn.close()
+    except sqlite3.Error as exc:
+        return str(exc)
+    if result is None or result[0] != "ok":
+        return str(result[0] if result else "quick_check returned no result")
+    return None
+
 
 def _get_default_data_dir() -> str:
     return str(Path.home() / ".cogito")
@@ -17,7 +60,7 @@ def _get_default_data_dir() -> str:
 
 def _redact_db(db_path: str, out_path: str) -> None:
     """Copy a SQLite database and redact secret values."""
-    shutil.copy2(db_path, out_path)
+    _sqlite_copy(db_path, out_path)
     try:
         conn = sqlite3.connect(out_path)
         try:
@@ -53,7 +96,7 @@ def create_backup(
 
     manifest: dict[str, Any] = {
         "created_at": datetime.now(UTC).isoformat(),
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "tool": "cogito backup create",
         "include_secrets": include_secrets,
         "files": [],
@@ -65,7 +108,7 @@ def create_backup(
         # 1. SQLite DB (redacted if no --include-secrets)
         db_target = tmp / "cogito.db"
         if include_secrets:
-            shutil.copy2(db_path, str(db_target))
+            _sqlite_copy(db_path, str(db_target))
         else:
             _redact_db(db_path, str(db_target))
         manifest["files"].append("cogito.db")
@@ -146,11 +189,17 @@ def create_backup(
         except Exception:
             pass
 
-        # Write manifest
+        manifest["files"].append("manifest.json")
+        manifest["checksums"] = {
+            str(item.relative_to(tmp)).replace("\\", "/"): _sha256(item)
+            for item in tmp.rglob("*")
+            if item.is_file()
+        }
+
+        # Write manifest after inventory and checksums are final.
         (tmp / "manifest.json").write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
-        manifest["files"].append("manifest.json")
 
         # Create ZIP
         out_path_parent = Path(out_path).parent
@@ -194,8 +243,12 @@ def restore_backup(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        with zipfile.ZipFile(backup_path, "r") as zf:
-            zf.extractall(str(tmp))
+        try:
+            with zipfile.ZipFile(backup_path, "r") as zf:
+                _safe_extract(zf, tmp)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            result["errors"].append(f"Invalid backup archive: {exc}")
+            return result
 
         # Read manifest
         manifest_path = tmp / "manifest.json"
@@ -206,10 +259,30 @@ def restore_backup(
         result["manifest"] = manifest
         result["files_found"] = list(manifest.get("files", []))
 
+        checksums = manifest.get("checksums", {})
+        if isinstance(checksums, dict):
+            for relative_path, expected in checksums.items():
+                candidate = tmp / str(relative_path)
+                if not candidate.is_file() or _sha256(candidate) != expected:
+                    result["errors"].append(
+                        f"Checksum mismatch: {relative_path}"
+                    )
+
+        db_target = tmp / "cogito.db"
+        if db_target.exists():
+            db_error = _check_database(db_target)
+            if db_error:
+                result["errors"].append(f"SQLite integrity check failed: {db_error}")
+        else:
+            result["errors"].append("Backup does not contain cogito.db")
+
+        if result["errors"]:
+            return result
+
         if dry_run:
             result["actions"].append(f"Would restore SQLite DB to {db_path}")
             result["actions"].append(f"Would restore config to {data_dir}/config.json")
-            result["actions"].append("Would restore skills to {data_dir}/skills/")
+            result["actions"].append(f"Would restore skills to {data_dir}/skills/")
             if "audit_logs.json" in manifest.get("files", []):
                 result["actions"].append("Would import audit logs")
             if "traces.json" in manifest.get("files", []):
@@ -221,9 +294,19 @@ def restore_backup(
             return result
 
         # Perform restore
-        db_target = tmp / "cogito.db"
         if db_target.exists():
-            shutil.copy2(str(db_target), db_path)
+            destination = Path(db_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+                safety_copy = destination.with_name(
+                    f"{destination.name}.pre-restore.{timestamp}.bak"
+                )
+                _sqlite_copy(str(destination), str(safety_copy))
+                result["actions"].append(
+                    f"Created pre-restore safety copy at {safety_copy}"
+                )
+            _sqlite_copy(str(db_target), str(destination))
             result["actions"].append(f"Restored SQLite DB to {db_path}")
 
         config_target = tmp / "config.json"
@@ -270,7 +353,7 @@ def export_data(
 
     export: dict[str, Any] = {
         "exported_at": datetime.now(UTC).isoformat(),
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "sections": {},
     }
 

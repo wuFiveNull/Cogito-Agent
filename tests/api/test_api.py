@@ -7,7 +7,16 @@ from cogito_agent.api.app import app
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """API tests are hermetic and never consume the user's live provider config."""
+    import sys
+
+    api_mod = sys.modules["cogito_agent.api.app"]
+    api_mod._kernel = None
+    monkeypatch.setattr(
+        "cogito_agent.cli.config_manager.build_model_adapter_from_config",
+        lambda: None,
+    )
     return TestClient(app)
 
 

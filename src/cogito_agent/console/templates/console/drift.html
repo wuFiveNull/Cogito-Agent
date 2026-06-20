@@ -10,20 +10,20 @@
                 <p>
                     <strong>Enabled:</strong>
                     <span class="{% if status.enabled %}text-success{% else %}text-danger{% endif %}">
-                        {{ status.enabled|yesno:"Yes,No" }}
+                        {{ "Yes" if status.enabled else "No" }}
                     </span>
                 </p>
                 <p>
                     <strong>Paused:</strong>
                     <span class="{% if status.paused %}text-warning{% else %}text-success{% endif %}">
-                        {{ status.paused|yesno:"Yes,No" }}
+                        {{ "Yes" if status.paused else "No" }}
                     </span>
                 </p>
                 {% if status.paused and status.pause_reason %}
                 <p><strong>Pause Reason:</strong> {{ status.pause_reason }}</p>
                 {% endif %}
                 <p><strong>Quiet Hours:</strong> {{ status.quiet_hours_start }} - {{ status.quiet_hours_end }}</p>
-                <p><strong>In Quiet Hours:</strong> {{ status.in_quiet_hours|yesno:"Yes,No" }}</p>
+                <p><strong>In Quiet Hours:</strong> {{ "Yes" if status.in_quiet_hours else "No" }}</p>
             </div>
         </div>
     </div>
@@ -34,7 +34,7 @@
                 <p><strong>Daily Budget:</strong> {{ status.daily_budget }}</p>
                 <p><strong>Runs Today:</strong> {{ status.runs_today }}</p>
                 <p><strong>Budget Remaining:</strong> {{ status.budget_remaining }}</p>
-                <p><strong>Last Tick:</strong> {{ status.last_tick|default:"Never" }}</p>
+                <p><strong>Last Tick:</strong> {{ status.last_tick|default("Never") }}</p>
             </div>
         </div>
     </div>
@@ -62,7 +62,7 @@
 
 {% if status.next_eligible_skills %}
 <div class="alert alert-info">
-    <strong>Next eligible skills:</strong> {{ status.next_eligible_skills|join:", " }}
+    <strong>Next eligible skills:</strong> {{ status.next_eligible_skills|join(", ") }}
 </div>
 {% endif %}
 
@@ -88,7 +88,7 @@
                         {{ run.status }}
                     </span>
                 </td>
-                <td>{{ run.started_at|default:run.created_at|truncatechars:16 }}</td>
+                <td>{{ run.started_at|default(run.created_at)|truncate(16) }}</td>
                 <td>
                     {% if run.artifact_id %}
                     <a href="/console/artifacts/{{ run.artifact_id }}">View</a>
@@ -98,14 +98,14 @@
                 </td>
                 <td>
                     {% if run.trace_id %}
-                    <a href="/console/traces/{{ run.trace_id }}">{{ run.trace_id|truncatechars:12 }}</a>
+                    <a href="/console/traces/{{ run.trace_id }}">{{ run.trace_id|truncate(12, True) }}</a>
                     {% else %}
                     -
                     {% endif %}
                 </td>
                 <td><a href="/console/drift/runs/{{ run.id }}">Detail</a></td>
             </tr>
-            {% empty %}
+            {% else %}
             <tr><td colspan="6" class="text-muted">No drift runs yet.</td></tr>
             {% endfor %}
         </tbody>

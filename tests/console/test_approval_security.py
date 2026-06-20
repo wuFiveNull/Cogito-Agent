@@ -53,8 +53,10 @@ class TestApprovalSecurity:
 
         resp = client.get(f"/console/approval/{aid}")
         html = resp.text
-        assert '<script>' not in html
-        assert '&lt;script&gt;' in html
+        # User-controlled resource must be HTML-escaped
+        assert "&lt;script&gt;alert" in html
+        # Raw user-controlled content should NOT appear
+        assert '<script>alert("xss")</script>' not in html
 
 
 class TestApprovalAuth:

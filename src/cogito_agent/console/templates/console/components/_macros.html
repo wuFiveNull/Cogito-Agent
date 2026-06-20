@@ -1,0 +1,110 @@
+{% from "console/components/icons.html" import icon %}
+
+{% macro stat_card(value, label, class="") %}
+<div class="stat-card {{ class }}">
+  <div class="stat-value">{{ value }}</div>
+  <div class="stat-label">{{ label }}</div>
+</div>
+{% endmacro %}
+
+{% macro stat_grid(cards) %}
+<div class="stats-grid">
+  {% for card in cards %}
+  {{ stat_card(card.value, card.label) }}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro badge(text, variant="default", class="") %}
+<span class="badge badge-{{ variant }} {{ class }}">{{ text }}</span>
+{% endmacro %}
+
+{% macro button(text, href="", variant="default", size="", icon_name="", class="", attrs="") %}
+{%- set btn_class = "btn" ~ (" btn-" ~ variant if variant != "default" else "") ~ (" btn-" ~ size if size else "") ~ (" " ~ class if class else "") -%}
+{%- if href %}
+<a href="{{ href }}" class="{{ btn_class }}" {{ attrs | safe }}>
+  {%- if icon_name %}{{ icon(icon_name, size=14) }} {% endif %}
+  {{ text }}
+</a>
+{%- else %}
+<button class="{{ btn_class }}" {{ attrs | safe }}>
+  {%- if icon_name %}{{ icon(icon_name, size=14) }} {% endif %}
+  {{ text }}
+</button>
+{%- endif %}
+{% endmacro %}
+
+{% macro card(actions="", body="", class="") %}
+<div class="card {{ class }}">
+  {% if actions %}<div class="card-actions">{{ actions }}</div>{% endif %}
+  <div class="card-body">{{ body }}</div>
+</div>
+{% endmacro %}
+
+{% macro info_table(rows) %}
+<table class="info-table">
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.label }}</td>
+    <td>{{ row.value | safe }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endmacro %}
+
+{% macro flash_messages(messages) %}
+<div id="flash-container">
+  {% if messages %}
+  {% for msg in messages %}
+  <div class="flash flash-{{ msg.level }}">{{ msg.message }}</div>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro page_header(title, subtitle="") %}
+<div class="page-header">
+  <h2>{{ title }}</h2>
+  {% if subtitle %}<p class="page-subtitle">{{ subtitle }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro filter_bar(fields) %}
+<div class="filter-bar">
+  {% for field in fields %}
+    {% if field.type == "search" %}
+    <input type="search" class="filter-search" name="{{ field.name }}" placeholder="{{ field.placeholder }}" value="{{ field.value or '' }}">
+    {% elif field.type == "select" %}
+    <select name="{{ field.name }}" class="filter-select">
+      {% for opt in field.options %}
+      <option value="{{ opt.value }}"{% if opt.selected %} selected{% endif %}>{{ opt.label }}</option>
+      {% endfor %}
+    </select>
+    {% elif field.type == "button" %}
+    <button type="submit" class="btn btn-filter">{{ field.label }}</button>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro empty_state(text="No data", icon_name="") %}
+<div class="empty-state">
+  {% if icon_name %}{{ icon(icon_name, size=32, class="empty-icon") }}<br>{% endif %}
+  {{ text }}
+</div>
+{% endmacro %}
+
+{% macro stat_card_mini(value, label, class="") %}
+<div class="stat-card stat-card-mini {{ class }}">
+  <div class="stat-value">{{ value }}</div>
+  <div class="stat-label">{{ label }}</div>
+</div>
+{% endmacro %}
+
+{% macro stat_row(cards) %}
+<div class="stat-row">
+  {% for card in cards %}
+  {{ stat_card_mini(card.value, card.label) }}
+  {% endfor %}
+</div>
+{% endmacro %}

@@ -135,9 +135,10 @@ v0.11.0-dev (Autonomy Delivery & Local Production Hardening, current):
 
 ## Verification Status
 
-- **1192 tests passing** (`pytest` clean)
+- **1433 tests passing, 4 skipped** (`pytest` clean; Python 3.11 audit environment)
 - **ruff clean** (`ruff check src/` clean)
-- **mypy clean** (`mypy src/` clean, 112 files)
+- **mypy clean** (`mypy src/` clean, 124 source files)
+- Python 3.12/3.13 and cross-platform release verification remains pending.
 
 - ✅ Phase 1 (Epics A–B): Runtime full turn pipeline, context engine with budget shares
 - ✅ Phase 2 (Epics C–E): Tool dispatch, approval flow, budget enforcement
@@ -199,7 +200,26 @@ v0.13.0-dev (Workspace Files + Artifact System):
 - 44 new tests, 1146 tests passing, ruff clean, mypy clean (95 source files)
 - docs/22_V0_13_WORKSPACE_FILES_ARTIFACTS_PLAN.md created
 
-v0.14.0-dev (Real Skills + Drift Runtime, current):
+v0.15.0-dev (Production Foundation):
+- TOML config file with CLI > ENV > config file > defaults priority
+- Structured JSON logging with rotating file handler (python-json-logger)
+- GET /api/v1/health returning 200/503 with database and config checks
+- SQLite WAL + busy_timeout (5000ms) on all connections
+- Web security: CORS allowlist (no wildcard), CSRF protection, CSP headers, X-Content-Type-Options, Referrer-Policy, X-Frame-Options (DENY), frame-ancestors
+- Request body size limit (default 10MB) via security middleware
+- Security regression tests: 30+ new tests covering all new features
+- Version sync across pyproject.toml, README, AGENTS, CHANGELOG
+- 1222+ tests passing, ruff clean, mypy clean (113 source files)
+
+v0.16.0-dev (Console Architecture Foundation, current):
+- **Phase 0 (Foundation)**: ConsolePageContext TypedDict, BaseConsoleService abstract boundary, DashboardService, static resource versioning, 22 new tests
+- **Phase 1 (Design System)**: 85-token design-tokens.css, 7 component macros (_macros.html), 14-item SVG icon sprite in components/icons.html, responsive base shell with sidebar, 5 status/error components, 33 new tests
+- **Phase 2 (Overview)**: ConsoleOverviewService with 7 data aggregation methods (attention queue, runtime health, activity stream, usage snapshot, quick actions), overview.html template with 5 sections and empty states, GET /console/overview route with nav link, fixed drift.html {% empty %} → {% else %} and truncatechars → truncate bugs, 50 new tests
+- 105 new tests across phases 0–2; production closure work adds config initialization,
+  wheel contracts, daemon PID locking, and service definitions; stabilized baseline:
+  1433 tests passing, 4 skipped, ruff clean, mypy clean (134 source files)
+
+v0.14.0-dev (Real Skills + Drift Runtime):
 - 5 built-in skills upgraded from stubs to real implementations:
   - **daily_brief**: collects memories/tasks/sessions/inbox/artifacts/file_chunks → Markdown artifact + inbox notification; ContextEngine integration; trace/audit
   - **memory_consolidation**: finds duplicates (identical text), stale (≥30 days), conflicting (negation-based), low-confidence (<0.3) memories → JSON proposal artifact; proposal-only (NO direct merge/archive/delete); inbox notification; trace/audit

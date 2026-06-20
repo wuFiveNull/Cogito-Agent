@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from starlette.responses import JSONResponse
 
 from cogito_agent.storage import Database
+from cogito_agent.version import APP_VERSION
 
 status_router = APIRouter()
 
@@ -82,7 +83,7 @@ def build_status() -> dict[str, object]:
     secrets = _secrets_info()
 
     return {
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
         "db": db,
         "model": model,
         "secrets": secrets,

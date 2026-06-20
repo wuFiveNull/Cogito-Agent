@@ -9,4 +9,7 @@ cogito_demo.db
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-.venv/
+.venv*/
+.pytest-*/
+.pytest_codex_tmp/
+.server-*.log

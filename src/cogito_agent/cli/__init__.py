@@ -292,6 +292,9 @@ def run_cli() -> None:
 
     config_parser = sub.add_parser("config", help="View or set configuration")
     config_sub = config_parser.add_subparsers(dest="config_action", help="Config command")
+    config_init = config_sub.add_parser("init", help="Create a default TOML config")
+    config_init.add_argument("--path", dest="config_path", default=None)
+    config_init.add_argument("--force", action="store_true")
     config_sub.add_parser("show", help="Show current configuration")
     config_set = config_sub.add_parser("set", help="Set a config key")
     config_set.add_argument("key", help="Config key (e.g. model.provider)")
@@ -311,6 +314,15 @@ def run_cli() -> None:
     restore_create.add_argument("--db", dest="db_path", default="", help="SQLite database path")
     restore_create.add_argument("--dry-run", dest="dry_run", action="store_true",
                                 help="Preflight validation without restoring")
+
+    diagnostics_parser = sub.add_parser(
+        "diagnostics", help="Create a redacted local diagnostic bundle"
+    )
+    diagnostics_sub = diagnostics_parser.add_subparsers(dest="diagnostics_action")
+    diagnostics_create = diagnostics_sub.add_parser("create")
+    diagnostics_create.add_argument("--out", dest="diagnostics_out", required=True)
+    diagnostics_create.add_argument("--db", dest="diagnostics_db")
+    diagnostics_create.add_argument("--log", dest="diagnostics_log")
 
     export_parser = sub.add_parser("export", help="Export workspace data or specific sections")
     export_parser.set_defaults(db_path=None)
@@ -355,6 +367,24 @@ def run_cli() -> None:
     daemon_sub.add_parser("run", help="Run daemon continuously")
     daemon_sub.add_parser("status", help="Show daemon and job status")
     daemon_sub.add_parser("stop", help="Set daemon state to stopped")
+
+    service_parser = sub.add_parser("service", help="Install or remove the daemon service")
+    service_sub = service_parser.add_subparsers(dest="service_action")
+    for service_action in ("install", "uninstall"):
+        service_command = service_sub.add_parser(service_action)
+        manager = service_command.add_mutually_exclusive_group()
+        manager.add_argument(
+            "--systemd", dest="service_manager", action="store_const", const="systemd"
+        )
+        manager.add_argument(
+            "--launchd", dest="service_manager", action="store_const", const="launchd"
+        )
+        manager.add_argument(
+            "--windows", dest="service_manager", action="store_const", const="windows"
+        )
+        service_command.add_argument(
+            "--path", dest="service_path", help="Override the service definition path"
+        )
 
     inbox_parser = sub.add_parser("inbox", help="Manage inbox items")
     inbox_parser.set_defaults(db_path=None)
@@ -696,6 +726,19 @@ def run_cli() -> None:
             else:
                 print("Restore complete.")
         _adb.close()
+    elif args.command == "diagnostics":
+        if args.diagnostics_action == "create":
+            from .diagnostics import create_diagnostic_bundle
+
+            report = create_diagnostic_bundle(
+                args.diagnostics_out,
+                db_path=args.diagnostics_db,
+                log_path=args.diagnostics_log,
+            )
+            print(f"Created diagnostic bundle: {report['path']}")
+            print("Secrets and application rows were excluded.")
+        else:
+            print("Usage: cogito diagnostics create --out <path>")
     elif args.command == "export":
         export_action = getattr(args, "export_action", None)
         from cogito_agent.governance import AuditLogger
@@ -850,6 +893,27 @@ def run_cli() -> None:
             _db_instance.connection.commit()
             print("  Daemon state set to 'stopped'.")
         _db_instance.close()
+    elif args.command == "service":
+        from .service import install_service, service_platform, uninstall_service
+
+        manager_name = service_platform(getattr(args, "service_manager", None))
+        service_path = getattr(args, "service_path", None)
+        try:
+            if args.service_action == "install":
+                installed = install_service(manager_name, service_path)
+                print(f"Installed {manager_name} service: {installed}")
+                if manager_name == "systemd":
+                    print("Run: systemctl --user daemon-reload")
+                    print("Then: systemctl --user enable --now cogito-agent")
+                elif manager_name == "launchd":
+                    print(f"Run: launchctl load {installed}")
+            elif args.service_action == "uninstall":
+                removed = uninstall_service(manager_name, service_path)
+                print(f"Removed {manager_name} service: {removed}")
+            else:
+                print("Usage: cogito service install|uninstall")
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"Service operation failed: {exc}")
     elif args.command == "inbox":
         from cogito_agent.autonomy import NotificationGate as _NGate
         from cogito_agent.storage import Database as _InboxDb  # noqa: N814
@@ -1259,11 +1323,22 @@ def run_cli() -> None:
     elif args.command == "config":
         from .config_manager import KEYS, get_config, set_config_key
 
-        if args.config_action == "show":
+        if args.config_action == "init":
+            from cogito_agent.config import initialize_config
+
+            try:
+                path = initialize_config(args.config_path, force=args.force)
+                print(f"Created configuration: {path}")
+            except FileExistsError as exc:
+                print(f"Error: {exc}. Use --force to replace it.")
+        elif args.config_action == "show":
             cfg = get_config()
             print("Current configuration (~/.cogito/config.json):")
             for k in KEYS:
-                print(f"  {k} = {cfg.get(k, '')}")
+                value = cfg.get(k, "")
+                if any(term in k.lower() for term in ("api_key", "secret", "password")):
+                    value = "[REDACTED]" if value else ""
+                print(f"  {k} = {value}")
         elif args.config_action == "set":
             try:
                 set_config_key(args.key, args.value)
@@ -1271,7 +1346,7 @@ def run_cli() -> None:
             except ValueError as e:
                 print(f"Error: {e}")
         else:
-            print("Usage: cogito config show | cogito config set <key> <value>")
+            print("Usage: cogito config init|show|set")
     elif args.command == "doctor":
         from cogito_agent.trace import RedactionHelper
 

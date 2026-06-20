@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -215,7 +216,7 @@ async def memory_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Memory",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "tab": tab,
         "status": status,
@@ -248,7 +249,7 @@ async def memory_detail(request: Request, id: str) -> HTMLResponse:
     ctx = {
         "request": request,
         "title": "Memory Detail",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "item": item,
         "item_type": item_type,
         "menu": _menu_items(),

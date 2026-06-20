@@ -1,6 +1,19 @@
 from .adapter import ModelAdapter, ModelResponse, StreamGenerator, ToolIntent
 from .openai_adapter import OpenAICompatibleAdapter
 from .registry import ProviderConfig, get_adapter, list_providers, register_provider
+from .router import (
+    ModelCandidate,
+    ModelExclusion,
+    ModelRouteDecision,
+    ModelRouteEvent,
+    ModelRouteEventType,
+    ModelRouter,
+    ModelRouteRequest,
+    ModelRouterProtocol,
+    ProviderHealth,
+    ProviderHealthStatus,
+    RoutedModelAdapter,
+)
 
 try:
     import tiktoken
@@ -25,6 +38,17 @@ __all__ = [
     "ProviderConfig",
     "get_adapter",
     "list_providers",
+    "ModelCandidate",
+    "ModelExclusion",
+    "ModelRouteDecision",
+    "ModelRouteEvent",
+    "ModelRouteEventType",
+    "ModelRouteRequest",
+    "ModelRouter",
+    "ModelRouterProtocol",
+    "ProviderHealth",
+    "ProviderHealthStatus",
+    "RoutedModelAdapter",
     "register_provider",
     "token_count",
 ]

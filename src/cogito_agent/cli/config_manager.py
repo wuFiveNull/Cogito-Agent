@@ -4,7 +4,14 @@ import json
 import os
 from pathlib import Path
 
-from cogito_agent.models import ModelAdapter, get_adapter, list_providers
+from cogito_agent.models import (
+    ModelAdapter,
+    ModelCandidate,
+    ModelRouter,
+    RoutedModelAdapter,
+    get_adapter,
+    list_providers,
+)
 from cogito_agent.models.registry import _PROVIDERS
 from cogito_agent.security import (
     KeychainSecretProvider,
@@ -20,6 +27,7 @@ DEFAULT_CONFIG: dict[str, str] = {
     "model.provider": "mock",
     "model.base_url": "",
     "model.model": "",
+    "model.api_key": "",
     "model.api_key_env": "MODEL_API_KEY",
     "model.secret_ref": "",
     "model.timeout_seconds": "60",
@@ -88,17 +96,22 @@ def set_config_key(key: str, value: str) -> None:
     _save_raw(cfg)
 
 
-def _resolve_api_key(cfg: dict[str, str]) -> str:
-    """Resolve API key from secret_ref (preferred) or api_key_env (fallback)."""
+def _resolve_api_key(
+    cfg: dict[str, str], secret_provider: SecretProvider | None = None
+) -> str:
+    """Resolve API key from secret_ref, config value, or environment."""
     secret_ref = cfg.get("model.secret_ref", "")
     if secret_ref:
         try:
-            provider: SecretProvider = get_provider_from_config(cfg)
+            provider = secret_provider or get_provider_from_config(cfg)
             sv = provider.get_secret(secret_ref)
             if sv is not None:
                 return sv.value
         except Exception:
             pass
+    configured_key = cfg.get("model.api_key", "")
+    if configured_key:
+        return configured_key
     api_key_env = cfg.get("model.api_key_env", "MODEL_API_KEY")
     return os.environ.get(api_key_env, "")
 
@@ -110,7 +123,7 @@ def build_model_adapter_from_config(
     provider = cfg.get("model.provider", "mock")
     if provider == "mock":
         return None
-    api_key = _resolve_api_key(cfg)
+    api_key = _resolve_api_key(cfg, secret_provider)
     timeout = int(cfg.get("model.timeout_seconds", "60"))
     adapter = get_adapter(
         provider=provider,
@@ -119,7 +132,14 @@ def build_model_adapter_from_config(
         base_url=cfg.get("model.base_url", ""),
         timeout_sec=timeout,
     )
-    return adapter  # type: ignore[return-value]
+    candidate = ModelCandidate(
+        provider=provider,
+        model=adapter.model,
+        capabilities={"chat", "tools"},
+        context_window=32_768,
+    )
+    router = ModelRouter([candidate])
+    return RoutedModelAdapter(router, lambda _candidate: adapter)
 
 
 def doctor() -> list[dict[str, str]]:
@@ -201,9 +221,14 @@ def doctor() -> list[dict[str, str]]:
                 "check": "secret_ref", "status": "warn",
                 "detail": f"secret_ref '{secret_ref}' error resolving",
             })
+    elif provider != "mock" and cfg.get("model.api_key", ""):
+        results.append({
+            "check": "model.api_key", "status": "ok",
+            "detail": "configured in file (redacted)",
+        })
     elif provider != "mock":
         api_key_env = cfg.get("model.api_key_env", "MODEL_API_KEY")
-        val = os.environ.get(api_key_env)
+        val = os.environ.get(api_key_env) if api_key_env else None
         if val:
             results.append({
                 "check": "api_key_env", "status": "ok",

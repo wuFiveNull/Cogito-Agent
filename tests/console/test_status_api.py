@@ -21,7 +21,7 @@ class TestStatusAPI:
     def test_status_version(self) -> None:
         resp = client.get("/api/v1/status")
         data = resp.json()
-        assert data["version"] == "0.9.0-dev"
+        assert data["version"] == "0.16.0-dev"
 
     def test_status_db_fields(self) -> None:
         resp = client.get("/api/v1/status")

@@ -187,6 +187,5 @@ Run against live API server via subprocess with curl-like HTTP requests.
 5. **No Web UI / TUI**, no Telegram/Feishu channels, no multi-agent workspace, no plugin runtime.
 6. **MockModel**: the test adapter does not produce realistic streaming output (word-split, not token-split). Suitable for event validation only.
 
-## Next Architecture Gaps
-
-See [docs/14_ARCHITECTURE_REQUIREMENTS_GAP_REVIEW.md](14_ARCHITECTURE_REQUIREMENTS_GAP_REVIEW.md) for the full gap analysis against the architecture design document.
+The limitations above describe the v0.5 implementation and are retained as historical
+release context. Several were addressed in later releases.

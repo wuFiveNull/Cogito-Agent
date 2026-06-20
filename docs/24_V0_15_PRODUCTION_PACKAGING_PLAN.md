@@ -1,6 +1,6 @@
 # v0.15.0 — Production Packaging Plan (DRAFT)
 
-**Status:** 🔵 **Draft — Not Implemented**
+**Status:** 🟢 **部分实现 — v0.15 最小闭环完成 (2026-06-19)**
 **Date:** 2026-06-18
 
 ---
@@ -14,9 +14,9 @@ Harden Cogito-Agent for local production use by addressing reliability, packagin
 ## Proposed Items
 
 ### 1. Pip Packaging & Distribution
-- [ ] Verify `pyproject.toml` entry points and dependencies
-- [ ] Ensure console templates/static files are included in wheel (`package-data` already configured)
-- [ ] Add `console_scripts` or `scripts` entry for `cogito-daemon` as a proper service wrapper
+- [x] Verify `pyproject.toml` entry points and dependencies
+- [x] Ensure console templates/static files and SQL migrations are included in wheel
+- [x] Add `cogito-daemon` as a configuration-driven service wrapper
 - [ ] Add `cogito` to PyPI (or keep as GitHub-only artifact)
 - [ ] Move `docs_zh/`, `private/`, `secrets/` to `.gitignore` or dedicated `.gitattributes export-ignore`
 
@@ -27,44 +27,47 @@ Harden Cogito-Agent for local production use by addressing reliability, packagin
 - [ ] Test `cogito migrate` on clean Windows install
 
 ### 3. Daemon & Service Management
-- [ ] Windows: `cogito service install` / `cogito service uninstall` using pywin32
-- [ ] Linux: systemd unit file generation (`cogito service install --systemd`)
-- [ ] macOS: launchd plist generation
-- [ ] `cogito daemon run` should handle SIGHUP/SIGTERM/SIGINT gracefully
-- [ ] PID file management
+- [x] Windows: `cogito service install` / `cogito service uninstall` using optional pywin32
+- [x] Linux: systemd user unit generation (`cogito service install --systemd`)
+- [x] macOS: launchd LaunchAgent generation
+- [x] `cogito-daemon` handles SIGHUP/SIGTERM/SIGINT gracefully
+- [x] Atomic PID file management with stale-owner recovery
 
 ### 4. Logging & Observability
-- [ ] Structured logging (JSON lines) for production log aggregation
-- [ ] Log rotation: `cogito config set logging.max_size 10MB`, `logging.backup_count 5`
-- [ ] Health check endpoint: `GET /api/v1/health` returns 200/503
+- [x] Structured logging (JSON lines) for production log aggregation
+- [x] Log rotation: `cogito config set logging.max_size 10MB`, `logging.backup_count 5`
+- [x] Health check endpoint: `GET /api/v1/health` returns 200/503
 - [ ] Prometheus metrics: `/api/v1/metrics` with counters for traces, audits, skills, drift runs
 
 ### 5. Configuration File
-- [ ] YAML/TOML config file at `~/.cogito/config.toml` (read on startup)
-- [ ] `cogito config init` creates default config
-- [ ] Merge precedence: CLI flags > env vars > config file > defaults
+- [x] TOML config file at `~/.cogito/config.toml` (read on startup)
+- [x] `cogito config init` creates and validates default config
+- [x] Merge precedence: CLI flags > env vars > config file > defaults
 - [ ] Config file watching: hot-reload on file change (or SIGHUP)
 
 ### 6. Database Maintenance
-- [ ] Auto-vacuum: `cogito config set storage.auto_vacuum 1` (after export/backup)
-- [ ] WAL mode: `PRAGMA journal_mode=WAL` for concurrent read/write
-- [ ] Backup scheduler: `cogito config set backup.schedule daily` — auto-backup on daemon tick
+- [x] busy_timeout: `PRAGMA busy_timeout=5000` for concurrent access
+- [x] WAL mode: `PRAGMA journal_mode=WAL` for concurrent read/write
+- [x] Auto-vacuum and SQLite optimize/checkpoint: config driven
+- [x] Bounded backup scheduler integrated with the daemon maintenance worker
 
 ### 7. Security Hardening
-- [ ] Rate limiting on API endpoints
-- [ ] CORS configuration (allow specific origins)
-- [ ] Request size limits on API payloads
-- [ ] Input validation hardening (current: Pydantic models)
+- [x] Configurable rate limiting on API endpoints
+- [x] CORS configuration (allow specific origins)
+- [x] Request size limits on API payloads
+- [x] Input validation hardening (Pydantic models)
 - [ ] Session timeout / expiry for console sessions
+- [x] CSRF protection for console forms
+- [x] CSP, X-Content-Type-Options, Referrer-Policy, frame-ancestors headers
 
 ### 8. Error Reporting
 - [ ] Optional Sentry integration (`cogito config set error_reporting.provider sentry`)
-- [ ] Local error log with rotatable file handler
-- [ ] Error aggregation endpoint for CLI diagnostics
+- [x] Local error log with rotatable file handler
+- [x] Redacted `cogito diagnostics create` bundle with DB health and bounded log tail
 
 ### 9. Multi-Arch Testing
 - [ ] Test on Windows (x64), macOS (arm64), Linux (x64/arm64)
-- [ ] CI matrix for 3 platforms
+- [x] CI matrix configured for Windows/Linux/macOS and Python 3.12/3.13 (first hosted run pending)
 - [ ] Address platform-specific path, encoding, and file system issues
 
 ---
@@ -99,7 +102,7 @@ Harden Cogito-Agent for local production use by addressing reliability, packagin
 
 - [ ] `pip install cogito-agent` works on Windows, macOS, Linux
 - [ ] `cogito migrate` succeeds on fresh install
-- [ ] `cogito daemon run` works as a background service
+- [x] Service definitions and daemon wrapper are implemented; hosted platform smoke runs remain pending
 - [ ] `cogito doctor` shows no security risks
-- [ ] 1200+ tests passing, ruff clean, mypy clean
-- [ ] No secrets leaked in logs, traces, audit, or backup (default)
+- [x] 1422 tests passing, 4 skipped; Ruff clean; strict Mypy clean (132 source files)
+- [x] No secrets leaked in logs, traces, audit, or backup (default)

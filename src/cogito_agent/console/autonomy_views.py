@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -97,7 +98,7 @@ async def autonomy_dashboard(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "menu": _menu_items(),
     }
@@ -140,7 +141,7 @@ async def decisions_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy Decisions",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "action": action,
         "reason_code": reason_code,
@@ -200,7 +201,7 @@ async def decision_detail(request: Request, decision_id: str) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Decision Detail",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "decision": decision,
         "event_metadata_raw": "",
         "outbox_messages": outbox_msgs,
@@ -317,7 +318,7 @@ async def outbox_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy Outbox",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "status": status,
         "q": q,
@@ -355,7 +356,7 @@ async def outbox_detail(request: Request, message_id: str) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Outbox Detail",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "msg": msg,
         "raw_json": raw_json,
         "menu": _menu_items(),
@@ -397,7 +398,7 @@ async def feedback_page(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Autonomy Feedback",
-        "version": "0.11.0-dev",
+        "version": APP_VERSION,
         "stats": stats,
         "value": value,
         "decision_id": decision_id,

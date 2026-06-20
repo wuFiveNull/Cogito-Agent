@@ -1,0 +1,63 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install ".[dev]"
+      - run: python -m pytest
+      - run: python -m ruff check src
+      - run: python -m mypy src
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build --wheel
+      - run: python -m pip install --target installed dist/*.whl
+      - name: Verify installed wheel
+        env:
+          PYTHONPATH: installed
+        working-directory: installed
+        run: >-
+          python -c "import cogito_agent;
+          from cogito_agent.storage import Database;
+          from cogito_agent.skill.builtin.loader import BuiltinSkillLoader;
+          db=Database('smoke.db'); db.initialize();
+          assert len(BuiltinSkillLoader(db).load_all()) == 6;
+          assert cogito_agent.__version__ == '0.16.0-dev'; db.close()"
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install ".[dev,e2e]"
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest tests/browser -m browser_e2e

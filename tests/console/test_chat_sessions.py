@@ -12,12 +12,16 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def _reset_db() -> None:
+def _reset_db(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared database singleton before each test."""
     import sys
     api_mod = sys.modules["cogito_agent.api.app"]
     api_mod._db = None
     api_mod._kernel = None
+    monkeypatch.setattr(
+        "cogito_agent.cli.config_manager.build_model_adapter_from_config",
+        lambda: None,
+    )
     _ensure_default_workspace()
     yield
 
@@ -236,8 +240,10 @@ class TestChatSessionSecurity:
         resp = client.get(f"/console/chat/sessions/{sess_id}")
         assert resp.status_code == 200
         html = resp.text
-        assert "&lt;script&gt;" in html
-        assert "<script>" not in html
+        # User-provided content must be HTML-escaped
+        assert "&lt;script&gt;alert" in html
+        # Raw user-controlled script tag should NOT appear
+        assert "<script>alert('xss')</script>" not in html
 
     def test_auth_protects_session_routes(self) -> None:
         from cogito_agent.storage.repositories import WorkspaceRepository

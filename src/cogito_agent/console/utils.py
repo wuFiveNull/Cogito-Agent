@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+from fastapi import Request
 
-def menu_items() -> list[dict[str, str | bool]]:
+from cogito_agent.console.context import MenuItem
+
+
+def csrf_token_input(request: Request) -> str:
+    token = getattr(request.state, "csrf_token", "")
+    if not token:
+        return ""
+    return f'<input type="hidden" name="csrf_token" value="{token}">'
+
+
+def menu_items() -> list[MenuItem]:
     return [
         {"label": "Dashboard", "href": "/console/", "icon": "home"},
+        {"label": "Overview", "href": "/console/overview", "icon": "check"},
         {"label": "Chat", "href": "/console/chat", "icon": "chat"},
         {"label": "Inbox", "href": "/console/inbox", "icon": "inbox"},
         {"label": "Memory", "href": "/console/memory", "icon": "memory"},

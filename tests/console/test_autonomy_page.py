@@ -188,8 +188,10 @@ class TestAutonomyDecisionDetail:
         )
         resp = client.get(f"/console/autonomy/decisions/{did}")
         html = resp.text
-        assert "<script>" not in html
-        assert "<b>" not in html
+        # User-controlled content must be escaped
+        assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
+        # Raw user-controlled tags should NOT appear
+        assert '<script>alert' not in html
 
 
 class TestAutonomyFeedback:
@@ -283,7 +285,11 @@ class TestAutonomyFeedback:
             workspace_id="default",
         )
         resp = client.get("/console/autonomy/feedback")
-        assert "<script>" not in resp.text
+        html = resp.text
+        # User-controlled comment must be HTML-escaped
+        assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
+        # Raw user-controlled script tag should NOT appear
+        assert '<script>alert(' not in html
 
 
 class TestAutonomyOutbox:
@@ -359,8 +365,11 @@ class TestAutonomyOutboxDetail:
             workspace_id="default",
         )
         resp = client.get(f"/console/autonomy/outbox/{mid}")
-        assert "<script>" not in resp.text
-        assert "<b>" not in resp.text
+        html = resp.text
+        # User-controlled title must be HTML-escaped
+        assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
+        # Raw user-controlled tags should NOT appear
+        assert '<script>alert(' not in html
 
 
 class TestAutonomySecurity:

@@ -7,6 +7,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from cogito_agent.version import APP_VERSION
+
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
 
@@ -125,7 +127,7 @@ def _env_summary() -> dict[str, str]:
     from cogito_agent.cli.config_manager import CONFIG_PATH
     from cogito_agent.storage import Database
     result: dict[str, str] = {
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", "0.9.0-dev"),
+        "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
         "python_version": sys.version.split()[0],
         "platform": sys.platform,
         "config_path": CONFIG_PATH,
@@ -169,7 +171,7 @@ async def config_page(request: Request) -> HTMLResponse:
     ctx: dict[str, object] = {
         "request": request,
         "title": "Configuration",
-        "version": "0.9.0-dev",
+        "version": APP_VERSION,
         "sections": sections,
         "menu": _menu_items(),
     }

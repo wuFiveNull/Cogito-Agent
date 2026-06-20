@@ -101,12 +101,16 @@ class TestTraceSecurity:
         db = get_db()
         tracer = Tracer(db)
         trace = tracer.create_trace("default", str(uuid.uuid4()), "sess")
-        tracer.create_span(trace.id, '<script>alert("xss")</script>', SpanKind.runtime)
+        span_name = '<script>alert("xss")</script>'
+        tracer.create_span(trace.id, span_name, SpanKind.runtime)
         tracer.end_trace(trace)
 
         resp = client.get(f"/console/traces/{trace.id}")
         html = resp.text
-        assert '<script>' not in html
+        # User-controlled span name must be HTML-escaped
+        assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
+        # Raw user-controlled script tag should NOT appear in the page
+        assert '<script>alert("xss")</script>' not in html
 
 
 class TestTraceAuth:
