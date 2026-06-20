@@ -13,3 +13,5 @@ cogito_demo.db
 .pytest-*/
 .pytest_codex_tmp/
 .server-*.log
+configs/default.yaml
+pic/
