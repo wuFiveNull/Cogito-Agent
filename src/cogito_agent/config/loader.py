@@ -150,16 +150,68 @@ class RuntimeSettings(BaseModel):
     turn_timeout_seconds: int = 120
 
 
-class MemoryRetrievalSettings(BaseModel):
-    bm25_top_k: int = 8
-    vector_top_k: int = 0
-    final_top_k: int = 6
+class EmbeddingSettings(BaseModel):
+    provider: str = "mock"
+    base_url: str = ""
+    model: str = "all-MiniLM-L6-v2"
+    expected_dimension: int = 0
+    api_key_secret_name: str = ""
+    api_key_env: str = "OPENAI_API_KEY"
+    encoding_format: str = "float"
+    timeout_seconds: float = 30.0
+    connect_timeout_seconds: float = 10.0
+    max_retries: int = 3
+    batch_size: int = 32
+    normalize: bool = True
+    verify_norm: bool = True
+    allow_mock_fallback: bool = False
+    max_input_tokens: int = 8192
+
+
+class RetrievalWeightsSettings(BaseModel):
+    dense: float = 0.35
+    sparse: float = 0.30
+    recency: float = 0.10
+    confidence: float = 0.10
+    task_relevance: float = 0.10
+    type_priority: float = 0.05
+
+
+class TypePolicySettings(BaseModel):
+    threshold: float = 0.50
+    max_items: int = 3
+    resident_eligible: bool = False
+
+
+class RetrievalSettings(BaseModel):
+    enabled: bool = True
+    default_mode: str = "hybrid"
+    result_limit: int = 10
+    sparse_candidate_limit: int = 40
+    dense_candidate_limit: int = 40
+    resident_token_budget: int = 500
+    dynamic_token_budget: int = 1000
+    min_final_score: float = 0.20
+    recency_half_life_days: float = 90.0
+    query_recent_user_turns: int = 2
+    weights: RetrievalWeightsSettings = Field(default_factory=RetrievalWeightsSettings)
+    type_policy: dict[str, TypePolicySettings] = Field(default_factory=lambda: {
+        "profile": TypePolicySettings(threshold=0.35, max_items=2, resident_eligible=True),
+        "preference": TypePolicySettings(threshold=0.40, max_items=3, resident_eligible=True),
+        "project": TypePolicySettings(threshold=0.50, max_items=4, resident_eligible=False),
+        "task": TypePolicySettings(threshold=0.50, max_items=4, resident_eligible=False),
+        "relationship": TypePolicySettings(threshold=0.50, max_items=2, resident_eligible=True),
+        "episodic": TypePolicySettings(threshold=0.58, max_items=3, resident_eligible=False),
+        "skill": TypePolicySettings(threshold=0.60, max_items=2, resident_eligible=False),
+        "general": TypePolicySettings(threshold=0.60, max_items=2, resident_eligible=False),
+    })
 
 
 class MemorySettings(BaseModel):
     enabled: bool = True
     write_mode: str = "candidate_requires_approval"
-    retrieval: MemoryRetrievalSettings = Field(default_factory=MemoryRetrievalSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
 
 
 class CogitoConfig(BaseModel):
@@ -186,6 +238,10 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "COGITO_MAX_REQUEST_SIZE": ("security.max_request_size", int),
     "COGITO_CSRF_ENABLED": ("security.csrf_enabled", bool),
     "COGITO_API_KEY": ("api_key", str),
+    "COGITO_EMBEDDING_PROVIDER": ("memory.embedding.provider", str),
+    "COGITO_EMBEDDING_MODEL": ("memory.embedding.model", str),
+    "COGITO_EMBEDDING_DIMENSION": ("memory.embedding.expected_dimension", int),
+    "COGITO_EMBEDDING_BASE_URL": ("memory.embedding.base_url", str),
 }
 
 

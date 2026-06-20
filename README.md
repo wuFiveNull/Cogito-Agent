@@ -26,6 +26,11 @@ cogito memory review                                  # review pending candidate
 cogito memory edit <id> --text "..."                  # edit a memory
 cogito memory pin <id>                                # pin a memory
 cogito memory merge <src> <tgt>                       # merge memories
+cogito memory embeddings status                       # embedding provider/index status
+cogito memory embeddings doctor                       # check embedding health
+cogito memory embeddings rebuild --workspace default  # rebuild embeddings
+cogito memory embeddings retry-failed --workspace default  # retry failed embeddings
+cogito memory search <query> --explain                # detailed score breakdown
 
 # Skill management & approval workflow
 cogito skill list                                     # list installed skills
@@ -109,7 +114,7 @@ curl -N -X POST http://localhost:8000/chat/stream \
 - **API auth:** Set `COGITO_API_KEY` to enable single-key Bearer token authentication on all endpoints, including `/docs` and `/openapi.json`. When unset, all endpoints are accessible without auth.
 - This is a **single-user, single-key** auth scheme — not OAuth/RBAC.
 - **Secret backends:** Default is `DevSqliteSecretProvider` (plaintext SQLite, dev only). For production, use `cogito config set secrets.backend local_encrypted` (requires `pip install cryptography`) or `cogito config set secrets.backend keychain` (OS keychain via `keyring` library). See `cogito doctor` for security risk assessment.
-- **Limitations:** No multi-user / OAuth / RBAC. No config editing (read-only). No real Telegram / Feishu delivery (outbox is local SQLite queue). No advanced diagnostics or diagnostic bundle export. No Plugin Marketplace. No cloud sync or distributed queue. `cogito daemon run` is blocking (no background process management). No LLM relevance judge for autonomy decisions (deterministic rules only). Session title editing not yet available in the UI. Memory vector search uses MockEmbeddingService fallback (deterministic hash) when `sentence-transformers` is not installed — install `sentence-transformers` for real semantic embeddings.
+- **Limitations:** No multi-user / OAuth / RBAC. No config editing (read-only). No real Telegram / Feishu delivery (outbox is local SQLite queue). No advanced diagnostics or diagnostic bundle export. No Plugin Marketplace. No cloud sync or distributed queue. `cogito daemon run` is blocking (no background process management). No LLM relevance judge for autonomy decisions (deterministic rules only). Session title editing not yet available in the UI.
 - **/chat/stream** uses true per-token streaming when the model adapter supports it (`supports_streaming=True` and `stream_chat()`). Falls back to single-delta emission for non-streaming adapters.
 - Streaming tool calls (v0.10): `process_stream()` now yields `tool_call_started` and `tool_call_completed` SSE events during tool dispatch, with full governance pipeline (policy, approval, audit, trace, redaction). Tools are dispatched in a multi-round loop up to `max_tool_rounds` (default 3).
 
@@ -119,8 +124,8 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.16.0-dev (Reasoning & Console Foundation)** — v0.15 Production Foundation plus typed Console services, the local design system and Overview page, deterministic Model Router/fallback, evidence-aware ContextItems, derived incremental summaries, and ResultComposer. Phase 3 Chat Workspace remains in development.
-Verified baseline: **1433 tests passed, 4 skipped** under Python 3.11; Python 3.12/3.13 hosted release verification remains required.
+**v0.16.0-dev (BGE-M3 Embedding + Memory Retrieval V2)** — Memory Retrieval V2 with OpenAI-compatible embedding API (BAAI/bge-m3, 1024-dim), dual independent dense/sparse recall, Retrieval Gate, QueryBuilder, CandidateFusion with score breakdown, resident memory layer, type threshold/quota, MemoryEmbeddingIndexService, retry-failed/purge-stale, RetrievalTrace persistence, CLI embed doctor/rebuild, API `/memories/embeddings/status` etc.
+Verified baseline: **1433+ tests passed, 4 skipped** under Python 3.11; Python 3.12/3.13 hosted release verification remains required.
 Includes: v0.14.0 Real Skills + Drift Runtime, v0.13.0 Workspace Files + Artifacts, v0.11.0 Delivery Hardening, v0.10.0 Hybrid Memory + Streaming Tools + Tool Loop, v0.9.0 Multi-Session Chat, v0.8.0 Console MVP, v0.7.0 Autonomy Plane MVP.
 
 ## Development

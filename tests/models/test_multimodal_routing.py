@@ -26,11 +26,11 @@ from cogito_agent.models.codec import (
     get_codec_for_provider,
 )
 from cogito_agent.models.provider_errors import ProviderErrorCode
-from cogito_agent.shared.multimodal import (
+from cogito_agent.models.messages import (
     ChatMessage,
     ImagePart,
-    TextPart,
     MessageRole,
+    TextPart,
 )
 
 

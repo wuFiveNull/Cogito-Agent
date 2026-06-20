@@ -1,14 +1,6 @@
 from .calls import ModelCall, ToolCall
 from .events import EventSource, EventType, RuntimeEvent
 from .manifests import CapabilityManifest, CapabilityType, Permission, RiskLevel
-from .multimodal import (
-    ChatMessage,
-    ContentPart,
-    FilePart,
-    ImagePart,
-    MessageRole,
-    TextPart,
-)
 from .policy import DecisionType, PolicyDecision, PolicyRequest
 from .schedule import JobStatus, ScheduleJob
 from .skill import OnError, SkillManifest, SkillRiskLevel, SkillStep, StepKind
@@ -26,6 +18,4 @@ __all__ = [
     "StreamEvent", "StreamEventType",
     "SkillManifest", "SkillStep", "SkillRiskLevel", "StepKind", "OnError",
     "ScheduleJob", "JobStatus",
-    "ChatMessage", "ContentPart", "FilePart", "ImagePart",
-    "MessageRole", "TextPart",
 ]

@@ -35,6 +35,57 @@ def _run_memory_search(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
     db.initialize()
+    db.migrate()
+
+    if getattr(ns, "explain", False):
+        from cogito_agent.config import Settings
+        from cogito_agent.embedding.service import create_embedding_provider_from_config
+        from cogito_agent.retrieval import MemoryRetrievalService
+        from cogito_agent.retrieval.dense import DenseMemoryRetriever
+        from cogito_agent.retrieval.sparse import SparseMemoryRetriever
+
+        cfg = Settings.get()
+        provider = create_embedding_provider_from_config(cfg.memory.embedding)
+        svc = MemoryRetrievalService(
+            db=db,
+            provider=provider,
+            sparse_retriever=SparseMemoryRetriever(db),
+            dense_retriever=DenseMemoryRetriever(db, provider),
+            retrieval_config=cfg.memory.retrieval,
+        )
+        explain = svc.explain_search(ns.workspace_id, ns.query, limit=20)
+        print(f"  Trace ID:         {explain.get('trace_id', '')}")
+        print(f"  Retrieval mode:   {explain['mode']}")
+        print(f"  Gate mode:        {explain.get('gate_mode', '')}")
+        if explain.get("degraded_reason"):
+            print(f"  Degraded reason:  {explain['degraded_reason']}")
+        print(f"  Sparse candidates: {explain['sparse_candidate_count']}")
+        print(f"  Dense candidates:  {explain['dense_candidate_count']}")
+        print(f"  Union candidates:  {explain['union_candidate_count']}")
+        print(f"  Selected:          {explain['selected_count']}")
+        print(f"  Resident:          {explain['resident_count']}")
+        if explain.get("embedding_provider"):
+            emb = explain
+            print(
+                f"  Embedding:         {emb['embedding_provider']}/"
+                f"{emb['embedding_model']} dim={emb['embedding_dimension']}"
+            )
+        if explain.get("score_breakdowns"):
+            print("  Score breakdowns:")
+            for mid, breakdown in explain["score_breakdowns"].items():
+                print(
+                    f"    {mid}: dense={breakdown['dense_score']:.4f} "
+                    f"sparse={breakdown['sparse_score']:.4f} "
+                    f"recency={breakdown['recency_score']:.4f} "
+                    f"final={breakdown['final_score']:.4f}"
+                )
+        if explain.get("selected"):
+            print("  Selected memories:")
+            for m in explain["selected"]:
+                print(f"    [{m['type']}] ({m['source']}) {m['id'][:8]}  {m['text']}")
+        db.close()
+        return
+
     retriever = MemoryRetriever(db)
     results = retriever.search(ns.workspace_id, ns.query, limit=20)
     if not results:
@@ -295,4 +346,160 @@ def _run_memory_merge(args: Any) -> None:
         )
     else:
         print("  One or both memories not found.")
+    db.close()
+
+
+def _run_embeddings_status(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding import MemoryEmbeddingIndexService
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    if provider is None:
+        print("  Embedding provider: disabled")
+        db.close()
+        return
+
+    svc = MemoryEmbeddingIndexService(db, provider)
+    ws = ns.workspace_id or "default"
+    s = svc.status(ws)
+    print(f"  Provider:       {s['provider']}")
+    print(f"  Model:          {s['model']}")
+    print(f"  Dimension:      {s['dimension']}")
+    print(f"  Is semantic:    {s['is_semantic']}")
+    print(f"  Version:        {s['embedding_version']}")
+    print(f"  Ready:          {s['ready']}")
+    print(f"  Pending:        {s['pending']}")
+    print(f"  Failed:         {s['failed']}")
+    print(f"  Stale:          {s['stale']}")
+    print(f"  Total memories: {s['total_memories']}")
+    print(f"  Coverage:       {s['coverage_pct']}%")
+    db.close()
+
+
+def _run_embeddings_doctor(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    es = cfg.memory.embedding
+    print(f"  Config provider: {es.provider}")
+    print(f"  Config model:    {es.model}")
+    print(f"  Config base_url: {es.base_url or '(none)'}")
+    secret_available = False
+    if es.api_key_secret_name:
+        print(f"  Secret name:     {es.api_key_secret_name}")
+    if es.api_key_env:
+        import os
+        secret_available = bool(os.environ.get(es.api_key_env))
+        status = "available" if secret_available else "unavailable"
+        print(f"  API key env:     {es.api_key_env} -> {status}")
+
+    try:
+        provider = create_embedding_provider_from_config(es)
+    except Exception as e:
+        print(f"  Provider init:   FAILED - {e}")
+        db.close()
+        return
+
+    if provider is None:
+        print("  Provider:        disabled (sparse-only)")
+        db.close()
+        return
+
+    health = provider.health_check()
+    print("  Provider init:   OK")
+    print(f"  Health:          {'healthy' if health.healthy else 'UNHEALTHY'}")
+    print(f"  Provider name:   {health.provider_name}")
+    print(f"  Model:           {health.model_name}")
+    print(f"  Dimension:       {health.dimension}")
+    print(f"  Is semantic:     {health.is_semantic}")
+    if not health.healthy:
+        print(f"  Error:           {health.error_message}")
+    db.close()
+
+
+def _run_embeddings_rebuild(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding import MemoryEmbeddingIndexService
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    if provider is None:
+        print("  Embedding provider not available.")
+        db.close()
+        return
+
+    svc = MemoryEmbeddingIndexService(db, provider)
+    ws = ns.workspace_id or "default"
+    batch = ns.batch_size or 32
+    force = getattr(ns, "force", False)
+    result = svc.rebuild_workspace(ws, force=force, batch_size=batch)
+    print(f"  Workspace:    {result['workspace_id']}")
+    print(f"  Total:        {result['total']}")
+    print(f"  Indexed:      {result['indexed']}")
+    print(f"  Failed:       {result['failed']}")
+    print(f"  Skipped:      {result['skipped']}")
+    if result["failed"] > 0:
+        print("  WARNING: Some embeddings failed!")
+    db.close()
+
+
+def _run_embeddings_retry_failed(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding import MemoryEmbeddingIndexService
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    if provider is None:
+        print("  Embedding provider not available.")
+        db.close()
+        return
+
+    svc = MemoryEmbeddingIndexService(db, provider)
+    ws = ns.workspace_id or "default"
+    result = svc.retry_failed(ws)
+    print(f"  Retried: {result['succeeded']} succeeded, {result['failed']} failed")
+    db.close()
+
+
+def _run_embeddings_purge_stale(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding import MemoryEmbeddingIndexService
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    if provider is None:
+        print("  Embedding provider not available.")
+        db.close()
+        return
+
+    svc = MemoryEmbeddingIndexService(db, provider)
+    ws = ns.workspace_id or "default"
+    count = svc.purge_stale(ws)
+    print(f"  Purged {count} stale embedding(s)")
     db.close()

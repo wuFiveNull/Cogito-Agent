@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn>=0.27",
     "python-json-logger>=2.0",
     "Pillow>=10.0",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

@@ -160,6 +160,8 @@ register_migration(13, """
 """)
 register_migration(14, _load_migration_sql("0014_vision_attachments.sql"))
 register_migration(15, _load_migration_sql("0015_meme_assets.sql"))
+register_migration(16, _load_migration_sql("0016_embeddings_v2.sql"))
+register_migration(17, _load_migration_sql("0017_retrieval_traces.sql"))
 
 register_migration(10, """
     CREATE TABLE IF NOT EXISTS drift_runs (

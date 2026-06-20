@@ -99,6 +99,12 @@ class WorkspaceRepository:
             self._db.connection.execute(
                 "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
             )
+            try:
+                self._db.connection.execute(
+                    "DELETE FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
+                )
+            except Exception:
+                pass
             cur2 = self._db.connection.execute(
                 "SELECT rowid FROM memories WHERE id = ?", (mid,)
             )
@@ -382,6 +388,12 @@ class MemoryRepository:
         self._db.connection.execute(
             "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
         )
+        try:
+            self._db.connection.execute(
+                "DELETE FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
+            )
+        except Exception:
+            pass
         self._db.connection.commit()
 
     def unarchive(self, mid: str, workspace_id: str) -> bool:
@@ -788,6 +800,12 @@ class MemoryEditRepository:
         self._db.connection.execute(
             "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
         )
+        try:
+            self._db.connection.execute(
+                "DELETE FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
+            )
+        except Exception:
+            pass
         self._db.connection.execute(
             "DELETE FROM memories WHERE id = ? AND workspace_id = ?",
             (mid, workspace_id),

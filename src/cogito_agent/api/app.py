@@ -1029,6 +1029,63 @@ def delete_memory(mid: str, workspace_id: str, request: Request) -> dict[str, st
     return {"status": "deleted"}
 
 
+# --- Memory Embedding endpoints ---
+
+
+@app.get("/memories/embeddings/status")
+def memory_embeddings_status(workspace_id: str = "default") -> dict[str, object]:
+    db = get_db()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding import MemoryEmbeddingIndexService
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    if provider is None:
+        return {"provider": "disabled", "status": "sparse_only"}
+    svc = MemoryEmbeddingIndexService(db, provider)
+    return svc.status(workspace_id)
+
+
+@app.post("/memories/embeddings/rebuild")
+def memory_embeddings_rebuild(
+    workspace_id: str = "default", force: bool = False,
+) -> dict[str, object]:
+    db = get_db()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding import MemoryEmbeddingIndexService
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    if provider is None:
+        return {"status": "error", "message": "No embedding provider configured"}
+    svc = MemoryEmbeddingIndexService(db, provider)
+    return svc.rebuild_workspace(workspace_id, force=force)
+
+
+@app.post("/memories/search/explain")
+def memory_search_explain(
+    workspace_id: str, query: str, limit: int = 10,
+) -> dict[str, object]:
+    db = get_db()
+    from cogito_agent.config import Settings
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+    from cogito_agent.retrieval import MemoryRetrievalService
+    from cogito_agent.retrieval.dense import DenseMemoryRetriever
+    from cogito_agent.retrieval.sparse import SparseMemoryRetriever
+
+    cfg = Settings.get()
+    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    svc = MemoryRetrievalService(
+        db=db, provider=provider,
+        sparse_retriever=SparseMemoryRetriever(db),
+        dense_retriever=DenseMemoryRetriever(db, provider),
+        retrieval_config=cfg.memory.retrieval,
+    )
+    return svc.explain_search(workspace_id, query, limit=limit)
+
+
 # --- Approval endpoints ---
 
 @app.get("/approvals")

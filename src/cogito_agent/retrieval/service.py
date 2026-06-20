@@ -1,0 +1,419 @@
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+from cogito_agent.storage import Database
+
+from ..embedding.interface import EmbeddingProvider
+from .dense import DenseMemoryRetriever
+from .fusion import CandidateFusion
+from .gate import RetrievalGate, RetrievalGateResult
+from .query import MemoryQueryBuilder, MemoryQueryContext
+from .resident import ResidentMemorySelector
+from .sparse import SparseMemoryRetriever
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MemoryRecallResult:
+    resident_memories: list[dict[str, object]] = field(default_factory=list)
+    dynamic_memories: list[dict[str, object]] = field(default_factory=list)
+    mode: str = "hybrid"
+    gate_mode: str = ""
+    degraded_reason: str = ""
+    sparse_candidate_count: int = 0
+    dense_candidate_count: int = 0
+    union_candidate_count: int = 0
+    selected_count: int = 0
+    resident_count: int = 0
+    embedding_provider: str = ""
+    embedding_model: str = ""
+    embedding_dimension: int = 0
+    embedding_version: str = "2"
+    trace_id: str = ""
+    score_breakdowns: dict[str, dict[str, float]] = field(default_factory=dict)
+    excluded: list[dict[str, str]] = field(default_factory=list)
+    latencies: dict[str, float] = field(default_factory=dict)
+
+    def to_legacy_result(self) -> list[dict[str, object]]:
+        result: list[dict[str, object]] = []
+        for mem in self.resident_memories:
+            entry = dict(mem)
+            entry["retrieval_source"] = "resident"
+            result.append(entry)
+        for mem in self.dynamic_memories:
+            entry = dict(mem)
+            entry["retrieval_source"] = "dynamic"
+            result.append(entry)
+        return result
+
+
+class MemoryRetrievalService:
+    def __init__(
+        self,
+        db: Database,
+        provider: EmbeddingProvider | None = None,
+        sparse_retriever: SparseMemoryRetriever | None = None,
+        dense_retriever: DenseMemoryRetriever | None = None,
+        query_builder: MemoryQueryBuilder | None = None,
+        gate: RetrievalGate | None = None,
+        resident_selector: ResidentMemorySelector | None = None,
+        fusion: CandidateFusion | None = None,
+        retrieval_config: Any = None,
+    ) -> None:
+        self._db = db
+        self._sparse = sparse_retriever or SparseMemoryRetriever(db)
+        self._dense = dense_retriever or DenseMemoryRetriever(db, provider)
+        self._query_builder = query_builder or MemoryQueryBuilder()
+        self._gate = gate or RetrievalGate()
+        self._resident = resident_selector or ResidentMemorySelector(db)
+        self._fusion = fusion or CandidateFusion()
+        self._config = retrieval_config
+
+    @property
+    def provider(self) -> EmbeddingProvider | None:
+        return self._dense.provider
+
+    @provider.setter
+    def provider(self, p: EmbeddingProvider | None) -> None:
+        self._dense.provider = p
+
+    def recall(
+        self,
+        query_context: MemoryQueryContext,
+        limit: int = 10,
+        include_archived: bool = False,
+        force_mode: str = "",
+    ) -> MemoryRecallResult:
+        trace_id = str(uuid.uuid4())
+        result = MemoryRecallResult(trace_id=trace_id)
+        result.embedding_provider = (
+            self._dense.provider.provider_name if self._dense.provider else ""
+        )
+        result.embedding_model = (
+            self._dense.provider.model_name if self._dense.provider else ""
+        )
+        result.embedding_dimension = (
+            self._dense.provider.dimension if self._dense.provider else 0
+        )
+
+        if force_mode:
+            result.mode = force_mode
+            result.gate_mode = force_mode
+            gate_result = RetrievalGateResult(
+                mode=force_mode,
+                original_query=query_context.original_query,
+                enriched_query=query_context.context_enriched_query,
+            )
+        else:
+            gate_result = self._gate.evaluate(query_context)
+            result.mode = gate_result.mode
+            result.gate_mode = gate_result.mode
+
+        config = self._get_config()
+        type_policy = config.get("type_policy", {})
+        dense_candidate_limit = config.get("dense_candidate_limit", 40)
+        sparse_candidate_limit = config.get("sparse_candidate_limit", 40)
+        resident_budget = config.get("resident_token_budget", 500)
+        min_score = config.get("min_final_score", 0.20)
+
+        query = query_context.context_enriched_query or query_context.current_message
+
+        t0 = time.time()
+
+        if gate_result.mode == "no_recall":
+            result.resident_memories = self._resident.select(
+                query_context.workspace_id, resident_budget, type_policy,
+            )
+            result.resident_count = len(result.resident_memories)
+            result.latencies["total"] = (time.time() - t0) * 1000
+            return result
+
+        if gate_result.mode in ("resident_only",):
+            result.resident_memories = self._resident.select(
+                query_context.workspace_id, resident_budget, type_policy,
+            )
+            result.resident_count = len(result.resident_memories)
+            result.latencies["total"] = (time.time() - t0) * 1000
+            return result
+
+        if gate_result.mode == "profile_only":
+            result.resident_memories = self._resident.select(
+                query_context.workspace_id, resident_budget, type_policy,
+            )
+            result.resident_count = len(result.resident_memories)
+            result.latencies["total"] = (time.time() - t0) * 1000
+            return result
+
+        use_sparse = gate_result.mode in ("sparse", "hybrid", "timeline")
+        use_dense = gate_result.mode in ("hybrid", "timeline")
+
+        sparse_candidates: list[dict[str, object]] = []
+        dense_candidates: list[dict[str, object]] = []
+
+        if use_sparse:
+            try:
+                t1 = time.time()
+                sparse_candidates = self._sparse.search(
+                    query_context.workspace_id, query,
+                    limit=sparse_candidate_limit,
+                    include_archived=include_archived,
+                )
+                result.latencies["sparse"] = (time.time() - t1) * 1000
+            except Exception as e:
+                logger.warning("Sparse retrieval failed: %s", e)
+                sparse_candidates = []
+
+        if use_dense:
+            try:
+                t1 = time.time()
+                dense_candidates = self._dense.search(
+                    query_context.workspace_id, query,
+                    limit=dense_candidate_limit,
+                    include_archived=include_archived,
+                )
+                result.latencies["dense"] = (time.time() - t1) * 1000
+            except Exception as e:
+                logger.warning("Dense retrieval failed, degrading to sparse-only: %s", e)
+                result.mode = "degraded"
+                result.degraded_reason = f"Dense retrieval failed: {e}"
+                dense_candidates = []
+
+        if not sparse_candidates and not dense_candidates:
+            result.latencies["total"] = (time.time() - t0) * 1000
+            return result
+
+        result.sparse_candidate_count = len(sparse_candidates)
+        result.dense_candidate_count = len(dense_candidates)
+        result.mode = (
+            "sparse_only" if not dense_candidates else
+            "dense_only" if not sparse_candidates else
+            result.mode
+        )
+
+        fused = self._fusion.fuse(sparse_candidates, dense_candidates, query)
+        result.union_candidate_count = len(fused)
+
+        selected: list[dict[str, object]] = []
+        type_counts: dict[str, int] = {}
+        score_breakdowns: dict[str, dict[str, float]] = {}
+
+        for mem, breakdown in fused:
+            mid = str(mem.get("id", ""))
+            mem_type = str(mem.get("type", "general"))
+
+            policy = type_policy.get(mem_type, {})
+            if isinstance(policy, dict):
+                threshold = policy.get("threshold", min_score)
+                max_items = policy.get("max_items", 99)
+            else:
+                threshold = getattr(policy, "threshold", min_score)
+                max_items = getattr(policy, "max_items", 99)
+
+            if breakdown.final_score < threshold:
+                result.excluded.append({
+                    "memory_id": mid,
+                    "reason": "below_threshold",
+                    "score": f"{breakdown.final_score:.4f}",
+                })
+                continue
+
+            if type_counts.get(mem_type, 0) >= max_items:
+                result.excluded.append({
+                    "memory_id": mid,
+                    "reason": "type_quota",
+                    "type": mem_type,
+                })
+                continue
+
+            score_breakdowns[mid] = {
+                "dense_score": breakdown.dense_score,
+                "sparse_score": breakdown.sparse_score,
+                "recency_score": breakdown.recency_score,
+                "confidence_score": breakdown.confidence_score,
+                "task_relevance_score": breakdown.task_relevance_score,
+                "type_priority_score": breakdown.type_priority_score,
+                "final_score": breakdown.final_score,
+            }
+
+            entry = dict(mem)
+            entry["_score_breakdown"] = score_breakdowns[mid]
+            entry["retrieval_source"] = "dynamic"
+            selected.append(entry)
+            type_counts[mem_type] = type_counts.get(mem_type, 0) + 1
+
+            if len(selected) >= limit:
+                break
+
+        result.dynamic_memories = selected
+        result.selected_count = len(selected)
+        result.score_breakdowns = score_breakdowns
+
+        if gate_result.mode not in ("no_recall", "profile_only"):
+            try:
+                resident = self._resident.select(
+                    query_context.workspace_id, resident_budget, type_policy,
+                )
+                existing_ids = {str(m.get("id", "")) for m in selected}
+                for mem in resident:
+                    if str(mem.get("id", "")) not in existing_ids:
+                        mem["retrieval_source"] = "resident"
+                        result.resident_memories.append(mem)
+                result.resident_count = len(result.resident_memories)
+            except Exception as e:
+                logger.warning("Resident selection failed: %s", e)
+
+        result.latencies["total"] = (time.time() - t0) * 1000
+
+        try:
+            self._persist_trace(result, query_context)
+        except Exception as e:
+            logger.warning("Failed to persist retrieval trace: %s", e)
+
+        return result
+
+    def _persist_trace(
+        self, result: MemoryRecallResult, ctx: MemoryQueryContext,
+    ) -> None:
+        rt_id = result.trace_id or str(uuid.uuid4())
+        try:
+            self._db.connection.execute(
+                "INSERT INTO retrieval_traces"
+                " (id, workspace_id, session_id, gate_mode, original_query,"
+                "  enriched_query, retrieval_mode, degraded_reason,"
+                "  sparse_candidate_count, dense_candidate_count,"
+                "  union_candidate_count, selected_count, resident_count,"
+                "  embedding_provider, embedding_model, embedding_dimension,"
+                "  embedding_version, sparse_latency_ms, dense_latency_ms,"
+                "  total_latency_ms)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    rt_id, ctx.workspace_id, ctx.session_id,
+                    result.gate_mode, ctx.original_query,
+                    ctx.context_enriched_query, result.mode,
+                    result.degraded_reason,
+                    result.sparse_candidate_count, result.dense_candidate_count,
+                    result.union_candidate_count, result.selected_count,
+                    result.resident_count,
+                    result.embedding_provider, result.embedding_model,
+                    result.embedding_dimension, result.embedding_version,
+                    result.latencies.get("sparse", 0.0),
+                    result.latencies.get("dense", 0.0),
+                    result.latencies.get("total", 0.0),
+                ),
+            )
+
+            for mem in result.dynamic_memories:
+                mid = str(mem.get("id", ""))
+                bd = result.score_breakdowns.get(mid, {})
+                self._db.connection.execute(
+                    "INSERT INTO retrieval_trace_results"
+                    " (id, trace_id, memory_id, sparse_score, dense_score,"
+                    "  recency_score, confidence_score, task_relevance_score,"
+                    "  type_priority_score, final_score, inclusion_reason)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()), rt_id, mid,
+                        bd.get("sparse_score", 0.0), bd.get("dense_score", 0.0),
+                        bd.get("recency_score", 0.0), bd.get("confidence_score", 0.0),
+                        bd.get("task_relevance_score", 0.0),
+                        bd.get("type_priority_score", 0.0),
+                        bd.get("final_score", 0.0), "dynamic",
+                    ),
+                )
+
+            for entry in result.excluded:
+                eid = entry.get("memory_id", "")
+                if eid:
+                    self._db.connection.execute(
+                        "INSERT INTO retrieval_trace_results"
+                        " (id, trace_id, memory_id, final_score, excluded_reason)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (
+                            str(uuid.uuid4()), rt_id, eid,
+                            float(entry.get("score", 0.0)),
+                            entry.get("reason", ""),
+                        ),
+                    )
+
+            self._db.connection.commit()
+        except Exception as e:
+            logger.warning("Failed to write retrieval trace rows: %s", e)
+
+    def search_compat(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        include_archived: bool = False,
+        recent_user_messages: list[str] | None = None,
+    ) -> list[dict[str, object]]:
+        ctx = self._query_builder.build(
+            current_message=query,
+            recent_user_messages=recent_user_messages,
+            workspace_id=workspace_id,
+        )
+        recall_result = self.recall(
+            ctx, limit=limit, include_archived=include_archived,
+            force_mode="hybrid",
+        )
+        return recall_result.to_legacy_result()
+
+    def _get_config(self) -> dict[str, Any]:
+        if self._config is not None:
+            if hasattr(self._config, "model_dump"):
+                result = self._config.model_dump()
+                return result if isinstance(result, dict) else {}
+            if hasattr(self._config, "type_policy"):
+                cfg = {}
+                for k in dir(self._config):
+                    if not k.startswith("_"):
+                        cfg[k] = getattr(self._config, k)
+                return cfg
+            return dict(self._config)
+        return {}
+
+    def explain_search(
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
+        recent_user_messages: list[str] | None = None,
+    ) -> dict[str, Any]:
+        ctx = self._query_builder.build(
+            current_message=query,
+            recent_user_messages=recent_user_messages,
+            workspace_id=workspace_id,
+        )
+        result = self.recall(ctx, limit=limit)
+        return {
+            "trace_id": result.trace_id,
+            "mode": result.mode,
+            "gate_mode": result.gate_mode,
+            "degraded_reason": result.degraded_reason,
+            "sparse_candidate_count": result.sparse_candidate_count,
+            "dense_candidate_count": result.dense_candidate_count,
+            "union_candidate_count": result.union_candidate_count,
+            "selected_count": result.selected_count,
+            "resident_count": result.resident_count,
+            "embedding_provider": result.embedding_provider,
+            "embedding_model": result.embedding_model,
+            "embedding_dimension": result.embedding_dimension,
+            "score_breakdowns": result.score_breakdowns,
+            "latencies_ms": result.latencies,
+            "excluded": result.excluded,
+            "selected": [
+                {
+                    "id": str(m.get("id", "")),
+                    "text": str(m.get("text", ""))[:100],
+                    "type": str(m.get("type", "general")),
+                    "source": m.get("retrieval_source", "dynamic"),
+                }
+                for m in result.dynamic_memories + result.resident_memories
+            ],
+        }

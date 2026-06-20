@@ -540,6 +540,7 @@ def run_cli() -> None:
     mem_sub.add_parser("list", help="List memories")
     mem_search = mem_sub.add_parser("search", help="Search memories")
     mem_search.add_argument("query", help="Search query")
+    mem_search.add_argument("--explain", action="store_true", help="Show detailed score breakdown")
     mem_sub.add_parser("review", help="Review pending candidates")
     mem_accept = mem_sub.add_parser("accept", help="Accept a candidate")
     mem_accept.add_argument("candidate_id", help="Candidate ID")
@@ -565,6 +566,20 @@ def run_cli() -> None:
     mem_merge.add_argument("source_memory_id", help="Source memory ID (will be archived)")
     mem_merge.add_argument("target_memory_id", help="Target memory ID (receives merged text)")
     mem_sub.add_parser("consolidate", help="Deduplicate memories")
+
+    # Embeddings subcommands
+    mem_emb = mem_sub.add_parser("embeddings", help="Manage memory embeddings")
+    mem_emb_sub = mem_emb.add_subparsers(dest="embeddings_action", help="Embedding command")
+    mem_emb_sub.add_parser("status", help="Show embedding status")
+    mem_emb_sub.add_parser("doctor", help="Check embedding health")
+    mem_emb_rebuild = mem_emb_sub.add_parser("rebuild", help="Rebuild embeddings")
+    mem_emb_rebuild.add_argument("--workspace", dest="workspace_id", default="default", help="Workspace ID")
+    mem_emb_rebuild.add_argument("--batch-size", dest="batch_size", type=int, default=32, help="Batch size")
+    mem_emb_rebuild.add_argument("--force", action="store_true", help="Force rebuild all")
+    mem_emb_retry = mem_emb_sub.add_parser("retry-failed", help="Retry failed embeddings")
+    mem_emb_retry.add_argument("--workspace", dest="workspace_id", default="default", help="Workspace ID")
+    mem_emb_purge = mem_emb_sub.add_parser("purge-stale", help="Purge stale embeddings")
+    mem_emb_purge.add_argument("--workspace", dest="workspace_id", default="default", help="Workspace ID")
 
     secrets_parser = sub.add_parser("secrets", help="Manage secrets")
     secrets_parser.set_defaults(db_path=None)
@@ -1166,8 +1181,14 @@ def run_cli() -> None:
             text=getattr(args, "text", ""),
             source_memory_id=getattr(args, "source_memory_id", ""),
             target_memory_id=getattr(args, "target_memory_id", ""),
+            explain=getattr(args, "explain", False),
         )
         from .memory import (
+            _run_embeddings_doctor,
+            _run_embeddings_purge_stale,
+            _run_embeddings_rebuild,
+            _run_embeddings_retry_failed,
+            _run_embeddings_status,
             _run_memory_accept,
             _run_memory_archive,
             _run_memory_consolidate,
@@ -1199,15 +1220,35 @@ def run_cli() -> None:
             "merge": _run_memory_merge,
             "consolidate": _run_memory_consolidate,
         }
-        handler = dispatch.get(args.memory_action)
-        if handler:
-            handler(mem_ns)
-        else:
-            print(
-                "Usage: cogito memory"
-                " list|search|review|accept|reject|delete|pin|edit|correct"
-                "|archive|unarchive|unpin|merge|consolidate"
+        if args.memory_action == "embeddings":
+            emb_ns = argparse.Namespace(
+                db_path=db_path,
+                workspace_id=getattr(args, "workspace_id", "default"),
+                batch_size=getattr(args, "batch_size", 32),
+                force=getattr(args, "force", False),
             )
+            emb_dispatch = {
+                "status": _run_embeddings_status,
+                "doctor": _run_embeddings_doctor,
+                "rebuild": _run_embeddings_rebuild,
+                "retry-failed": _run_embeddings_retry_failed,
+                "purge-stale": _run_embeddings_purge_stale,
+            }
+            emb_handler = emb_dispatch.get(args.embeddings_action)
+            if emb_handler:
+                emb_handler(emb_ns)
+            else:
+                print("Usage: cogito memory embeddings status|doctor|rebuild|retry-failed|purge-stale")
+        else:
+            handler = dispatch.get(args.memory_action)
+            if handler:
+                handler(mem_ns)
+            else:
+                print(
+                    "Usage: cogito memory"
+                    " list|search|review|accept|reject|delete|pin|edit|correct"
+                    "|archive|unarchive|unpin|merge|consolidate"
+                )
     elif args.command == "secrets":
         from .secrets import (
             _delete_secret,

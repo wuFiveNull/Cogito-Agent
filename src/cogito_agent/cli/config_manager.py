@@ -290,4 +290,76 @@ def doctor() -> list[dict[str, str]]:
         "detail": os.path.expanduser("~/.cogito/cogito.db"),
     })
 
+    # Embedding health check
+    emb_provider = cfg.get("memory.embedding.provider", "mock")
+    emb_model = cfg.get("memory.embedding.model", "all-MiniLM-L6-v2")
+    if emb_provider in ("disabled", "none"):
+        results.append({
+            "check": "embedding", "status": "info",
+            "detail": "disabled (sparse-only retrieval)",
+        })
+    elif emb_provider == "mock":
+        results.append({
+            "check": "embedding", "status": "ok",
+            "detail": f"mock ({emb_model}) - NOT semantic, test only",
+        })
+    elif emb_provider == "local_sentence_transformer":
+        try:
+            from cogito_agent.embedding.local import LocalSentenceTransformerEmbeddingProvider
+            p = LocalSentenceTransformerEmbeddingProvider(model_name=emb_model)
+            h = p.health_check()
+            if h.healthy:
+                results.append({
+                    "check": "embedding", "status": "ok",
+                    "detail": (
+                        f"{h.provider_name}/{h.model_name} "
+                        f"dim={h.dimension} semantic={h.is_semantic}"
+                    ),
+                })
+            else:
+                results.append({
+                    "check": "embedding", "status": "warn",
+                    "detail": f"{h.error_message}",
+                })
+        except Exception as e:
+            results.append({
+                "check": "embedding", "status": "warn",
+                "detail": f"local provider init failed: {e}",
+            })
+    elif emb_provider == "openai_compatible":
+        base_url = cfg.get("memory.embedding.base_url", "")
+        if not base_url:
+            results.append({
+                "check": "embedding", "status": "warn",
+                "detail": "openai_compatible provider, but base_url not configured",
+            })
+        else:
+            api_key_secret = cfg.get("memory.embedding.api_key_secret_name", "")
+            api_key_env = cfg.get("memory.embedding.api_key_env", "OPENAI_API_KEY")
+            has_key = False
+            if api_key_secret:
+                try:
+                    sp: SecretProvider = LocalSecretsProvider()
+                    if sp.get_secret(api_key_secret):
+                        has_key = True
+                except Exception:
+                    pass
+            if not has_key and api_key_env:
+                has_key = bool(os.environ.get(api_key_env))
+            if has_key:
+                results.append({
+                    "check": "embedding", "status": "ok",
+                    "detail": f"openai_compatible ({emb_model}) base_url={base_url} key=available",
+                })
+            else:
+                results.append({
+                    "check": "embedding", "status": "warn",
+                    "detail": f"openai_compatible ({emb_model}) - API key not found (sparse-only)",
+                })
+    else:
+        results.append({
+            "check": "embedding", "status": "info",
+            "detail": f"provider={emb_provider} (not checked)",
+        })
+
     return results
