@@ -1,3 +1,4 @@
+from .application import MemoryApplicationService
 from .candidates import CandidateExtractor
 from .retrieval import MemoryRetriever
 from .vector import EmbeddingService, HybridRetriever, _pack_embedding, _unpack_embedding
@@ -7,6 +8,7 @@ __all__ = [
     "CandidateExtractor",
     "EmbeddingService",
     "HybridRetriever",
+    "MemoryApplicationService",
     "_pack_embedding",
     "_unpack_embedding",
 ]
