@@ -121,11 +121,13 @@ class ContextEngine:
         for i, mem in enumerate(memories):
             text = str(mem.get("text", ""))
             lineage_info = mem.get("lineage_info")
-            reason = "retrieved"
+            retrieval_source = str(mem.get("retrieval_source", "retrieved"))
+            source_type = "memory_resident" if retrieval_source == "resident" else "memory_retrieved"
+            reason = retrieval_source
             if isinstance(lineage_info, dict):
                 reason = str(lineage_info.get("reason", reason))
             items.append(ContextItem(
-                source_type="memory",
+                source_type=source_type,
                 source_id=str(mem.get("id", "")),
                 text=text,
                 rank=i + 1,
@@ -200,6 +202,8 @@ class ContextEngine:
             "current_message": "system",
             "message": "recent_messages",
             "memory": "retrieved_memory",
+            "memory_resident": "retrieved_memory",
+            "memory_retrieved": "retrieved_memory",
             "tool": "tool_file_context",
             "file": "tool_file_context",
             "skill": "tool_file_context",

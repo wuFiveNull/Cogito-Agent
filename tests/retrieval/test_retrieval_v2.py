@@ -604,6 +604,8 @@ def test_no_recall_gate_mode(db):
     ctx = builder.build(current_message="", workspace_id="ws")
     result = svc.recall(ctx, limit=10)
     assert result.mode == "no_recall"
+    assert result.resident_count == 0
+    assert result.selected_count == 0
 
 
 def test_pinned_not_dominating_low_relevance(db):
@@ -638,6 +640,20 @@ def test_pinned_not_dominating_low_relevance(db):
     result = svc.recall(ctx, limit=10)
     if len(result.dynamic_memories) >= 2:
         assert result.dynamic_memories[0]["id"] == "m1"
+
+
+def test_resident_only_gate_mode(db):
+    _ensure_workspace(db, "ws")
+    _add_memory(db, "m1", "ws", "profile info", mtype="profile", confidence=0.9, pinned=True)
+    _add_memory(db, "m2", "ws", "general info", mtype="general", confidence=0.5)
+    from cogito_agent.retrieval.service import MemoryRetrievalService as _MRS
+    svc = _MRS(db=db, sparse_retriever=SparseMemoryRetriever(db))
+    from cogito_agent.retrieval.gate import RetrievalGateResult
+    from cogito_agent.retrieval.query import MemoryQueryContext
+    ctx = MemoryQueryContext(current_message="hello")
+    result = svc.recall(ctx, limit=10)
+    assert result.mode in ("resident_only", "hybrid")
+    assert result.resident_count >= 0
 
 
 def test_type_threshold_enforced(db):

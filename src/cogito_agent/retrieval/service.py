@@ -121,6 +121,17 @@ class MemoryRetrievalService:
     def provider(self, p: EmbeddingProvider | None) -> None:
         self._dense.provider = p
 
+    def _finalize(
+        self, result: MemoryRecallResult, ctx: MemoryQueryContext, t0: float,
+    ) -> MemoryRecallResult:
+        result.latencies["total"] = (time.time() - t0) * 1000
+        result.excluded_count = len(result.excluded)
+        try:
+            self._persist_trace(result, ctx)
+        except Exception as e:
+            logger.warning("Failed to persist retrieval trace: %s", e)
+        return result
+
     def recall(
         self,
         query_context: MemoryQueryContext,
@@ -158,36 +169,38 @@ class MemoryRetrievalService:
         dense_candidate_limit = config.get("dense_candidate_limit", 40)
         sparse_candidate_limit = config.get("sparse_candidate_limit", 40)
         resident_budget = config.get("resident_token_budget", 500)
+        dynamic_budget = config.get("dynamic_token_budget", 1000)
         min_score = config.get("min_final_score", 0.20)
 
         query = query_context.context_enriched_query or query_context.current_message
-
         t0 = time.time()
 
+        # ── no_recall: absolutely nothing ──
         if gate_result.mode == "no_recall":
-            result.resident_memories = self._resident.select(
-                query_context.workspace_id, resident_budget, type_policy,
-            )
-            result.resident_count = len(result.resident_memories)
-            result.latencies["total"] = (time.time() - t0) * 1000
-            return result
+            return self._finalize(result, query_context, t0)
 
-        if gate_result.mode in ("resident_only",):
-            result.resident_memories = self._resident.select(
-                query_context.workspace_id, resident_budget, type_policy,
-            )
-            result.resident_count = len(result.resident_memories)
-            result.latencies["total"] = (time.time() - t0) * 1000
-            return result
-
+        # ── profile_only: only profile/preference resident ──
         if gate_result.mode == "profile_only":
+            profile_policy = {
+                k: v for k, v in type_policy.items()
+                if k in ("profile", "preference")
+            }
+            result.resident_memories = self._resident.select(
+                query_context.workspace_id, resident_budget, profile_policy,
+            )
+            result.resident_count = len(result.resident_memories)
+            return self._finalize(result, query_context, t0)
+
+        # ── resident_only: only resident memories ──
+        if gate_result.mode == "resident_only":
             result.resident_memories = self._resident.select(
                 query_context.workspace_id, resident_budget, type_policy,
             )
             result.resident_count = len(result.resident_memories)
-            result.latencies["total"] = (time.time() - t0) * 1000
-            return result
+            return self._finalize(result, query_context, t0)
 
+        # ── dynamic retrieval (sparse, hybrid, timeline) ──
+        result.health_state = "healthy"
         use_sparse = gate_result.mode in ("sparse", "hybrid", "timeline")
         use_dense = gate_result.mode in ("hybrid", "timeline")
 
@@ -207,32 +220,46 @@ class MemoryRetrievalService:
                 logger.warning("Sparse retrieval failed: %s", e)
                 sparse_candidates = []
 
+        dense_attempted = False
         if use_dense:
-            try:
-                t1 = time.time()
-                dense_candidates = self._dense.search(
-                    query_context.workspace_id, query,
-                    limit=dense_candidate_limit,
-                    include_archived=include_archived,
-                )
-                result.latencies["dense"] = (time.time() - t1) * 1000
-            except Exception as e:
-                logger.warning("Dense retrieval failed, degrading to sparse-only: %s", e)
-                result.mode = "degraded"
-                result.degraded_reason = f"Dense retrieval failed: {e}"
-                dense_candidates = []
-
-        if not sparse_candidates and not dense_candidates:
-            result.latencies["total"] = (time.time() - t0) * 1000
-            return result
+            if self._dense.provider is None:
+                result.health_state = "disabled"
+                result.mode = "sparse_only"
+                result.degraded_code = "dense_provider_not_configured"
+                result.degraded_reason = _code_to_reason("dense_provider_not_configured")
+            elif not self._dense.provider.is_semantic:
+                result.health_state = "disabled"
+                result.mode = "sparse_only"
+            else:
+                dense_attempted = True
+                try:
+                    t1 = time.time()
+                    dense_candidates = self._dense.search(
+                        query_context.workspace_id, query,
+                        limit=dense_candidate_limit,
+                        include_archived=include_archived,
+                    )
+                    result.latencies["dense"] = (time.time() - t1) * 1000
+                except Exception as e:
+                    result.health_state = "degraded"
+                    if result.mode != "degraded":
+                        result.mode = "degraded"
+                    result.degraded_code = "embedding_api_error"
+                    result.degraded_reason = _code_to_reason("embedding_api_error")
+                    dense_candidates = []
 
         result.sparse_candidate_count = len(sparse_candidates)
         result.dense_candidate_count = len(dense_candidates)
-        result.mode = (
-            "sparse_only" if not dense_candidates else
-            "dense_only" if not sparse_candidates else
-            result.mode
-        )
+
+        if result.health_state == "healthy" and not use_dense:
+            result.mode = "sparse_only"
+        elif result.health_state == "healthy" and not dense_candidates and dense_attempted:
+            result.mode = "sparse_only"
+        elif result.health_state == "healthy" and not sparse_candidates and dense_candidates:
+            result.mode = "dense_only"
+
+        if not sparse_candidates and not dense_candidates:
+            return self._finalize(result, query_context, t0)
 
         fused = self._fusion.fuse(sparse_candidates, dense_candidates, query)
         result.union_candidate_count = len(fused)
@@ -240,6 +267,8 @@ class MemoryRetrievalService:
         selected: list[dict[str, object]] = []
         type_counts: dict[str, int] = {}
         score_breakdowns: dict[str, dict[str, float]] = {}
+        excluded: list[dict[str, str]] = []
+        used_tokens = 0
 
         for mem, breakdown in fused:
             mid = str(mem.get("id", ""))
@@ -254,19 +283,16 @@ class MemoryRetrievalService:
                 max_items = getattr(policy, "max_items", 99)
 
             if breakdown.final_score < threshold:
-                result.excluded.append({
-                    "memory_id": mid,
-                    "reason": "below_threshold",
-                    "score": f"{breakdown.final_score:.4f}",
-                })
+                excluded.append({"memory_id": mid, "reason": "below_threshold"})
                 continue
 
             if type_counts.get(mem_type, 0) >= max_items:
-                result.excluded.append({
-                    "memory_id": mid,
-                    "reason": "type_quota",
-                    "type": mem_type,
-                })
+                excluded.append({"memory_id": mid, "reason": "type_quota", "type": mem_type})
+                continue
+
+            token_est = max(1, len(str(mem.get("text", ""))) // 4)
+            if used_tokens + token_est > dynamic_budget:
+                excluded.append({"memory_id": mid, "reason": "token_budget"})
                 continue
 
             score_breakdowns[mid] = {
@@ -284,6 +310,7 @@ class MemoryRetrievalService:
             entry["retrieval_source"] = "dynamic"
             selected.append(entry)
             type_counts[mem_type] = type_counts.get(mem_type, 0) + 1
+            used_tokens += token_est
 
             if len(selected) >= limit:
                 break
@@ -291,29 +318,23 @@ class MemoryRetrievalService:
         result.dynamic_memories = selected
         result.selected_count = len(selected)
         result.score_breakdowns = score_breakdowns
+        result.excluded = excluded
 
-        if gate_result.mode not in ("no_recall", "profile_only"):
-            try:
-                resident = self._resident.select(
-                    query_context.workspace_id, resident_budget, type_policy,
-                )
-                existing_ids = {str(m.get("id", "")) for m in selected}
-                for mem in resident:
-                    if str(mem.get("id", "")) not in existing_ids:
-                        mem["retrieval_source"] = "resident"
-                        result.resident_memories.append(mem)
-                result.resident_count = len(result.resident_memories)
-            except Exception as e:
-                logger.warning("Resident selection failed: %s", e)
-
-        result.latencies["total"] = (time.time() - t0) * 1000
-
+        # Resident selection (adds to result, does not replace)
         try:
-            self._persist_trace(result, query_context)
+            resident = self._resident.select(
+                query_context.workspace_id, resident_budget, type_policy,
+            )
+            existing_ids = {str(m.get("id", "")) for m in selected}
+            for mem in resident:
+                if str(mem.get("id", "")) not in existing_ids:
+                    mem["retrieval_source"] = "resident"
+                    result.resident_memories.append(mem)
+            result.resident_count = len(result.resident_memories)
         except Exception as e:
-            logger.warning("Failed to persist retrieval trace: %s", e)
+            logger.warning("Resident selection failed: %s", e)
 
-        return result
+        return self._finalize(result, query_context, t0)
 
     def _persist_trace(
         self, result: MemoryRecallResult, ctx: MemoryQueryContext,
@@ -400,7 +421,13 @@ class MemoryRetrievalService:
             ctx, limit=limit, include_archived=include_archived,
             force_mode="hybrid",
         )
-        return recall_result.to_legacy_result()
+        results = recall_result.to_legacy_result()
+        trace_id = recall_result.trace_id
+        mode = recall_result.mode
+        for r in results:
+            r["_retrieval_trace_id"] = trace_id
+            r["_retrieval_mode"] = mode
+        return results
 
     def _get_config(self) -> dict[str, Any]:
         if self._config is not None:
