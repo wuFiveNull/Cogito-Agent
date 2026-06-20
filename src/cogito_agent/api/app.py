@@ -465,6 +465,22 @@ class WorkspaceUpdateRequest(BaseModel):
     max_daily_notifications: int | None = None
 
 
+class RebuildEmbeddingRequest(BaseModel):
+    workspace_id: str = "default"
+    force: bool = False
+    batch_size: int = 32
+    retry_failed: bool = True
+
+
+class SearchExplainRequest(BaseModel):
+    workspace_id: str = "default"
+    session_id: str = ""
+    query: str
+    limit: int = 10
+    include_archived: bool = False
+    force_mode: str | None = None
+
+
 def get_db() -> Database:
     global _db
     if _db is None:
@@ -1050,7 +1066,7 @@ def memory_embeddings_status(workspace_id: str = "default") -> dict[str, object]
 
 @app.post("/memories/embeddings/rebuild")
 def memory_embeddings_rebuild(
-    workspace_id: str = "default", force: bool = False,
+    req: RebuildEmbeddingRequest,
 ) -> dict[str, object]:
     db = get_db()
     from cogito_agent.config import Settings
@@ -1063,12 +1079,14 @@ def memory_embeddings_rebuild(
     if provider is None:
         return {"status": "error", "message": "No embedding provider configured"}
     idx_svc = MemoryEmbeddingIndexService(db, provider)
-    return idx_svc.rebuild_workspace(workspace_id, force=force)
+    if req.retry_failed:
+        idx_svc.retry_failed(req.workspace_id)
+    return idx_svc.rebuild_workspace(req.workspace_id, force=req.force, batch_size=req.batch_size)
 
 
 @app.post("/memories/search/explain")
 def memory_search_explain(
-    workspace_id: str, query: str, limit: int = 10,
+    req: SearchExplainRequest,
 ) -> dict[str, object]:
     db = get_db()
     from cogito_agent.config import Settings
@@ -1076,7 +1094,9 @@ def memory_search_explain(
 
     cfg = Settings.get()
     svc = _make_retrieval(db, config=cfg.memory)
-    return svc.explain_search(workspace_id, query, limit=limit)
+    return svc.explain_search(
+        req.workspace_id, req.query, limit=req.limit,
+    )
 
 
 # --- Approval endpoints ---

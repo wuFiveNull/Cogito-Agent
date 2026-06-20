@@ -142,6 +142,17 @@ class MemoryApplicationService:
                 workspace_id=str(result.get("workspace_id", "")),
                 decision="allow",
             )
+            # Best-effort embedding indexing for the new memory
+            created_mid = str(result.get("memory_id", ""))
+            if not created_mid:
+                cand_text = str(result.get("text", ""))
+                if cand_text and self._embedding_index is not None:
+                    mems = self._db.connection.execute(
+                        "SELECT id FROM memories WHERE text = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+                        (cand_text,),
+                    ).fetchall()
+                    for row in mems:
+                        self._try_index(str(row["id"]), cand_text)
         return result
 
     def reject_candidate(
