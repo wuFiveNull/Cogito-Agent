@@ -141,9 +141,13 @@ class RuntimeKernel:
         self._extra_content: list[ContentPart] = []
         self._multimodal_coordinator: MultimodalCoordinator | None = None
         self._vision_service: VisionObservationService | None = None
+        self._meme_service: Any = None
 
     def set_vision_service(self, service: VisionObservationService) -> None:
         self._vision_service = service
+
+    def set_meme_service(self, service: Any) -> None:
+        self._meme_service = service
 
     def _run_vision_pipeline(
         self,
@@ -1238,9 +1242,14 @@ class RuntimeKernel:
             args = dict(intent.arguments) if intent.arguments else {}
             tool_start = datetime.now(UTC)
 
-            # Inject current workspace/trace context for vision service
+            # Inject current workspace/trace context for vision and meme services
             if self._vision_service is not None:
                 self._vision_service.set_current_context(
+                    workspace_id=event.workspace_id,
+                    trace_id=str(getattr(trace, "id", "")),
+                )
+            if self._meme_service is not None:
+                self._meme_service.set_current_context(
                     workspace_id=event.workspace_id,
                     trace_id=str(getattr(trace, "id", "")),
                 )

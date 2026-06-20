@@ -1064,6 +1064,196 @@ class VisionObservationRepository:
         self._db.connection.commit()
 
 
+class MemeAssetRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def _row_to_asset(self, row: sqlite3.Row | None) -> dict[str, object] | None:
+        if row is None:
+            return None
+        d = dict(row)
+        for key in ("aliases_json", "emotions_json", "use_cases_json", "avoid_cases_json"):
+            if isinstance(d.get(key), str):
+                import json
+                try:
+                    d[key] = json.loads(d[key])  # type: ignore[arg-type]
+                except (json.JSONDecodeError, TypeError):
+                    d[key] = []
+        return d
+
+    def _rows_to_assets(self, rows: list[sqlite3.Row]) -> list[dict[str, object]]:
+        return [self._row_to_asset(r) for r in rows if r is not None]  # type: ignore[arg-type]
+
+    def create(
+        self,
+        meme_id: str,
+        workspace_id: str,
+        attachment_id: str,
+        content_hash: str,
+        name: str,
+        description: str,
+        source: str = "manual",
+        aliases: list[str] | None = None,
+        emotions: list[str] | None = None,
+        use_cases: list[str] | None = None,
+        avoid_cases: list[str] | None = None,
+        text_on_image: str | None = None,
+    ) -> dict[str, object]:
+        import json
+        from datetime import UTC, datetime
+        now = datetime.now(UTC).isoformat()
+        self._db.connection.execute(
+            "INSERT OR IGNORE INTO meme_assets"
+            " (id, workspace_id, attachment_id, content_hash, name,"
+            " aliases_json, description, emotions_json, use_cases_json,"
+            " avoid_cases_json, text_on_image, source, enabled,"
+            " use_count, last_used_at, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?)",
+            (
+                meme_id, workspace_id, attachment_id, content_hash, name,
+                json.dumps(aliases or [], ensure_ascii=False),
+                description,
+                json.dumps(emotions or [], ensure_ascii=False),
+                json.dumps(use_cases or [], ensure_ascii=False),
+                json.dumps(avoid_cases or [], ensure_ascii=False),
+                text_on_image, source, now, now,
+            ),
+        )
+        self._db.connection.commit()
+        return self.get(meme_id, workspace_id) or {}
+
+    def get(self, meme_id: str, workspace_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM meme_assets WHERE id = ? AND workspace_id = ?",
+            (meme_id, workspace_id),
+        )
+        return self._row_to_asset(cur.fetchone())
+
+    def get_by_attachment_id(
+        self, attachment_id: str, workspace_id: str
+    ) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM meme_assets WHERE attachment_id = ? AND workspace_id = ?",
+            (attachment_id, workspace_id),
+        )
+        return self._row_to_asset(cur.fetchone())
+
+    def find_by_content_hash(
+        self, content_hash: str, workspace_id: str
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM meme_assets WHERE content_hash = ? AND workspace_id = ?"
+            " ORDER BY updated_at DESC",
+            (content_hash, workspace_id),
+        )
+        return self._rows_to_assets(cur.fetchall())
+
+    def list_enabled(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM meme_assets WHERE workspace_id = ? AND enabled = 1"
+            " ORDER BY use_count DESC, updated_at DESC",
+            (workspace_id,),
+        )
+        return self._rows_to_assets(cur.fetchall())
+
+    def list_all(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM meme_assets WHERE workspace_id = ?"
+            " ORDER BY use_count DESC, updated_at DESC",
+            (workspace_id,),
+        )
+        return self._rows_to_assets(cur.fetchall())
+
+    def search(
+        self, workspace_id: str, query: str, limit: int = 10
+    ) -> list[dict[str, object]]:
+        import unicodedata
+        q = unicodedata.normalize("NFKC", query).lower().strip()
+        if not q:
+            return self.list_enabled(workspace_id)[:limit]
+        keywords = [kw.strip() for kw in q.split() if kw.strip()]
+        all_assets = self.list_enabled(workspace_id)
+        scored: list[tuple[int, dict[str, object]]] = []
+        for asset in all_assets:
+            score = 0
+            text_fields = [
+                str(asset.get("name", "")),
+                str(asset.get("description", "")),
+                str(asset.get("text_on_image", "")),
+            ]
+            json_fields: list[list[str]] = [
+                asset.get("aliases_json", []),  # type: ignore[arg-type]
+                asset.get("emotions_json", []),  # type: ignore[arg-type]
+                asset.get("use_cases_json", []),  # type: ignore[arg-type]
+                asset.get("avoid_cases_json", []),  # type: ignore[arg-type]
+            ]
+            for kw in keywords:
+                for field in text_fields:
+                    if kw in unicodedata.normalize("NFKC", field).lower():
+                        score += 2
+                for lst in json_fields:
+                    if isinstance(lst, list):
+                        for item in lst:
+                            if kw in unicodedata.normalize("NFKC", str(item)).lower():
+                                score += 3
+            if score > 0:
+                scored.append((score, asset))
+        scored.sort(key=lambda x: -x[0])
+        return [s[1] for s in scored[:limit]]
+
+    def update(
+        self,
+        meme_id: str,
+        workspace_id: str,
+        **kwargs: object,
+    ) -> dict[str, object] | None:
+        allowed = {
+            "name", "aliases_json", "description", "emotions_json",
+            "use_cases_json", "avoid_cases_json", "text_on_image",
+            "source", "enabled",
+        }
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return self.get(meme_id, workspace_id)
+        from datetime import UTC, datetime
+        now = datetime.now(UTC).isoformat()
+        updates["updated_at"] = now
+        cols = ", ".join(f"{k} = ?" for k in updates)
+        vals = list(updates.values())
+        self._db.connection.execute(
+            f"UPDATE meme_assets SET {cols} WHERE id = ? AND workspace_id = ?",  # noqa: S608
+            [*vals, meme_id, workspace_id],
+        )
+        self._db.connection.commit()
+        return self.get(meme_id, workspace_id)
+
+    def record_use(self, meme_id: str, workspace_id: str) -> None:
+        from datetime import UTC, datetime
+        now = datetime.now(UTC).isoformat()
+        self._db.connection.execute(
+            "UPDATE meme_assets SET use_count = use_count + 1, last_used_at = ?"
+            " WHERE id = ? AND workspace_id = ?",
+            (now, meme_id, workspace_id),
+        )
+        self._db.connection.commit()
+
+    def delete(self, meme_id: str, workspace_id: str) -> bool:
+        cur = self._db.connection.execute(
+            "DELETE FROM meme_assets WHERE id = ? AND workspace_id = ?",
+            (meme_id, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
+
+    def count_by_workspace(self, workspace_id: str) -> int:
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) AS cnt FROM meme_assets WHERE workspace_id = ?",
+            (workspace_id,),
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+
 class WorkspaceSettingsRepository:
     def __init__(self, db: Database) -> None:
         self._db = db

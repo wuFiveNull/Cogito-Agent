@@ -2,6 +2,7 @@ from .database import Database, register_migration
 from .repositories import (
     AttachmentRepository,
     FileArtifactRepository,
+    MemeAssetRepository,
     MemoryEditRepository,
     MemoryRepository,
     MessageRepository,
@@ -23,5 +24,6 @@ __all__ = [
     "FileArtifactRepository",
     "AttachmentRepository",
     "VisionObservationRepository",
+    "MemeAssetRepository",
     "register_migration",
 ]

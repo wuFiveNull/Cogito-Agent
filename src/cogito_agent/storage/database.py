@@ -159,6 +159,7 @@ register_migration(13, """
         ON session_summaries(workspace_id, session_id, created_at);
 """)
 register_migration(14, _load_migration_sql("0014_vision_attachments.sql"))
+register_migration(15, _load_migration_sql("0015_meme_assets.sql"))
 
 register_migration(10, """
     CREATE TABLE IF NOT EXISTS drift_runs (

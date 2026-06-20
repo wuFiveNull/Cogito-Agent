@@ -117,8 +117,8 @@ class CapabilityRegistry:
             return None
         return entry[0]
 
-    def invoke(self, name: str, **kwargs: Any) -> ToolResult | None:
-        entry = self._tools.get(name)
+    def invoke(self, cap_name: str, **kwargs: Any) -> ToolResult | None:
+        entry = self._tools.get(cap_name)
         if entry is None:
             return None
         manifest, invoke_fn = entry
@@ -128,7 +128,7 @@ class CapabilityRegistry:
             if err:
                 return ToolResult(
                     status="error", summary="Input validation failed",
-                    error=f"Validation error for {name}: {err}",
+                    error=f"Validation error for {cap_name}: {err}",
                 )
         return invoke_fn(**kwargs)
 

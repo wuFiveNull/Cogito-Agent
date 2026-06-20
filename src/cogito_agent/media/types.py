@@ -58,6 +58,33 @@ class VisionObservation:
     created_at: datetime
 
 
+@dataclass
+class MemeAsset:
+    id: str
+    workspace_id: str
+    attachment_id: str
+    content_hash: str
+
+    name: str
+    aliases: list[str]
+    description: str
+    emotions: list[str]
+    use_cases: list[str]
+    avoid_cases: list[str]
+    text_on_image: str | None
+
+    source: str
+    enabled: bool
+    use_count: int
+    last_used_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+def create_meme_id() -> str:
+    return f"meme_{uuid.uuid4().hex[:24]}"
+
+
 def create_cache_key(
     workspace_id: str,
     image_content_hash: str,

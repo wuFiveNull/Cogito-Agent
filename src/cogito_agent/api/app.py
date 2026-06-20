@@ -514,6 +514,13 @@ def get_kernel() -> RuntimeKernel:
         _kernel.set_vision_service(vision_svc)
         if hasattr(_kernel, '_cap_reg'):
             _kernel._cap_reg = cap_reg
+        # Set up meme service
+        from cogito_agent.media import MemeService
+        meme_svc = MemeService(db)
+        if vision_svc.has_vision_capability:
+            meme_svc.set_vision_service(vision_svc)
+        meme_svc.register_with_capability_registry(cap_reg)
+        _kernel.set_meme_service(meme_svc)
     return _kernel
 
 
@@ -1208,6 +1215,188 @@ def run_skill(
         "status": log.status,
         "step_logs": log.step_logs,
     }
+
+
+# ── Meme API Endpoints ─────────────────────────────────────────────────────
+
+class CreateMemeRequest(BaseModel):
+    attachment_id: str
+    name: str
+    description: str
+    aliases: list[str] = []
+    emotions: list[str] = []
+    use_cases: list[str] = []
+    avoid_cases: list[str] = []
+    text_on_image: str | None = None
+    workspace_id: str = ""
+    session_id: str = ""
+
+
+class UpdateMemeRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    aliases: list[str] | None = None
+    emotions: list[str] | None = None
+    use_cases: list[str] | None = None
+    avoid_cases: list[str] | None = None
+    text_on_image: str | None = None
+    enabled: bool | None = None
+
+
+class AnalyzeMemeRequest(BaseModel):
+    attachment_id: str
+    force_refresh: bool = False
+    workspace_id: str = ""
+
+
+class SendMemeRequest(BaseModel):
+    caption: str = ""
+    workspace_id: str = ""
+
+
+@app.post("/memes", response_model=None)
+def create_meme(req: CreateMemeRequest, request: Request) -> dict[str, object] | JSONResponse:
+    db = get_db()
+    kernel = get_kernel()
+    meme_svc = getattr(kernel, "_meme_service", None)
+    if meme_svc is None:
+        return _error_response("CONFIG", "Meme service not available", request.state.request_id, status_code=503)
+    ws = req.workspace_id or "default"
+    try:
+        meme = meme_svc.register_meme(
+            attachment_id=req.attachment_id, name=req.name, description=req.description,
+            workspace_id=ws, aliases=req.aliases, emotions=req.emotions,
+            use_cases=req.use_cases, avoid_cases=req.avoid_cases,
+            text_on_image=req.text_on_image,
+        )
+        return {
+            "id": meme.id, "name": meme.name, "description": meme.description,
+            "source": meme.source, "enabled": meme.enabled,
+        }
+    except (ValueError, RuntimeError) as e:
+        return _error_response("ERROR", str(e), request.state.request_id, status_code=400)
+
+
+@app.get("/memes", response_model=None)
+def list_memes(
+    workspace_id: str = Query("default"),
+    enabled_only: bool = Query(True),
+    search: str = Query(""),
+    request: Request = None,
+) -> list[dict[str, object]] | JSONResponse:
+    if request is None:
+        request = Request({"type": "http"})
+    from cogito_agent.storage import MemeAssetRepository
+    repo = MemeAssetRepository(get_db())
+    try:
+        if search:
+            return repo.search(workspace_id, search)
+        if enabled_only:
+            return repo.list_enabled(workspace_id)
+        return repo.list_all(workspace_id)
+    except Exception as e:
+        return _error_response("ERROR", str(e), request.state.request_id, status_code=400)
+
+
+@app.get("/memes/{meme_id}", response_model=None)
+def get_meme(meme_id: str, request: Request, workspace_id: str = Query("default")) -> dict[str, object] | JSONResponse:
+    from cogito_agent.storage import MemeAssetRepository
+    repo = MemeAssetRepository(get_db())
+    record = repo.get(meme_id, workspace_id)
+    if record is None:
+        return _error_response("NOT_FOUND", "Meme not found", request.state.request_id, status_code=404)
+    safe = dict(record)
+    safe.pop("storage_path", None)
+    return safe
+
+
+@app.patch("/memes/{meme_id}", response_model=None)
+def update_meme(
+    meme_id: str, req: UpdateMemeRequest, request: Request,
+    workspace_id: str = Query("default"),
+) -> dict[str, object] | JSONResponse:
+    from cogito_agent.storage import MemeAssetRepository
+    import json
+    repo = MemeAssetRepository(get_db())
+    kwargs: dict[str, object] = {}
+    if req.name is not None:
+        kwargs["name"] = req.name
+    if req.description is not None:
+        kwargs["description"] = req.description
+    if req.aliases is not None:
+        kwargs["aliases_json"] = json.dumps(req.aliases, ensure_ascii=False)
+    if req.emotions is not None:
+        kwargs["emotions_json"] = json.dumps(req.emotions, ensure_ascii=False)
+    if req.use_cases is not None:
+        kwargs["use_cases_json"] = json.dumps(req.use_cases, ensure_ascii=False)
+    if req.avoid_cases is not None:
+        kwargs["avoid_cases_json"] = json.dumps(req.avoid_cases, ensure_ascii=False)
+    if req.text_on_image is not None:
+        kwargs["text_on_image"] = req.text_on_image
+    if req.enabled is not None:
+        kwargs["enabled"] = 1 if req.enabled else 0
+    result = repo.update(meme_id, workspace_id, **kwargs)
+    if result is None:
+        return _error_response("NOT_FOUND", "Meme not found", request.state.request_id, status_code=404)
+    return result
+
+
+@app.delete("/memes/{meme_id}", response_model=None)
+def delete_meme(
+    meme_id: str, request: Request,
+    workspace_id: str = Query("default"),
+) -> dict[str, object] | JSONResponse:
+    from cogito_agent.storage import MemeAssetRepository
+    repo = MemeAssetRepository(get_db())
+    if repo.delete(meme_id, workspace_id):
+        return {"status": "deleted", "meme_id": meme_id}
+    return _error_response("NOT_FOUND", "Meme not found", request.state.request_id, status_code=404)
+
+
+@app.post("/memes/analyze", response_model=None)
+def analyze_meme_api(req: AnalyzeMemeRequest, request: Request) -> dict[str, object] | JSONResponse:
+    kernel = get_kernel()
+    meme_svc = getattr(kernel, "_meme_service", None)
+    if meme_svc is None:
+        return _error_response("CONFIG", "Meme service not available", request.state.request_id, status_code=503)
+    ws = req.workspace_id or "default"
+    try:
+        meme = meme_svc.analyze_meme(
+            attachment_id=req.attachment_id, workspace_id=ws,
+            force_refresh=req.force_refresh,
+        )
+        return {
+            "id": meme.id, "name": meme.name, "source": meme.source,
+            "description": meme.description, "emotions": meme.emotions,
+            "use_cases": meme.use_cases,
+        }
+    except (ValueError, RuntimeError) as e:
+        return _error_response("ERROR", str(e), request.state.request_id, status_code=400)
+
+
+@app.post("/memes/{meme_id}/send", response_model=None)
+def send_meme_api(
+    meme_id: str, req: SendMemeRequest, request: Request,
+    workspace_id: str = Query("default"),
+) -> dict[str, object] | JSONResponse:
+    kernel = get_kernel()
+    meme_svc = getattr(kernel, "_meme_service", None)
+    if meme_svc is None:
+        return _error_response("CONFIG", "Meme service not available", request.state.request_id, status_code=503)
+    ws = req.workspace_id or workspace_id or "default"
+    try:
+        result = meme_svc.send_meme(meme_id, ws, caption=req.caption)
+        safe = {
+            "meme_id": result["meme_id"],
+            "name": result["name"],
+            "attachment_id": result["attachment_id"],
+            "media_type": result["media_type"],
+            "caption": result["caption"],
+            "vision_model_called": result["vision_model_called"],
+        }
+        return safe
+    except (ValueError, RuntimeError) as e:
+        return _error_response("ERROR", str(e), request.state.request_id, status_code=400)
 
 
 def run_api(host: str = "127.0.0.1", port: int = 8000) -> None:

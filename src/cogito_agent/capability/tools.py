@@ -194,6 +194,127 @@ LIST_FILES_MANIFEST = CapabilityManifest(
 )
 
 
+REGISTER_MEME_MANIFEST = CapabilityManifest(
+    name="register_meme",
+    version="1.0.0",
+    type=CapabilityType.tool,
+    description=(
+        "Register an already-uploaded image as a reusable meme/sticker. "
+        "Does NOT call a vision model. Provide name and description manually."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "attachment_id": {"type": "string", "description": "ID of the uploaded image attachment (att_xxx)"},
+            "name": {"type": "string", "description": "Short name, e.g. 'Confused Dog'"},
+            "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alias search terms"},
+            "description": {"type": "string", "description": "What the image shows and its expression meaning"},
+            "emotions": {"type": "array", "items": {"type": "string"}, "description": "Emotions expressed"},
+            "use_cases": {"type": "array", "items": {"type": "string"}, "description": "When to send this meme"},
+            "avoid_cases": {"type": "array", "items": {"type": "string"}, "description": "When NOT to send"},
+            "text_on_image": {"type": "string", "description": "Visible text in the image"},
+        },
+        "required": ["attachment_id", "name", "description"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {"result": {"type": "string"}},
+    },
+    permissions=[Permission(resource="attachment", operations=["read"])],
+    risk_level=RiskLevel.low,
+    allowed_contexts=["interactive", "background"],
+    approval_required=False,
+    audit_required=True,
+    idempotent=True,
+)
+
+ANALYZE_MEME_MANIFEST = CapabilityManifest(
+    name="analyze_meme",
+    version="1.0.0",
+    type=CapabilityType.tool,
+    description=(
+        "Use the vision model to analyze an image and auto-generate a meme profile. "
+        "Only call this when the user explicitly wants VLM analysis for a new meme. "
+        "Do NOT call this when sending a meme."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "attachment_id": {"type": "string", "description": "ID of the uploaded image attachment (att_xxx)"},
+            "force_refresh": {"type": "boolean", "description": "Force re-analysis even if profile exists", "default": False},
+        },
+        "required": ["attachment_id"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {"result": {"type": "string"}},
+    },
+    permissions=[Permission(resource="attachment", operations=["read"])],
+    risk_level=RiskLevel.low,
+    allowed_contexts=["interactive", "background"],
+    approval_required=False,
+    audit_required=True,
+    idempotent=True,
+)
+
+SEARCH_MEMES_MANIFEST = CapabilityManifest(
+    name="search_memes",
+    version="1.0.0",
+    type=CapabilityType.tool,
+    description=(
+        "Search registered memes by emotion, topic, or description. "
+        "Returns name, description, emotions, and use cases. "
+        "Does NOT read image bytes or call the vision model."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search keyword, e.g. 'happy', 'confused', 'congratulations'"},
+            "limit": {"type": "integer", "description": "Max results", "default": 5, "minimum": 1, "maximum": 20},
+        },
+        "required": ["query"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {"result": {"type": "string"}},
+    },
+    permissions=[Permission(resource="meme", operations=["read"])],
+    risk_level=RiskLevel.low,
+    allowed_contexts=["interactive", "background"],
+    approval_required=False,
+    audit_required=True,
+    idempotent=True,
+)
+
+SEND_MEME_MANIFEST = CapabilityManifest(
+    name="send_meme",
+    version="1.0.0",
+    type=CapabilityType.tool,
+    description=(
+        "Send a registered meme by its ID. "
+        "Does NOT call the vision model. "
+        "Use search_memes first to find the right meme_id."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "meme_id": {"type": "string", "description": "ID of the registered meme (meme_xxx)"},
+            "caption": {"type": "string", "description": "Optional text caption", "default": ""},
+        },
+        "required": ["meme_id"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {"result": {"type": "string"}},
+    },
+    permissions=[Permission(resource="meme", operations=["read"]), Permission(resource="attachment", operations=["read"])],
+    risk_level=RiskLevel.low,
+    allowed_contexts=["interactive"],
+    approval_required=False,
+    audit_required=True,
+    idempotent=True,
+)
+
 INSPECT_IMAGE_MANIFEST = CapabilityManifest(
     name="inspect_image",
     version="1.0.0",
