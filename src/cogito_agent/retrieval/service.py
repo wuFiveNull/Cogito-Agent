@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import logging
 import time
 import uuid
@@ -19,17 +20,54 @@ from .sparse import SparseMemoryRetriever
 logger = logging.getLogger(__name__)
 
 
+class HealthState(str, enum.Enum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    DISABLED = "disabled"
+
+
+class RetrievalMode(str, enum.Enum):
+    HYBRID = "hybrid"
+    SPARSE_ONLY = "sparse_only"
+    DENSE_ONLY = "dense_only"
+    RESIDENT_ONLY = "resident_only"
+    NO_RECALL = "no_recall"
+    PROFILE_ONLY = "profile_only"
+    TIMELINE = "timeline"
+    DEGRADED = "degraded"
+
+
+_DEGRADED_REASON_CODES: dict[str, str] = {
+    "embedding_secret_missing": "Embedding API key not configured",
+    "embedding_auth_failed": "Embedding API authentication failed",
+    "embedding_rate_limited": "Embedding API rate limited",
+    "embedding_timeout": "Embedding API timed out",
+    "embedding_api_error": "Embedding API returned an error",
+    "embedding_dimension_mismatch": "Embedding dimension mismatch",
+    "embedding_invalid_response": "Embedding API returned invalid response",
+    "dense_provider_not_configured": "Dense provider not configured",
+    "embedding_all_failed": "All embedding attempts failed",
+}
+
+
+def _code_to_reason(code: str) -> str:
+    return _DEGRADED_REASON_CODES.get(code, code)
+
+
 @dataclass
 class MemoryRecallResult:
     resident_memories: list[dict[str, object]] = field(default_factory=list)
     dynamic_memories: list[dict[str, object]] = field(default_factory=list)
     mode: str = "hybrid"
     gate_mode: str = ""
+    health_state: str = "healthy"
     degraded_reason: str = ""
+    degraded_code: str = ""
     sparse_candidate_count: int = 0
     dense_candidate_count: int = 0
     union_candidate_count: int = 0
     selected_count: int = 0
+    excluded_count: int = 0
     resident_count: int = 0
     embedding_provider: str = ""
     embedding_model: str = ""
@@ -395,6 +433,8 @@ class MemoryRetrievalService:
             "trace_id": result.trace_id,
             "mode": result.mode,
             "gate_mode": result.gate_mode,
+            "health_state": result.health_state,
+            "degraded_code": result.degraded_code,
             "degraded_reason": result.degraded_reason,
             "sparse_candidate_count": result.sparse_candidate_count,
             "dense_candidate_count": result.dense_candidate_count,
@@ -417,3 +457,50 @@ class MemoryRetrievalService:
                 for m in result.dynamic_memories + result.resident_memories
             ],
         }
+
+
+def create_retrieval_service(
+    db: Any,
+    config: Any = None,
+    secrets_provider: Any = None,
+    embedding_provider: Any | None = None,
+) -> MemoryRetrievalService:
+    """Unified composition root for the retrieval stack.
+
+    Accepts either a pre-built embedding_provider or creates one from config.
+    Every caller (CLI, API, RuntimeKernel) must use this factory so that
+    the HTTP client, secrets, and config are wired exactly once.
+    """
+    from cogito_agent.embedding.service import create_embedding_provider_from_config as _make_provider
+    from cogito_agent.retrieval.dense import DenseMemoryRetriever
+    from cogito_agent.retrieval.sparse import SparseMemoryRetriever
+
+    if embedding_provider is None and config is not None:
+        emb_cfg = getattr(config, "embedding", None) or config
+        embedding_provider = _make_provider(emb_cfg, secrets_provider=secrets_provider)
+
+    cfg = None
+    fusion = None
+    if config is not None:
+        retrieval_cfg = getattr(config, "retrieval", None)
+        if retrieval_cfg is not None:
+            cfg = retrieval_cfg
+            w = retrieval_cfg.weights
+            fusion = CandidateFusion(
+                dense_weight=w.dense,
+                sparse_weight=w.sparse,
+                recency_weight=w.recency,
+                confidence_weight=w.confidence,
+                task_relevance_weight=w.task_relevance,
+                type_priority_weight=w.type_priority,
+                recency_half_life_days=retrieval_cfg.recency_half_life_days,
+            )
+
+    return MemoryRetrievalService(
+        db=db,
+        provider=embedding_provider,
+        sparse_retriever=SparseMemoryRetriever(db),
+        dense_retriever=DenseMemoryRetriever(db, embedding_provider),
+        fusion=fusion,
+        retrieval_config=cfg,
+    )

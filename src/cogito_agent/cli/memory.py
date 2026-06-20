@@ -39,22 +39,13 @@ def _run_memory_search(args: Any) -> None:
 
     if getattr(ns, "explain", False):
         from cogito_agent.config import Settings
-        from cogito_agent.embedding.service import create_embedding_provider_from_config
-        from cogito_agent.retrieval import MemoryRetrievalService
-        from cogito_agent.retrieval.dense import DenseMemoryRetriever
-        from cogito_agent.retrieval.sparse import SparseMemoryRetriever
+        from cogito_agent.retrieval.service import create_retrieval_service
 
         cfg = Settings.get()
-        provider = create_embedding_provider_from_config(cfg.memory.embedding)
-        svc = MemoryRetrievalService(
-            db=db,
-            provider=provider,
-            sparse_retriever=SparseMemoryRetriever(db),
-            dense_retriever=DenseMemoryRetriever(db, provider),
-            retrieval_config=cfg.memory.retrieval,
-        )
+        svc = create_retrieval_service(db, config=cfg.memory)
         explain = svc.explain_search(ns.workspace_id, ns.query, limit=20)
         print(f"  Trace ID:         {explain.get('trace_id', '')}")
+        print(f"  Health state:     {explain.get('health_state', '')}")
         print(f"  Retrieval mode:   {explain['mode']}")
         print(f"  Gate mode:        {explain.get('gate_mode', '')}")
         if explain.get("degraded_reason"):
@@ -349,6 +340,11 @@ def _run_memory_merge(args: Any) -> None:
     db.close()
 
 
+def _get_provider(cfg):
+    from cogito_agent.embedding.service import create_embedding_provider_from_config
+    return create_embedding_provider_from_config(cfg.memory.embedding)
+
+
 def _run_embeddings_status(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
@@ -356,10 +352,9 @@ def _run_embeddings_status(args: Any) -> None:
     db.migrate()
     from cogito_agent.config import Settings
     from cogito_agent.embedding import MemoryEmbeddingIndexService
-    from cogito_agent.embedding.service import create_embedding_provider_from_config
 
     cfg = Settings.get()
-    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    provider = _get_provider(cfg)
     if provider is None:
         print("  Embedding provider: disabled")
         db.close()
@@ -388,24 +383,22 @@ def _run_embeddings_doctor(args: Any) -> None:
     db.initialize()
     db.migrate()
     from cogito_agent.config import Settings
-    from cogito_agent.embedding.service import create_embedding_provider_from_config
 
     cfg = Settings.get()
     es = cfg.memory.embedding
     print(f"  Config provider: {es.provider}")
     print(f"  Config model:    {es.model}")
     print(f"  Config base_url: {es.base_url or '(none)'}")
-    secret_available = False
     if es.api_key_secret_name:
         print(f"  Secret name:     {es.api_key_secret_name}")
     if es.api_key_env:
         import os
-        secret_available = bool(os.environ.get(es.api_key_env))
-        status = "available" if secret_available else "unavailable"
-        print(f"  API key env:     {es.api_key_env} -> {status}")
+        av = bool(os.environ.get(es.api_key_env))
+        st = "available" if av else "unavailable"
+        print(f"  API key env:     {es.api_key_env} -> {st}")
 
     try:
-        provider = create_embedding_provider_from_config(es)
+        provider = _get_provider(cfg)
     except Exception as e:
         print(f"  Provider init:   FAILED - {e}")
         db.close()
@@ -435,10 +428,9 @@ def _run_embeddings_rebuild(args: Any) -> None:
     db.migrate()
     from cogito_agent.config import Settings
     from cogito_agent.embedding import MemoryEmbeddingIndexService
-    from cogito_agent.embedding.service import create_embedding_provider_from_config
 
     cfg = Settings.get()
-    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    provider = _get_provider(cfg)
     if provider is None:
         print("  Embedding provider not available.")
         db.close()
@@ -466,10 +458,9 @@ def _run_embeddings_retry_failed(args: Any) -> None:
     db.migrate()
     from cogito_agent.config import Settings
     from cogito_agent.embedding import MemoryEmbeddingIndexService
-    from cogito_agent.embedding.service import create_embedding_provider_from_config
 
     cfg = Settings.get()
-    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    provider = _get_provider(cfg)
     if provider is None:
         print("  Embedding provider not available.")
         db.close()
@@ -489,10 +480,9 @@ def _run_embeddings_purge_stale(args: Any) -> None:
     db.migrate()
     from cogito_agent.config import Settings
     from cogito_agent.embedding import MemoryEmbeddingIndexService
-    from cogito_agent.embedding.service import create_embedding_provider_from_config
 
     cfg = Settings.get()
-    provider = create_embedding_provider_from_config(cfg.memory.embedding)
+    provider = _get_provider(cfg)
     if provider is None:
         print("  Embedding provider not available.")
         db.close()

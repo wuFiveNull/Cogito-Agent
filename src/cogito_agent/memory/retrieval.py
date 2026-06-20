@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from cogito_agent.storage import Database
 
@@ -53,38 +54,25 @@ def _score_memory(
 
 
 class MemoryRetriever:
-    def __init__(self, db: Database) -> None:
+    def __init__(
+        self, db: Database,
+        service: Any = None,
+    ) -> None:
         self._db = db
-        self._service = None
-
-    def _get_service(self):
-        if self._service is None:
-            try:
-                from cogito_agent.retrieval import MemoryRetrievalService
-                from cogito_agent.retrieval.dense import DenseMemoryRetriever
-                from cogito_agent.retrieval.sparse import SparseMemoryRetriever
-                self._service = MemoryRetrievalService(
-                    db=self._db,
-                    sparse_retriever=SparseMemoryRetriever(self._db),
-                    dense_retriever=DenseMemoryRetriever(self._db),
-                )
-            except Exception:
-                pass
-        return self._service
+        self._service = service
 
     def search(
         self, workspace_id: str, query: str, limit: int = 10,
         include_archived: bool = False,
     ) -> list[dict[str, object]]:
-        try:
-            svc = self._get_service()
-            if svc:
-                return svc.search_compat(
+        if self._service is not None:
+            try:
+                return self._service.search_compat(
                     workspace_id, query, limit=limit,
                     include_archived=include_archived,
                 )
-        except Exception as e:
-            logger.debug("New retrieval service failed, falling back: %s", e)
+            except Exception as e:
+                logger.debug("New retrieval service failed, falling back: %s", e)
 
         try:
             from cogito_agent.memory.vector import HybridRetriever

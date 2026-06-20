@@ -20,8 +20,13 @@ def _sanitize_fts_query(query: str) -> str:
 
 
 def _normalize_bm25(score: float) -> float:
-    """Normalize BM25 score to [0, 1] using sigmoid-like function."""
-    return 1.0 / (1.0 + math.exp(-score / 5.0))
+    """Normalize BM25 score to [0, 1].
+
+    SQLite FTS5 bm25() returns lower (more negative) scores for better matches.
+    Invert so that a strongly negative BM25 → high normalized score.
+    """
+    relevance = max(0.0, -score)
+    return relevance / (1.0 + relevance)
 
 
 class SparseMemoryRetriever:
