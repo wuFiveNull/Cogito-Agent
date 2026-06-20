@@ -86,8 +86,9 @@ class MemoryEmbeddingIndexService:
         )
         return True
 
-    def index_memories(self, memory_ids: Sequence[str]) -> dict[str, bool]:
+    def index_memories(self, memory_ids: Sequence[str], batch_size: int = 32) -> dict[str, bool]:
         results: dict[str, bool] = {}
+        batch: list[tuple[str, str, str]] = []
         for mid in memory_ids:
             row = self._db.connection.execute(
                 "SELECT text FROM memories WHERE id = ? AND deleted_at IS NULL",
@@ -96,7 +97,29 @@ class MemoryEmbeddingIndexService:
             if row is None:
                 results[mid] = False
                 continue
-            results[mid] = self.index_memory(mid, str(row["text"]))
+            batch.append((mid, str(row["text"]), _content_hash(str(row["text"]))))
+        for start in range(0, len(batch), batch_size):
+            chunk = batch[start:start + batch_size]
+            try:
+                texts = [item[1] for item in chunk]
+                if self._provider:
+                    vectors = self._provider.embed_batch(texts)
+                else:
+                    for item in chunk:
+                        results[item[0]] = False
+                    continue
+            except Exception:
+                for item in chunk:
+                    results[item[0]] = False
+                    self._upsert_embedding(item[0], "", item[2], "failed")
+                continue
+            if len(vectors) != len(chunk):
+                for item in chunk:
+                    results[item[0]] = False
+                continue
+            for item, vec in zip(chunk, vectors):
+                results[item[0]] = True
+                self._upsert_embedding(item[0], "", item[2], "ready", embedding=vec)
         return results
 
     def rebuild_workspace(
@@ -113,28 +136,40 @@ class MemoryEmbeddingIndexService:
         failed = 0
         skipped = 0
 
+        pending: list[tuple[str, str, str]] = []
         for row in rows:
             mid = str(row["id"])
             text = str(row["text"])
             content_hash = _content_hash(text)
-
             if not force:
                 existing = self._get_existing_embedding(mid)
-                if existing:
-                    if (
-                        existing.get("status") == "ready"
-                        and existing.get("embedding_version") == _EMBEDDING_VERSION
-                        and existing.get("model_name") == self._provider.model_name
-                        and existing.get("content_hash") == content_hash
-                    ):
-                        skipped += 1
-                        continue
+                if existing and existing.get("status") == "ready" and existing.get("embedding_version") == _EMBEDDING_VERSION and existing.get("model_name") == self._provider.model_name and existing.get("content_hash") == content_hash:
+                    skipped += 1
+                    continue
+            pending.append((mid, text, content_hash))
 
-            ok = self.index_memory(mid, text)
-            if ok:
+        for start in range(0, len(pending), batch_size):
+            batch = pending[start:start + batch_size]
+            texts = [item[1] for item in batch]
+            try:
+                vectors = self._provider.embed_batch(texts)
+            except Exception as e:
+                logger.warning("Batch embedding failed for %d items: %s", len(batch), e)
+                for item in batch:
+                    self._upsert_embedding(item[0], workspace_id, item[2], "failed", error_code=str(e)[:200])
+                    failed += 1
+                continue
+
+            if len(vectors) != len(batch):
+                logger.warning("Batch response count %d != input count %d", len(vectors), len(batch))
+                for item in batch:
+                    self._upsert_embedding(item[0], workspace_id, item[2], "failed", error_code="response_count_mismatch")
+                    failed += 1
+                continue
+
+            for item, vec in zip(batch, vectors):
+                self._upsert_embedding(item[0], workspace_id, item[2], "ready", embedding=vec)
                 indexed += 1
-            else:
-                failed += 1
 
         return {
             "status": "ok",
@@ -208,7 +243,7 @@ class MemoryEmbeddingIndexService:
             "coverage_pct": round(coverage, 1),
         }
 
-    def retry_failed(self, workspace_id: str) -> dict[str, Any]:
+    def retry_failed(self, workspace_id: str, batch_size: int = 32) -> dict[str, Any]:
         if not self._provider:
             return {"status": "error", "message": "No embedding provider"}
         rows = self._db.connection.execute(
@@ -222,14 +257,25 @@ class MemoryEmbeddingIndexService:
             (workspace_id, self._provider.provider_name,
              self._provider.model_name, _EMBEDDING_VERSION),
         ).fetchall()
+        items = [(str(r["memory_id"]), str(r["text"]), _content_hash(str(r["text"]))) for r in rows]
         succeeded = 0
         failed = 0
-        for row in rows:
-            ok = self.index_memory(str(row["memory_id"]), str(row["text"]))
-            if ok:
+        for start in range(0, len(items), batch_size):
+            chunk = items[start:start + batch_size]
+            try:
+                vectors = self._provider.embed_batch([item[1] for item in chunk])
+            except Exception:
+                for item in chunk:
+                    self._upsert_embedding(item[0], workspace_id, item[2], "failed")
+                    failed += 1
+                continue
+            if len(vectors) != len(chunk):
+                for item in chunk:
+                    failed += 1
+                continue
+            for item, vec in zip(chunk, vectors):
+                self._upsert_embedding(item[0], workspace_id, item[2], "ready", embedding=vec)
                 succeeded += 1
-            else:
-                failed += 1
         return {"status": "ok", "succeeded": succeeded, "failed": failed}
 
     def purge_stale(self, workspace_id: str) -> int:
