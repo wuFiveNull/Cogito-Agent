@@ -114,13 +114,17 @@ class OpenAICompatibleCodec:
             if isinstance(part, TextPart):
                 parts.append({"type": "text", "text": part.text})
             elif isinstance(part, ImagePart):
-                image_url: dict[str, object] = {"url": part.uri}
-                if part.mime_type:
-                    image_url["detail"] = "auto"
-                parts.append({
-                    "type": "image_url",
-                    "image_url": image_url,
-                })
+                uri = part.uri or part.get_uri_or_attachment()
+                if not uri:
+                    parts.append({"type": "text", "text": "[Image: attachment not resolved]"})
+                else:
+                    image_url: dict[str, object] = {"url": uri}
+                    if part.mime_type:
+                        image_url["detail"] = "auto"
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": image_url,
+                    })
             elif isinstance(part, type(FilePart)) or type(part).__name__ == "FilePart":
                 parts.append({
                     "type": "text",

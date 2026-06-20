@@ -64,6 +64,7 @@ class WorkspaceRepository:
             "memory_candidates", "file_artifacts",
             "file_chunk_embeddings", "file_chunks", "artifacts",
             "workspace_files", "workspace_roots",
+            "vision_observations", "message_attachments", "attachments",
         ]
         msgs = self._db.connection.execute(
             "SELECT id FROM messages WHERE workspace_id = ?", (wid,)
@@ -906,6 +907,161 @@ class ApprovalRepository:
             (workspace_id, limit),
         )
         return _rows_to_dicts(cur.fetchall())
+
+
+class AttachmentRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(
+        self,
+        att_id: str,
+        workspace_id: str,
+        content_hash: str,
+        media_type: str,
+        original_filename: str,
+        storage_path: str,
+        size_bytes: int,
+        width: int | None = None,
+        height: int | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, object]:
+        self._db.connection.execute(
+            "INSERT INTO attachments"
+            " (id, workspace_id, session_id, content_hash, media_type,"
+            " original_filename, storage_path, size_bytes, width, height)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (att_id, workspace_id, session_id, content_hash, media_type,
+             original_filename, storage_path, size_bytes, width, height),
+        )
+        self._db.connection.commit()
+        result = self.get_by_id(att_id, workspace_id)
+        assert result is not None
+        return result
+
+    def get_by_id(self, att_id: str, workspace_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM attachments WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (att_id, workspace_id),
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def get_by_hash(self, content_hash: str, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM attachments WHERE content_hash = ? AND workspace_id = ? AND deleted_at IS NULL",
+            (content_hash, workspace_id),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM attachments WHERE workspace_id = ? AND deleted_at IS NULL"
+            " ORDER BY created_at DESC",
+            (workspace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_session(self, session_id: str, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM attachments WHERE session_id = ? AND workspace_id = ? AND deleted_at IS NULL"
+            " ORDER BY created_at DESC",
+            (session_id, workspace_id),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def soft_delete(self, att_id: str, workspace_id: str) -> None:
+        self._db.connection.execute(
+            "UPDATE attachments SET deleted_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ?",
+            (att_id, workspace_id),
+        )
+        self._db.connection.commit()
+
+    def hard_delete(self, att_id: str, workspace_id: str) -> bool:
+        self._db.connection.execute(
+            "DELETE FROM vision_observations WHERE attachment_id = ?", (att_id,)
+        )
+        self._db.connection.execute(
+            "DELETE FROM message_attachments WHERE attachment_id = ?", (att_id,)
+        )
+        cur = self._db.connection.execute(
+            "DELETE FROM attachments WHERE id = ? AND workspace_id = ?",
+            (att_id, workspace_id),
+        )
+        self._db.connection.commit()
+        return cur.rowcount > 0
+
+
+class VisionObservationRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(
+        self,
+        obs_id: str,
+        workspace_id: str,
+        attachment_id: str,
+        image_content_hash: str,
+        prompt: str,
+        normalized_prompt: str,
+        result_text: str,
+        provider: str,
+        model: str,
+        preprocessing_version: str,
+        cache_key: str,
+        session_id: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        latency_ms: int = 0,
+        trace_id: str = "",
+    ) -> dict[str, object]:
+        self._db.connection.execute(
+            "INSERT OR IGNORE INTO vision_observations"
+            " (id, workspace_id, session_id, attachment_id, image_content_hash,"
+            " prompt, normalized_prompt, result_text, provider, model,"
+            " preprocessing_version, cache_key, input_tokens, output_tokens,"
+            " latency_ms, trace_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (obs_id, workspace_id, session_id, attachment_id, image_content_hash,
+             prompt, normalized_prompt, result_text, provider, model,
+             preprocessing_version, cache_key, input_tokens, output_tokens,
+             latency_ms, trace_id),
+        )
+        self._db.connection.commit()
+        return self.get_by_cache_key(cache_key) or {}
+
+    def get_by_cache_key(self, cache_key: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM vision_observations WHERE cache_key = ?",
+            (cache_key,),
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def get_by_attachment(
+        self, attachment_id: str, workspace_id: str, limit: int = 10
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM vision_observations"
+            " WHERE attachment_id = ? AND workspace_id = ?"
+            " ORDER BY created_at DESC LIMIT ?",
+            (attachment_id, workspace_id, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_workspace(self, workspace_id: str, limit: int = 50) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM vision_observations WHERE workspace_id = ?"
+            " ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def hard_delete_by_attachment(self, attachment_id: str) -> None:
+        self._db.connection.execute(
+            "DELETE FROM vision_observations WHERE attachment_id = ?",
+            (attachment_id,),
+        )
+        self._db.connection.commit()
 
 
 class WorkspaceSettingsRepository:

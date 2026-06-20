@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
 from cogito_agent.models import ModelAdapter, ModelResponse
-from cogito_agent.models.messages import ChatMessage, ImagePart, TextPart
+from cogito_agent.models.messages import ChatMessage, ImagePart, MessageRole, TextPart
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +40,20 @@ def _extract_json(text: str) -> dict[str, Any] | None:
     """Try to extract and parse JSON from model output."""
     # Try direct parse
     try:
-        return json.loads(text)
+        return cast("dict[str, Any]", json.loads(text))
     except json.JSONDecodeError:
         pass
     # Try to find JSON in markdown code blocks
     m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
     if m:
         try:
-            return json.loads(m.group(1))
+            return cast("dict[str, Any]", json.loads(m.group(1)))
         except json.JSONDecodeError:
             pass
     # Try to find any JSON-like structure
     for match in _JSON_RE.finditer(text):
         try:
-            return json.loads(match.group(0))
+            return cast("dict[str, Any]", json.loads(match.group(0)))
         except json.JSONDecodeError:
             continue
     return None
@@ -73,7 +73,7 @@ def _repair_json(text: str) -> dict[str, Any] | None:
     if open_count > close_count:
         cleaned += "}" * (open_count - close_count)
     try:
-        return json.loads(cleaned)
+        return cast("dict[str, Any]", json.loads(cleaned))
     except json.JSONDecodeError:
         return None
 
@@ -101,18 +101,18 @@ def analyze_image(
     """
     messages = [
         ChatMessage(
-            role="system",
+            role=MessageRole.system,
             content=[TextPart(text=VISION_SYSTEM_PROMPT)],
         ),
         ChatMessage(
-            role="user",
+            role=MessageRole.user,
             content=[*image_parts],
         ),
     ]
     if instruction:
         messages.append(
             ChatMessage(
-                role="user",
+                role=MessageRole.user,
                 content=[TextPart(text=instruction)],
             )
         )
@@ -140,7 +140,9 @@ def analyze_image(
                 return VisionObservation.model_validate(parsed)
 
             last_error = f"Failed to parse JSON from model output: {resp.content[:200]}"
-            logger.warning("Vision model parse failure (attempt %d): %s", attempt + 1, resp.content[:100])
+            logger.warning(
+                "Vision model parse failure (attempt %d): %s", attempt + 1, resp.content[:100]
+            )
 
         except Exception as exc:
             last_error = str(exc)

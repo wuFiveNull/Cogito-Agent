@@ -192,3 +192,46 @@ LIST_FILES_MANIFEST = CapabilityManifest(
     audit_required=True,
     idempotent=True,
 )
+
+
+INSPECT_IMAGE_MANIFEST = CapabilityManifest(
+    name="inspect_image",
+    version="1.0.0",
+    type=CapabilityType.tool,
+    description=(
+        "Read visual information from an already-uploaded image attachment. "
+        "Use this only when existing observations are insufficient "
+        "for the current task. Provide a narrow, task-specific prompt."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "attachment_id": {
+                "type": "string",
+                "description": "ID of the uploaded image attachment (att_xxx)",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Specific visual question to ask about the image",
+            },
+            "force_refresh": {
+                "type": "boolean",
+                "description": "Force a new vision model call even if a cached observation exists",
+                "default": False,
+            },
+        },
+        "required": ["attachment_id", "prompt"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "result": {"type": "string"},
+        },
+    },
+    permissions=[Permission(resource="attachment", operations=["read"])],
+    risk_level=RiskLevel.low,
+    allowed_contexts=["interactive", "background"],
+    approval_required=False,
+    audit_required=True,
+    idempotent=False,
+)

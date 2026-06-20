@@ -47,28 +47,37 @@ class TextPart(BaseModel):
 
 class ImagePart(BaseModel):
     type: Literal["image"] = "image"
-    uri: str
+    uri: str = ""
+    attachment_id: str | None = None
     mime_type: str = "image/png"
     sha256: str | None = None
     width: int | None = None
     height: int | None = None
     trust_level: str = "untrusted"
 
+    def get_uri_or_attachment(self) -> str:
+        if self.uri:
+            return self.uri
+        return f"attachment://{self.attachment_id}" if self.attachment_id else ""
+
     @model_validator(mode="after")
     def _validate_uri(self) -> ImagePart:
-        if not self.uri.strip():
-            raise ValueError("ImagePart uri must not be empty")
-        if self.mime_type not in _ALLOWED_IMAGE_MIME_TYPES:
-            raise ValueError(
-                f"Unsupported image MIME type '{self.mime_type}'. "
-                f"Allowed: {sorted(_ALLOWED_IMAGE_MIME_TYPES)}"
-            )
-        scheme = self.uri.split(":", 1)[0] if ":" in self.uri else ""
-        if scheme and scheme not in _ALLOWED_URI_SCHEMES:
-            raise ValueError(
-                f"Unsupported URI scheme '{scheme}' in ImagePart. "
-                f"Allowed: {sorted(_ALLOWED_URI_SCHEMES)}"
-            )
+        if not self.uri and not self.attachment_id:
+            raise ValueError("ImagePart must have either uri or attachment_id")
+        if self.uri:
+            if not self.uri.strip():
+                raise ValueError("ImagePart uri must not be empty")
+            if self.mime_type not in _ALLOWED_IMAGE_MIME_TYPES:
+                raise ValueError(
+                    f"Unsupported image MIME type '{self.mime_type}'. "
+                    f"Allowed: {sorted(_ALLOWED_IMAGE_MIME_TYPES)}"
+                )
+            scheme = self.uri.split(":", 1)[0] if ":" in self.uri else ""
+            if scheme and scheme not in _ALLOWED_URI_SCHEMES:
+                raise ValueError(
+                    f"Unsupported URI scheme '{scheme}' in ImagePart. "
+                    f"Allowed: {sorted(_ALLOWED_URI_SCHEMES)}"
+                )
         return self
 
 

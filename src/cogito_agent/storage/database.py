@@ -158,6 +158,8 @@ register_migration(13, """
     CREATE INDEX IF NOT EXISTS idx_summary_session
         ON session_summaries(workspace_id, session_id, created_at);
 """)
+register_migration(14, _load_migration_sql("0014_vision_attachments.sql"))
+
 register_migration(10, """
     CREATE TABLE IF NOT EXISTS drift_runs (
         id TEXT PRIMARY KEY,
@@ -350,6 +352,7 @@ class Database:
             "workspace_roots", "workspace_files", "file_chunks",
             "file_chunk_embeddings", "artifacts",
             "drift_runs",
+            "attachments", "vision_observations", "message_attachments",
         ]
         for table in tables:
             try:

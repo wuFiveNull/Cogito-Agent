@@ -8,6 +8,7 @@ from .file_capabilities import (
 )
 from .registry import CapabilityRegistry, ToolResult, _validate_json_schema
 from .tools import (
+    INSPECT_IMAGE_MANIFEST,
     LIST_FILES_MANIFEST,
     READ_FILE_MANIFEST,
     _list_files,
@@ -21,6 +22,7 @@ __all__ = [
     "ToolResult",
     "READ_FILE_MANIFEST",
     "LIST_FILES_MANIFEST",
+    "INSPECT_IMAGE_MANIFEST",
     "SCAN_FILE_MANIFEST",
     "SEARCH_FILE_MANIFEST",
     "READ_FILE_MANIFEST_V2",

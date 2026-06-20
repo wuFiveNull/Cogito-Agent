@@ -37,9 +37,11 @@ from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
     ApprovalRepository,
+    AttachmentRepository,
     MemoryCandidateRepository,
     MemoryEditRepository,
     SessionRepository,
+    VisionObservationRepository,
     WorkspaceRepository,
     WorkspaceSettingsRepository,
 )
@@ -385,6 +387,7 @@ class ChatRequest(BaseModel):
     workspace_id: str
     text: str | None = None
     content: list[ContentItem] = Field(default_factory=list)
+    attachment_ids: list[str] = Field(default_factory=list)
     preferred_role: str | None = None
 
     def get_content_parts(self) -> list[ContentPart]:
@@ -392,6 +395,7 @@ class ChatRequest(BaseModel):
 
         Both 'text' and 'content' can be present simultaneously.
         Old clients that only send 'text' continue to work.
+        New clients can send attachment_ids instead of inline content.
         """
         parts: list[ContentPart] = []
         if self.text:
@@ -402,6 +406,7 @@ class ChatRequest(BaseModel):
                 parts.append(ImagePart(
                     uri=item.uri or "",
                     mime_type=item.mime_type or "image/png",
+                    attachment_id=item.uri or "",
                 ))
             elif ptype == "file":
                 parts.append(FilePart(
@@ -411,6 +416,11 @@ class ChatRequest(BaseModel):
                 ))
             else:
                 parts.append(TextPart(text=item.text or ""))
+        for att_id in self.attachment_ids:
+            parts.append(ImagePart(
+                attachment_id=att_id,
+                uri="",
+            ))
         return parts
 
 
@@ -475,6 +485,35 @@ def get_kernel() -> RuntimeKernel:
             from cogito_agent.cli.config_manager import build_model_adapter_from_config
             adapter = build_model_adapter_from_config()
         _kernel = RuntimeKernel(db, model_adapter=adapter) if adapter else RuntimeKernel(db)
+        # Set up vision service
+        from cogito_agent.capability import CapabilityRegistry
+        from cogito_agent.media import MediaProcessor
+        from cogito_agent.media.vision_service import VisionObservationService
+        cfg = load_yaml_config()
+        vision_svc = VisionObservationService(db, MediaProcessor())
+        # Configure vision adapter from config
+        if cfg.model.vision.enabled and cfg.model.vision.provider:
+            from cogito_agent.models.openai_adapter import OpenAICompatibleAdapter
+            v_api_key = cfg.model.vision.api_key or ""
+            if cfg.model.vision.api_key_ref:
+                import os
+                v_api_key = os.environ.get(cfg.model.vision.api_key_ref, "") or v_api_key
+            v_adapter = OpenAICompatibleAdapter(
+                api_key=v_api_key or "",
+                base_url=cfg.model.vision.base_url or "",
+                model=cfg.model.vision.model or "gpt-4o-mini",
+                timeout_sec=cfg.model.vision.timeout_sec,
+            )
+            vision_svc.set_vision_adapter(v_adapter,
+                provider=cfg.model.vision.provider,
+                model=cfg.model.vision.model)
+        # Register inspect_image capability
+        cap_reg = CapabilityRegistry()
+        vision_svc.register_with_capability_registry(cap_reg)
+        # Wire into kernel
+        _kernel.set_vision_service(vision_svc)
+        if hasattr(_kernel, '_cap_reg'):
+            _kernel._cap_reg = cap_reg
     return _kernel
 
 
@@ -634,6 +673,7 @@ class ChatStreamRequest(BaseModel):
     workspace_id: str
     text: str | None = None
     content: list[ContentItem] = Field(default_factory=list)
+    attachment_ids: list[str] = Field(default_factory=list)
 
     def get_content_parts(self) -> list[ContentPart]:
         parts: list[ContentPart] = []
@@ -645,6 +685,7 @@ class ChatStreamRequest(BaseModel):
                 parts.append(ImagePart(
                     uri=item.uri or "",
                     mime_type=item.mime_type or "image/png",
+                    attachment_id=item.uri or "",
                 ))
             elif ptype == "file":
                 parts.append(FilePart(
@@ -654,6 +695,11 @@ class ChatStreamRequest(BaseModel):
                 ))
             else:
                 parts.append(TextPart(text=item.text or ""))
+        for att_id in self.attachment_ids:
+            parts.append(ImagePart(
+                attachment_id=att_id,
+                uri="",
+            ))
         return parts
 
 
@@ -749,6 +795,102 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
             "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/attachments")
+async def upload_attachment(
+    request: Request,
+    workspace_id: str = "",
+    session_id: str = "",
+) -> JSONResponse:
+    """Upload an image attachment.
+
+    Accepts multipart/form-data with a single file field 'file'.
+    Returns attachment metadata including content_hash for cache matching.
+    """
+    rid = getattr(request.state, "request_id", "")
+    if not workspace_id:
+        return _error_response("VALIDATION_ERROR", "workspace_id is required", rid, status_code=400)
+
+    try:
+        form = await request.form()
+    except Exception:
+        return _error_response("VALIDATION_ERROR", "Invalid form data", rid, status_code=400)
+
+    uploaded_file = form.get("file")
+    if uploaded_file is None:
+        return _error_response("VALIDATION_ERROR", "No file uploaded", rid, status_code=400)
+
+    try:
+        data = await uploaded_file.read()
+    except Exception:
+        return _error_response("UPLOAD_ERROR", "Failed to read uploaded file", rid, status_code=400)
+
+    filename = getattr(uploaded_file, "filename", "") or ""
+
+    from cogito_agent.media import MediaProcessor
+    from cogito_agent.media.vision_service import VisionObservationService
+
+    processor = MediaProcessor()
+    try:
+        prepared = processor.validate_and_prepare(data, filename=filename)
+    except Exception as e:
+        safe_msg = str(e)
+        if "size exceeds" in safe_msg.lower():
+            return _error_response("ATTACHMENT_TOO_LARGE", safe_msg, rid, status_code=413)
+        if "unsupported" in safe_msg.lower():
+            return _error_response("UNSUPPORTED_MEDIA_TYPE", safe_msg, rid, status_code=415)
+        if "corrupt" in safe_msg.lower() or "cannot open" in safe_msg.lower():
+            return _error_response("CORRUPT_IMAGE", safe_msg, rid, status_code=400)
+        return _error_response("VALIDATION_ERROR", safe_msg, rid, status_code=400)
+
+    import hashlib
+    content_hash = hashlib.sha256(data).hexdigest()
+
+    ws_dir = Path(CFG.app.data_dir).expanduser() / "attachments" / workspace_id
+    ws_dir.mkdir(parents=True, exist_ok=True)
+
+    att_id = f"att_{uuid.uuid4().hex[:24]}"
+    storage_path = str(ws_dir / f"{att_id}.jpg")
+    Path(storage_path).write_bytes(prepared.data)
+
+    repo = AttachmentRepository(get_db())
+    repo.create(
+        att_id=att_id,
+        workspace_id=workspace_id,
+        content_hash=content_hash,
+        media_type=prepared.original_mime,
+        original_filename=filename or "unknown",
+        storage_path=storage_path,
+        size_bytes=len(data),
+        width=prepared.width,
+        height=prepared.height,
+        session_id=session_id or None,
+    )
+
+    return JSONResponse({
+        "attachment_id": att_id,
+        "content_hash": content_hash,
+        "media_type": prepared.original_mime,
+        "size_bytes": len(data),
+        "width": prepared.width,
+        "height": prepared.height,
+    })
+
+
+@app.get("/attachments")
+def list_attachments(workspace_id: str) -> list[dict[str, object]]:
+    repo = AttachmentRepository(get_db())
+    return repo.list_by_workspace(workspace_id)
+
+
+@app.get("/attachments/{att_id}")
+def get_attachment(att_id: str, workspace_id: str, request: Request) -> dict[str, object]:
+    repo = AttachmentRepository(get_db())
+    att = repo.get_by_id(att_id, workspace_id)
+    if att is None:
+        return _error_response("NOT_FOUND", "Attachment not found", request.state.request_id, status_code=404)
+    return att
 
 
 @app.get("/providers")

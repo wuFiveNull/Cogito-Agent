@@ -1,10 +1,12 @@
 from .database import Database, register_migration
 from .repositories import (
+    AttachmentRepository,
     FileArtifactRepository,
     MemoryEditRepository,
     MemoryRepository,
     MessageRepository,
     SessionRepository,
+    VisionObservationRepository,
     WorkspaceRepository,
 )
 
@@ -19,5 +21,7 @@ __all__ = [
     "MemoryRepository",
     "MemoryEditRepository",
     "FileArtifactRepository",
+    "AttachmentRepository",
+    "VisionObservationRepository",
     "register_migration",
 ]

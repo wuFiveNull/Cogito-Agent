@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from .adapter import ModelResponse  # noqa: F401
-from .openai_adapter import OpenAICompatibleAdapter
+
+if TYPE_CHECKING:
+    from .openai_adapter import OpenAICompatibleAdapter
 
 
 class ProviderConfig:
@@ -33,7 +36,9 @@ def get_adapter(
     api_key: str = "",
     base_url: str = "",
     timeout_sec: int = 60,
-) -> OpenAICompatibleAdapter:
+) -> object:
+    from .openai_adapter import OpenAICompatibleAdapter
+
     cfg = _PROVIDERS.get(provider)
     if cfg is None:
         cfg = ProviderConfig(

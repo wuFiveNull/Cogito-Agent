@@ -72,6 +72,16 @@ class ModelRouteSettings(BaseModel):
     fallback_strategy: str = "ordered"  # "ordered" or "none"
 
 
+class VisionModelSettings(BaseModel):
+    enabled: bool = False
+    provider: str = ""
+    base_url: str | None = None
+    api_key_ref: str | None = None
+    api_key: str | None = None
+    model: str = ""
+    timeout_sec: int = 60
+
+
 class ModelsSettings(BaseModel):
     provider: str = "mock"
     base_url: str | None = None
@@ -81,6 +91,7 @@ class ModelsSettings(BaseModel):
     max_retries: int = 2
     candidates: list[ModelCandidateSettings] = Field(default_factory=list)
     routes: dict[str, ModelRouteSettings] = Field(default_factory=dict)
+    vision: VisionModelSettings = Field(default_factory=VisionModelSettings)
 
 
 # ── Runtime ───────────────────────────────────────────────────────────────
@@ -303,6 +314,7 @@ __all__ = [
     "ModelCandidateSettings",
     "ModelRouteSettings",
     "ProviderConnectionSettings",
+    "VisionModelSettings",
     "RuntimeConfig",
     "MemoryConfig",
     "TraceConfig",

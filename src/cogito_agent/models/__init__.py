@@ -14,7 +14,6 @@ from .messages import (
     has_image,
     normalize_content,
 )
-from .openai_adapter import OpenAICompatibleAdapter
 from .registry import ProviderConfig, get_adapter, list_providers, register_provider
 from .router import (
     ModelCandidate,
@@ -79,6 +78,11 @@ def _import_analyze_image() -> object:
     return analyze_image
 
 
+def _import_openai_adapter() -> type:
+    from .openai_adapter import OpenAICompatibleAdapter
+    return OpenAICompatibleAdapter  # type: ignore[return-value]
+
+
 def __getattr__(name: str) -> object:
     _lazy_map: dict[str, Callable[..., object]] = {
         "GeminiCodec": _import_codec,
@@ -94,6 +98,7 @@ def __getattr__(name: str) -> object:
         "ProviderError": _import_provider_errors,
         "ProviderErrorCode": _import_provider_errors,
         "analyze_image": _import_analyze_image,
+        "OpenAICompatibleAdapter": _import_openai_adapter,
     }
     loader = _lazy_map.get(name)
     if loader is not None:

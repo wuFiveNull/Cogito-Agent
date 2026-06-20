@@ -51,8 +51,10 @@ from cogito_agent.shared import (
 from cogito_agent.shared.safety import wrap_untrusted
 from cogito_agent.shared.stream_events import StreamEvent, StreamEventType
 from cogito_agent.storage import Database, MessageRepository, SessionRepository
-from cogito_agent.storage.repositories import ApprovalRepository
+from cogito_agent.storage.repositories import ApprovalRepository, AttachmentRepository, VisionObservationRepository
 from cogito_agent.trace import SourceLineage, Tracer
+
+from cogito_agent.media.vision_service import VisionObservationService
 
 from .budget import TurnBudget
 from .multimodal import MultimodalCoordinator
@@ -138,6 +140,10 @@ class RuntimeKernel:
         self._compression = SessionCompressionService(db)
         self._extra_content: list[ContentPart] = []
         self._multimodal_coordinator: MultimodalCoordinator | None = None
+        self._vision_service: VisionObservationService | None = None
+
+    def set_vision_service(self, service: VisionObservationService) -> None:
+        self._vision_service = service
 
     def _run_vision_pipeline(
         self,
@@ -159,6 +165,41 @@ class RuntimeKernel:
         image_parts = [p for p in extra_content if isinstance(p, ImagePart)]
         text_parts = [p for p in extra_content if not isinstance(p, ImagePart)]
         primary_text = _extract_text_from_parts(text_parts) or user_text  # type: ignore[arg-type]
+
+        # If vision service is available with its own adapter, use it via inspect_image
+        if self._vision_service is not None and self._vision_service.has_vision_capability:
+            try:
+                self._vision_service.set_current_context(
+                    workspace_id=(event.workspace_id if event else ""),
+                    trace_id=str(getattr(trace, "id", "")),
+                )
+                results: list[str] = []
+                trace_id = str(getattr(trace, "id", ""))
+                for img_part in image_parts:
+                    att_id = getattr(img_part, "attachment_id", None) or ""
+                    if not att_id:
+                        continue
+                    result = self._vision_service.inspect_image(
+                        attachment_id=att_id,
+                        prompt=primary_text or "Describe this image",
+                        workspace_id=(event.workspace_id if event else ""),
+                        trace_id=trace_id,
+                    )
+                    if result:
+                        results.append(result)
+
+                if results:
+                    combined = "\n\n".join(results)
+                    call_id = f"vision_{uuid.uuid4().hex[:12]}"
+                    self._tool_results.append({
+                        "tool": "vision.observe",
+                        "summary": combined[:500],
+                        "status": "ok",
+                        "tool_call_id": call_id,
+                    })
+                    return text_parts, primary_text  # type: ignore[return-value]
+            except Exception as exc:
+                logger.warning("Vision service pipeline failed, falling back: %s", exc)
 
         try:
             call_start = datetime.now(UTC)
@@ -875,26 +916,99 @@ class RuntimeKernel:
         extra_content = self._get_extra_content(event)
         span = getattr(trace, "_current_span", None) or trace
 
+        # Resolve attachment references to data URIs for native vision models
+        resolved_content = self._resolve_attachment_content(extra_content, event.workspace_id)
+
+        # Collect vision observations context for attachments
+        vision_context = self._build_vision_context(
+            resolved_content, event.workspace_id, event.session_id,
+        )
+
         should_delegate_vision = (
-            has_image(extra_content) and not self._supports_vision()
+            has_image(resolved_content) and not self._supports_vision()
         )
         if should_delegate_vision:
             text_only_content, text_only_message = self._run_vision_pipeline(
-                extra_content, message, trace, span, event=event,
+                resolved_content, message, trace, span, event=event,
             )
             return self._prompt_builder.build(
                 ctx_items=ctx,
                 current_message=text_only_message,
                 tool_results=self._tool_results,
                 extra_content=text_only_content,
+                vision_context=vision_context,
             )
+
+        has_pending_attachments = any(
+            getattr(p, "attachment_id", None) and getattr(p, "get_uri_or_attachment", lambda: "")()
+            for p in (resolved_content or [])
+        ) if resolved_content else False
 
         return self._prompt_builder.build(
             ctx_items=ctx,
             current_message=message,
             tool_results=self._tool_results,
-            extra_content=extra_content,
+            extra_content=resolved_content if has_image(resolved_content) else resolved_content,
+            vision_context=vision_context,
         )
+
+    def _resolve_attachment_content(
+        self, extra_content: list[ContentPart], workspace_id: str,
+    ) -> list[ContentPart]:
+        """Resolve ImagePart.attachment_id to data URIs for native vision models."""
+        resolved: list[ContentPart] = []
+        for part in extra_content:
+            if isinstance(part, ImagePart) and part.attachment_id and not part.uri:
+                if self._vision_service:
+                    try:
+                        att = self._vision_service.require_attachment(
+                            part.attachment_id, workspace_id,
+                        )
+                        raw = self._vision_service.read_attachment_bytes(att)
+                        from cogito_agent.media import MediaProcessor
+                        proc = MediaProcessor()
+                        prepared = proc.validate_and_prepare(raw, filename=att.original_filename)
+                        data_uri = proc.to_data_uri(prepared)
+                        resolved.append(ImagePart(
+                            uri=data_uri,
+                            mime_type=prepared.mime_type,
+                            width=prepared.width,
+                            height=prepared.height,
+                            attachment_id=part.attachment_id,
+                        ))
+                    except Exception:
+                        resolved.append(TextPart(
+                            text=f"[Attachment {part.attachment_id}: failed to load]"
+                        ))
+                else:
+                    resolved.append(TextPart(
+                        text=f"[Attachment {part.attachment_id}]"
+                    ))
+            else:
+                resolved.append(part)
+        return resolved
+
+    def _build_vision_context(
+        self, extra_content: list[ContentPart],
+        workspace_id: str, session_id: str,
+    ) -> str:
+        """Build vision observation context string for prompt injection."""
+        if not self._vision_service:
+            return ""
+        attachment_ids: list[str] = []
+        for part in (extra_content or []):
+            if isinstance(part, ImagePart) and part.attachment_id:
+                attachment_ids.append(part.attachment_id)
+            elif isinstance(part, ImagePart) and part.uri:
+                pass
+        if not attachment_ids:
+            return ""
+        try:
+            return self._vision_service.format_observations_for_context(
+                attachment_ids, workspace_id,
+            )
+        except Exception:
+            return ""
 
     def _supports_vision(self) -> bool:
         """Check if the primary model adapter supports vision natively."""
@@ -1123,6 +1237,13 @@ class RuntimeKernel:
             self._check_budget_tool()
             args = dict(intent.arguments) if intent.arguments else {}
             tool_start = datetime.now(UTC)
+
+            # Inject current workspace/trace context for vision service
+            if self._vision_service is not None:
+                self._vision_service.set_current_context(
+                    workspace_id=event.workspace_id,
+                    trace_id=str(getattr(trace, "id", "")),
+                )
 
             def _do_invoke() -> object | None:
                 return (

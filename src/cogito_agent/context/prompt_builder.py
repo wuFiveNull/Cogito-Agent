@@ -54,7 +54,8 @@ class PromptBuilder:
       4. Retrieved workspace sources (files, chunks)
       5. Conversation history
       6. Tool results from current turn
-      7. Current user message (with optional multimodal content)
+      7. Vision observations for attachments in current message
+      8. Current user message (with optional multimodal content)
 
     Messages are deduplicated:
       - current_message may appear in ContextItems — only include once
@@ -75,6 +76,7 @@ class PromptBuilder:
         skill_instruction: str = "",
         runtime_metadata: dict[str, str] | None = None,
         extra_content: list[ContentPart] | None = None,
+        vision_context: str = "",
     ) -> list[dict[str, object]]:
         included = [c for c in ctx_items if c.included]
         msgs: list[dict[str, object]] = []
@@ -170,7 +172,14 @@ class PromptBuilder:
                     }],
                 })
 
-        # 7. Current user message — with optional multimodal content
+        # 7. Vision observations for attachments
+        if vision_context:
+            msgs.append({
+                "role": "system",
+                "content": vision_context,
+            })
+
+        # 8. Current user message — with optional multimodal content
         current_in_ctx = any(
             c.source_type == "current_message" and c.included
             for c in ctx_items
