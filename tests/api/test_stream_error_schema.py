@@ -27,11 +27,11 @@ def test_stream_nonexistent_session_returns_404(client: TestClient) -> None:
     assert data["error"]["code"] == "NOT_FOUND"
 
 
-def test_stream_missing_text_returns_422(client: TestClient) -> None:
+def test_stream_missing_session_returns_422(client: TestClient) -> None:
     """Stream returns 422 for missing required field."""
     resp = client.post("/chat/stream", json={
-        "session_id": "some-id",
         "workspace_id": "ws-1",
+        "text": "hello",
     })
     assert resp.status_code == 422
     data = resp.json()

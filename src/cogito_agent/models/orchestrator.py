@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from cogito_agent.models import ModelRouter, ModelRouteRequest
 from cogito_agent.models.vision import VisionObservation, analyze_image, render_observation_as_text
-from cogito_agent.shared.multimodal import ChatMessage, ContentPart, ImagePart
+from cogito_agent.models.messages import ChatMessage, ContentPart, ImagePart
 
 logger = logging.getLogger(__name__)
 

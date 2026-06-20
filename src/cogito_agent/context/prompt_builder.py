@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from cogito_agent.context import ContextItem
-from cogito_agent.shared.multimodal import (
-    ChatMessage,
+from cogito_agent.models.messages import (
     ContentPart,
+    FilePart,
     ImagePart,
     TextPart,
 )
@@ -31,7 +31,6 @@ def _content_parts_from_event_payload(payload: dict[str, object]) -> list[Conten
             if ptype == "image":
                 parts.append(ImagePart.model_validate(item))
             elif ptype == "file":
-                from cogito_agent.shared.multimodal import FilePart
                 parts.append(FilePart.model_validate(item))
             else:
                 parts.append(TextPart(text=str(item.get("text", ""))))
@@ -194,7 +193,6 @@ class PromptBuilder:
                         "mime_type": getattr(part, "mime_type", "image/png"),
                     })
                 else:
-                    from cogito_agent.shared.multimodal import FilePart
                     if isinstance(part, FilePart):
                         legacy_parts.append({
                             "type": "file",

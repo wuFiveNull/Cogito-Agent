@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from cogito_agent.models import ModelAdapter, ModelResponse
-from cogito_agent.shared.multimodal import ChatMessage, ImagePart, TextPart
+from cogito_agent.models.messages import ChatMessage, ImagePart, TextPart
 
 logger = logging.getLogger(__name__)
 

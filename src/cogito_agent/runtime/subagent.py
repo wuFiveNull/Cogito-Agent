@@ -4,8 +4,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from cogito_agent.models.messages import ContentPart, TextPart
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
-from cogito_agent.shared.multimodal import ContentPart, TextPart
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import MessageRepository, SessionRepository
 

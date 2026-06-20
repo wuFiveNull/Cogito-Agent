@@ -17,6 +17,10 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "cogito_agent.cli.config_manager.build_model_adapter_from_config",
         lambda: None,
     )
+    monkeypatch.setattr(
+        "cogito_agent.config_loader.build_multimodel_adapter",
+        lambda config=None: None,
+    )
     return TestClient(app)
 
 
@@ -202,6 +206,9 @@ def test_chat_with_configured_provider() -> None:
         with patch(
             "cogito_agent.cli.config_manager.build_model_adapter_from_config",
             return_value=fake_adapter,
+        ), patch(
+            "cogito_agent.config_loader.build_multimodel_adapter",
+            return_value=None,
         ):
             client = TestClient(app)
             ws_resp = client.post("/workspaces", params={"name": "config-test"})

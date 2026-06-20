@@ -292,8 +292,8 @@ def test_router_circuit_breaker_still_works() -> None:
         recovery_seconds=10,
         clock=lambda: fake_time[0],
     )
-    router.report_failure("primary", "err")
-    router.report_failure("primary", "err")
+    router.report_failure("primary:m", "err")
+    router.report_failure("primary:m", "err")
     decision = router.route(ModelRouteRequest(required_capabilities={"chat"}))
     assert decision.selected is not None
     assert decision.selected.provider == "fallback"

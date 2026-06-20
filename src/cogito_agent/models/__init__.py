@@ -1,4 +1,19 @@
+from collections.abc import Callable
+
 from .adapter import ModelAdapter, ModelResponse, StreamGenerator, ToolIntent
+from .messages import (
+    ChatMessage,
+    ContentPart,
+    ContentPartType,
+    FilePart,
+    ImagePart,
+    MessageRole,
+    TextPart,
+    extract_text,
+    has_file,
+    has_image,
+    normalize_content,
+)
 from .openai_adapter import OpenAICompatibleAdapter
 from .registry import ProviderConfig, get_adapter, list_providers, register_provider
 from .router import (
@@ -6,6 +21,7 @@ from .router import (
     ModelExclusion,
     ModelRole,
     ModelRouteDecision,
+    ModelRouteErrorCode,
     ModelRouteEvent,
     ModelRouteEventType,
     ModelRouter,
@@ -15,22 +31,78 @@ from .router import (
     ProviderHealthStatus,
     RoutedModelAdapter,
 )
-from .codec import (
-    ProviderMessageCodec,
-    TextOnlyCodec,
-    OpenAICompatibleCodec,
-    GeminiCodec,
-    UnsupportedModalityError,
-    get_codec_for_provider,
-)
-from .vision import VisionObservation, analyze_image, render_observation_as_text
-from .orchestrator import (
-    TaskKind,
-    ExecutionStep,
-    OrchestrationPlan,
-    TaskOrchestrator,
-)
-from .provider_errors import ProviderError, ProviderErrorCode
+from .vision import VisionObservation, render_observation_as_text
+
+
+# Lazy imports for modules with potential circular dependencies
+def _import_codec() -> dict[str, object]:
+    from .codec import (
+        GeminiCodec,
+        OpenAICompatibleCodec,
+        ProviderMessageCodec,
+        TextOnlyCodec,
+        UnsupportedModalityError,
+        get_codec_for_provider,
+    )
+    return {
+        "GeminiCodec": GeminiCodec,
+        "OpenAICompatibleCodec": OpenAICompatibleCodec,
+        "ProviderMessageCodec": ProviderMessageCodec,
+        "TextOnlyCodec": TextOnlyCodec,
+        "UnsupportedModalityError": UnsupportedModalityError,
+        "get_codec_for_provider": get_codec_for_provider,
+    }
+
+def _import_orchestrator() -> dict[str, object]:
+    from .orchestrator import (
+        ExecutionStep,
+        OrchestrationPlan,
+        TaskKind,
+        TaskOrchestrator,
+    )
+    return {
+        "ExecutionStep": ExecutionStep,
+        "OrchestrationPlan": OrchestrationPlan,
+        "TaskKind": TaskKind,
+        "TaskOrchestrator": TaskOrchestrator,
+    }
+
+def _import_provider_errors() -> dict[str, object]:
+    from .provider_errors import ProviderError, ProviderErrorCode
+    return {
+        "ProviderError": ProviderError,
+        "ProviderErrorCode": ProviderErrorCode,
+    }
+
+def _import_analyze_image() -> object:
+    from .vision import analyze_image
+    return analyze_image
+
+
+def __getattr__(name: str) -> object:
+    _lazy_map: dict[str, Callable[..., object]] = {
+        "GeminiCodec": _import_codec,
+        "OpenAICompatibleCodec": _import_codec,
+        "ProviderMessageCodec": _import_codec,
+        "TextOnlyCodec": _import_codec,
+        "UnsupportedModalityError": _import_codec,
+        "get_codec_for_provider": _import_codec,
+        "ExecutionStep": _import_orchestrator,
+        "OrchestrationPlan": _import_orchestrator,
+        "TaskKind": _import_orchestrator,
+        "TaskOrchestrator": _import_orchestrator,
+        "ProviderError": _import_provider_errors,
+        "ProviderErrorCode": _import_provider_errors,
+        "analyze_image": _import_analyze_image,
+    }
+    loader = _lazy_map.get(name)
+    if loader is not None:
+        result = loader()
+        if isinstance(result, dict):
+            return result[name]
+        return result
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 try:
     import tiktoken
@@ -59,6 +131,7 @@ __all__ = [
     "ModelExclusion",
     "ModelRole",
     "ModelRouteDecision",
+    "ModelRouteErrorCode",
     "ModelRouteEvent",
     "ModelRouteEventType",
     "ModelRouteRequest",
@@ -84,4 +157,15 @@ __all__ = [
     "TaskOrchestrator",
     "ProviderError",
     "ProviderErrorCode",
+    "ChatMessage",
+    "ContentPart",
+    "ContentPartType",
+    "FilePart",
+    "ImagePart",
+    "MessageRole",
+    "TextPart",
+    "extract_text",
+    "has_file",
+    "has_image",
+    "normalize_content",
 ]

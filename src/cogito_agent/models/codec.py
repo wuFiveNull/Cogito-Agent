@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import List, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
-from cogito_agent.shared.multimodal import ChatMessage, ImagePart, TextPart
+from cogito_agent.models.messages import ChatMessage, FilePart, ImagePart, TextPart
 from cogito_agent.models.provider_errors import ProviderError, ProviderErrorCode
 
 

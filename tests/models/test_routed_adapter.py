@@ -74,7 +74,7 @@ def test_routed_adapter_falls_back_and_reports_health() -> None:
     assert response.content == "fallback result"
     assert response.provider == "fallback"
     assert response.model == "chat"
-    assert router.get_health("primary").consecutive_failures == 1
+    assert router.get_health("primary:chat").consecutive_failures == 1
     assert len(observed) == 1
     assert [event.type for event in route_events] == [
         ModelRouteEventType.decision,

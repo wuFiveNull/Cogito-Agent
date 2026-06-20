@@ -79,8 +79,8 @@ def test_router_circuit_breaker_and_recovery_probe() -> None:
         recovery_seconds=10,
         clock=lambda: now[0],
     )
-    router.report_failure("primary", "timeout")
-    health = router.report_failure("primary", "timeout")
+    router.report_failure("primary:m", "timeout")
+    health = router.report_failure("primary:m", "timeout")
     assert health.status == ProviderHealthStatus.unhealthy
 
     open_decision = router.route(ModelRouteRequest(preferred_provider="primary"))
@@ -92,10 +92,10 @@ def test_router_circuit_breaker_and_recovery_probe() -> None:
     probe = router.route(ModelRouteRequest(preferred_provider="primary"))
     assert probe.selected is not None
     assert probe.selected.provider == "primary"
-    assert router.get_health("primary").status == ProviderHealthStatus.probing
+    assert router.get_health("primary:m").status == ProviderHealthStatus.probing
 
-    router.report_success("primary")
-    assert router.get_health("primary").status == ProviderHealthStatus.healthy
+    router.report_success("primary:m")
+    assert router.get_health("primary:m").status == ProviderHealthStatus.healthy
 
 
 def test_router_is_deterministic_for_equal_candidates() -> None:

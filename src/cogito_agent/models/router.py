@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 import time
 from collections.abc import Callable, Iterable, Iterator
-from typing import Protocol, Tuple
+from typing import Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 try:
     from enum import StrEnum
@@ -28,7 +26,20 @@ def _default_roles() -> frozenset[str]:
 def _default_modalities() -> frozenset[str]:
     return frozenset({"text"})
 
+
 from .adapter import ModelAdapter, ModelResponse
+
+# ── Error codes ───────────────────────────────────────────────────────────
+
+
+class ModelRouteErrorCode(StrEnum):
+    NO_MODEL_CANDIDATE = "NO_MODEL_CANDIDATE"
+    NO_VISION_MODEL_AVAILABLE = "NO_VISION_MODEL_AVAILABLE"
+    UNSUPPORTED_MODALITY = "UNSUPPORTED_MODALITY"
+    NO_STRUCTURED_OUTPUT_MODEL = "NO_STRUCTURED_OUTPUT_MODEL"
+
+
+# ── Health status ─────────────────────────────────────────────────────────
 
 
 class ProviderHealthStatus(StrEnum):
@@ -36,6 +47,9 @@ class ProviderHealthStatus(StrEnum):
     degraded = "degraded"
     unhealthy = "unhealthy"
     probing = "probing"
+
+
+# ── Roles ─────────────────────────────────────────────────────────────────
 
 
 class ModelRole(StrEnum):
@@ -56,6 +70,11 @@ COMMON_CAPABILITIES: set[str] = {
 
 COMMON_MODALITIES: set[str] = {"text", "image", "file"}
 
+COMMON_OUTPUT_FORMATS: set[str] = {"text", "json"}
+
+
+# ── Route request ─────────────────────────────────────────────────────────
+
 
 class ModelRouteRequest(BaseModel):
     required_capabilities: set[str] = Field(default_factory=_default_capabilities)
@@ -70,10 +89,16 @@ class ModelRouteRequest(BaseModel):
     max_cost_usd: float | None = None
     preferred_provider: str = ""
     preferred_model: str = ""
-    preferred_candidates: Tuple[str, ...] = Field(default_factory=tuple)
+    preferred_candidates: tuple[str, ...] = Field(default_factory=tuple)
+    strict_preferred_candidates: bool = False
+    chat_fallback_role: bool = True
+
+
+# ── Candidate model ───────────────────────────────────────────────────────
 
 
 class ModelCandidate(BaseModel):
+    candidate_id: str = ""
     provider: str
     model: str
     capabilities: set[str] = Field(default_factory=_default_capabilities)
@@ -88,8 +113,15 @@ class ModelCandidate(BaseModel):
     priority: int = 100
     enabled: bool = True
 
+    @field_validator("candidate_id", mode="before")
+    @classmethod
+    def _default_candidate_id(cls, v: str, info: object) -> str:
+        return v
+
     @property
     def id(self) -> str:
+        if self.candidate_id:
+            return self.candidate_id
         return f"{self.provider}:{self.model}"
 
     def estimated_cost(self, request: ModelRouteRequest) -> float:
@@ -110,6 +142,7 @@ class ModelRouteDecision(BaseModel):
     fallback_order: list[ModelCandidate] = Field(default_factory=list)
     exclusions: list[ModelExclusion] = Field(default_factory=list)
     reason: str
+    error_code: ModelRouteErrorCode | None = None
 
 
 class ModelRouteEventType(StrEnum):
@@ -130,7 +163,7 @@ class ModelRouteEvent(BaseModel):
 
 
 class ProviderHealth(BaseModel):
-    provider: str
+    candidate_id: str
     status: ProviderHealthStatus = ProviderHealthStatus.healthy
     consecutive_failures: int = 0
     opened_until: float = 0.0
@@ -142,7 +175,10 @@ class ModelRouterProtocol(Protocol):
 
 
 class ModelRouter:
-    """Deterministic local router with health cache and circuit breaking."""
+    """Deterministic local router with health cache and circuit breaking.
+
+    Health tracking is at candidate_id granularity.
+    """
 
     def __init__(
         self,
@@ -164,8 +200,10 @@ class ModelRouter:
     def unregister(self, candidate_id: str) -> None:
         self._candidates.pop(candidate_id, None)
 
-    def get_health(self, provider: str) -> ProviderHealth:
-        health = self._health.setdefault(provider, ProviderHealth(provider=provider))
+    def get_health(self, candidate_id: str) -> ProviderHealth:
+        health = self._health.setdefault(
+            candidate_id, ProviderHealth(candidate_id=candidate_id)
+        )
         if (
             health.status == ProviderHealthStatus.unhealthy
             and self._clock() >= health.opened_until
@@ -173,11 +211,13 @@ class ModelRouter:
             health.status = ProviderHealthStatus.probing
         return health.model_copy(deep=True)
 
-    def report_success(self, provider: str) -> None:
-        self._health[provider] = ProviderHealth(provider=provider)
+    def report_success(self, candidate_id: str) -> None:
+        self._health[candidate_id] = ProviderHealth(candidate_id=candidate_id)
 
-    def report_failure(self, provider: str, error: str = "") -> ProviderHealth:
-        health = self._health.setdefault(provider, ProviderHealth(provider=provider))
+    def report_failure(self, candidate_id: str, error: str = "") -> ProviderHealth:
+        health = self._health.setdefault(
+            candidate_id, ProviderHealth(candidate_id=candidate_id)
+        )
         health.consecutive_failures += 1
         health.last_error = error
         if health.consecutive_failures >= self._failure_threshold:
@@ -201,13 +241,13 @@ class ModelRouter:
                     )
                 )
                 continue
-            health = self.get_health(candidate.provider)
+            health = self.get_health(candidate.id)
             if health.status == ProviderHealthStatus.unhealthy:
                 exclusions.append(
                     ModelExclusion(
                         candidate_id=candidate.id,
                         reason_code="circuit_open",
-                        detail="provider circuit breaker is open",
+                        detail="circuit breaker is open for this candidate",
                     )
                 )
                 continue
@@ -215,10 +255,26 @@ class ModelRouter:
 
         eligible.sort(key=lambda item: self._sort_key(item[0], item[1], request))
         ordered = [candidate for candidate, _health in eligible]
+
+        error_code: ModelRouteErrorCode | None = None
+        if not ordered:
+            has_vision_req = (
+                "vision" in request.required_capabilities
+                or "image" in request.required_input_modalities
+            )
+            has_output_fmt = bool(request.required_output_formats)
+            if has_vision_req:
+                error_code = ModelRouteErrorCode.NO_VISION_MODEL_AVAILABLE
+            elif has_output_fmt and "json" in request.required_output_formats:
+                error_code = ModelRouteErrorCode.NO_STRUCTURED_OUTPUT_MODEL
+            else:
+                error_code = ModelRouteErrorCode.NO_MODEL_CANDIDATE
+
         if not ordered:
             return ModelRouteDecision(
                 reason="no eligible model candidate",
                 exclusions=exclusions,
+                error_code=error_code,
             )
         return ModelRouteDecision(
             selected=ordered[0],
@@ -232,31 +288,47 @@ class ModelRouter:
     ) -> tuple[str, str] | None:
         if not candidate.enabled:
             return "disabled", "candidate is disabled"
+
         missing = request.required_capabilities - candidate.capabilities
         if missing:
             return "missing_capability", ", ".join(sorted(missing))
+
         missing_modalities = request.required_input_modalities - candidate.input_modalities
-        if missing_modalities and request.required_input_modalities != {"text"}:
-            return "missing_modality", ", ".join(sorted(missing_modalities))
+        if missing_modalities:
+            return "missing_input_modality", ", ".join(sorted(missing_modalities))
+
+        missing_formats = request.required_output_formats - candidate.output_formats
+        if missing_formats:
+            return "missing_output_format", ", ".join(sorted(missing_formats))
+
         if request.role and request.role not in candidate.roles:
-            if candidate.roles != frozenset({"chat"}):
+            if request.chat_fallback_role and candidate.roles == frozenset({"chat"}):
+                pass
+            else:
                 return "role_mismatch", f"required role '{request.role}' not in candidate roles"
-        if request.preferred_candidates and candidate.id not in request.preferred_candidates:
-            pass
+
+        if request.strict_preferred_candidates and request.preferred_candidates:
+            if candidate.id not in request.preferred_candidates:
+                return "not_preferred", "candidate not in strict preferred_candidates list"
+
         required_context = request.estimated_input_tokens + request.max_output_tokens
         if required_context > candidate.context_window:
             detail = f"requires {required_context}, supports {candidate.context_window}"
             return "context_window", detail
+
         if candidate.quality_score < request.min_quality_score:
             return "quality", "quality score is below the requested minimum"
+
         if (
             request.max_latency_ms is not None
             and candidate.expected_latency_ms > request.max_latency_ms
         ):
             return "latency", "expected latency exceeds the requested maximum"
+
         estimated_cost = candidate.estimated_cost(request)
         if request.max_cost_usd is not None and estimated_cost > request.max_cost_usd:
             return "budget", f"estimated cost {estimated_cost:.6f} exceeds budget"
+
         return None
 
     @staticmethod
@@ -277,19 +349,28 @@ class ModelRouter:
             request.preferred_provider
             and candidate.provider == request.preferred_provider
         )
+
+        preferred_candidate_idx: int = 9999
+        if request.preferred_candidates:
+            try:
+                preferred_candidate_idx = request.preferred_candidates.index(candidate.id)
+            except ValueError:
+                pass
+
         health_rank = {
             ProviderHealthStatus.healthy: 0,
             ProviderHealthStatus.probing: 1,
             ProviderHealthStatus.degraded: 2,
             ProviderHealthStatus.unhealthy: 3,
         }[health.status]
-        # Penalize candidates with extra modalities/capabilities beyond the request
-        # so text-only models are preferred for text-only tasks.
+
         extra_modalities = len(candidate.input_modalities - request.required_input_modalities)
         extra_capabilities = len(candidate.capabilities - request.required_capabilities)
+
         return (
             not preferred_model,
             not preferred_provider,
+            preferred_candidate_idx,
             extra_modalities,
             extra_capabilities,
             health_rank,
@@ -329,7 +410,8 @@ class RoutedModelAdapter:
         self._observe(decision)
         candidates = self._ordered_candidates(decision)
         if not candidates:
-            raise RuntimeError("No eligible model candidate")
+            error_code = decision.error_code.value if decision.error_code else "NO_MODEL_CANDIDATE"
+            raise RuntimeError(f"No eligible model candidate [{error_code}]")
         errors: list[str] = []
         for index, candidate in enumerate(candidates, start=1):
             adapter = self._resolver(candidate)
@@ -342,7 +424,7 @@ class RoutedModelAdapter:
                     raise RuntimeError(response.error)
             except Exception as exc:
                 errors.append(f"{candidate.id}: {exc}")
-                self._report_failure(candidate.provider, str(exc))
+                self._report_failure(candidate.id, str(exc))
                 self._observe_route(
                     ModelRouteEvent(
                         type=ModelRouteEventType.attempt_failed,
@@ -354,7 +436,7 @@ class RoutedModelAdapter:
                     )
                 )
                 continue
-            self._report_success(candidate.provider)
+            self._report_success(candidate.id)
             response.provider = response.provider or candidate.provider
             response.model = response.model or candidate.model
             self._observe_route(
@@ -377,7 +459,8 @@ class RoutedModelAdapter:
         self._observe(decision)
         candidates = self._ordered_candidates(decision)
         if not candidates:
-            raise RuntimeError("No eligible model candidate")
+            error_code = decision.error_code.value if decision.error_code else "NO_MODEL_CANDIDATE"
+            raise RuntimeError(f"No eligible model candidate [{error_code}]")
         errors: list[str] = []
         for index, candidate in enumerate(candidates, start=1):
             adapter = self._resolver(candidate)
@@ -398,7 +481,7 @@ class RoutedModelAdapter:
                         emitted = True
                         yield response.content
             except Exception as exc:
-                self._report_failure(candidate.provider, str(exc))
+                self._report_failure(candidate.id, str(exc))
                 if emitted:
                     self._observe_route(
                         ModelRouteEvent(
@@ -425,7 +508,7 @@ class RoutedModelAdapter:
                     )
                 )
                 continue
-            self._report_success(candidate.provider)
+            self._report_success(candidate.id)
             self._observe_route(
                 ModelRouteEvent(
                     type=ModelRouteEventType.attempt_succeeded,
@@ -454,6 +537,7 @@ class RoutedModelAdapter:
         text_size = 0
         capabilities: set[str] = {"chat"}
         modalities: set[str] = {"text"}
+        output_formats: set[str] = set()
         role = kwargs.pop("_route_role", "")
         task_kind = kwargs.pop("_route_task_kind", "")
 
@@ -486,14 +570,18 @@ class RoutedModelAdapter:
             else ()
         )
 
+        strict_preferred = bool(kwargs.pop("_route_strict_preferred", False))
+
         return ModelRouteRequest(
             required_capabilities=capabilities,
             required_input_modalities=modalities,
+            required_output_formats=output_formats,
             role=explicit_role,
             task_kind=explicit_task,
             estimated_input_tokens=max(1, text_size // 4),
-            max_output_tokens=int(max_output) if isinstance(max_output, int) else 4000,
+            max_output_tokens=int(max_output) if isinstance(max_output, (int, float)) else 4000,
             preferred_candidates=pref_candidates,
+            strict_preferred_candidates=strict_preferred,
         )
 
     def _observe(self, decision: ModelRouteDecision) -> None:
@@ -513,12 +601,12 @@ class RoutedModelAdapter:
         if self._route_observer is not None:
             self._route_observer(event)
 
-    def _report_success(self, provider: str) -> None:
+    def _report_success(self, candidate_id: str) -> None:
         reporter = getattr(self._router, "report_success", None)
         if callable(reporter):
-            reporter(provider)
+            reporter(candidate_id)
 
-    def _report_failure(self, provider: str, error: str) -> None:
+    def _report_failure(self, candidate_id: str, error: str) -> None:
         reporter = getattr(self._router, "report_failure", None)
         if callable(reporter):
-            reporter(provider, error)
+            reporter(candidate_id, error)

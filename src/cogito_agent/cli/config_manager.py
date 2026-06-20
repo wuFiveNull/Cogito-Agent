@@ -8,6 +8,7 @@ from cogito_agent.models import (
     ModelAdapter,
     ModelCandidate,
     ModelRouter,
+    ModelRouteErrorCode,
     RoutedModelAdapter,
     get_adapter,
     list_providers,

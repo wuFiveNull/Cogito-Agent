@@ -34,6 +34,36 @@ class AppSettings(BaseModel):
     workspace_root: str = "~/.cogito/workspace"
 
 
+class ModelCandidateConfig(BaseModel):
+    id: str = ""
+    provider: str = ""
+    base_url: str | None = None
+    api_key_ref: str | None = None
+    api_key: str | None = None
+    model: str = ""
+    capabilities: list[str] = Field(default_factory=lambda: ["chat"])
+    roles: list[str] = Field(default_factory=lambda: ["chat"])
+    input_modalities: list[str] = Field(default_factory=lambda: ["text"])
+    output_formats: list[str] = Field(default_factory=list)
+    context_window: int = 32768
+    quality_score: float = 0.5
+    expected_latency_ms: int = 1000
+    input_cost_per_million: float = 0.0
+    output_cost_per_million: float = 0.0
+    priority: int = 100
+    enabled: bool = True
+
+
+class ModelRouteConfig(BaseModel):
+    required_capabilities: list[str] = Field(default_factory=lambda: ["chat"])
+    required_input_modalities: list[str] = Field(default_factory=lambda: ["text"])
+    required_output_formats: list[str] = Field(default_factory=list)
+    role: str = ""
+    preferred_candidates: list[str] = Field(default_factory=list)
+    strict_preferred: bool = False
+    fallback_strategy: str = "ordered"
+
+
 class ModelSettings(BaseModel):
     provider: str = "mock"
     base_url: str = ""
@@ -44,6 +74,8 @@ class ModelSettings(BaseModel):
     timeout_seconds: int = 60
     max_retries: int = 2
     streaming_enabled: bool = True
+    candidates: list[ModelCandidateConfig] = Field(default_factory=list)
+    routes: dict[str, ModelRouteConfig] = Field(default_factory=dict)
 
 
 class QuietHoursSettings(BaseModel):

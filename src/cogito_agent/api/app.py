@@ -25,6 +25,12 @@ from cogito_agent.console import console_router, status_router
 from cogito_agent.logging import setup_logging
 from cogito_agent.mcp import MCPServerConfig, MCPServerManager
 from cogito_agent.models import list_providers
+from cogito_agent.models.messages import (
+    ContentPart,
+    FilePart,
+    ImagePart,
+    TextPart,
+)
 from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest, StreamEventType
 from cogito_agent.skill import SkillPool, SkillRunner, WorkspaceSkill
@@ -375,11 +381,37 @@ class ContentItem(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    text: str | None = None
     session_id: str
     workspace_id: str
+    text: str | None = None
     content: list[ContentItem] = Field(default_factory=list)
     preferred_role: str | None = None
+
+    def get_content_parts(self) -> list[ContentPart]:
+        """Normalize text+content into unified ContentPart list.
+
+        Both 'text' and 'content' can be present simultaneously.
+        Old clients that only send 'text' continue to work.
+        """
+        parts: list[ContentPart] = []
+        if self.text:
+            parts.append(TextPart(text=self.text))
+        for item in self.content:
+            ptype = item.type
+            if ptype == "image":
+                parts.append(ImagePart(
+                    uri=item.uri or "",
+                    mime_type=item.mime_type or "image/png",
+                ))
+            elif ptype == "file":
+                parts.append(FilePart(
+                    uri=item.uri or "",
+                    mime_type=item.mime_type or "application/octet-stream",
+                    filename=item.text or "file",
+                ))
+            else:
+                parts.append(TextPart(text=item.text or ""))
+        return parts
 
 
 class ChatResponse(BaseModel):
@@ -436,7 +468,8 @@ def get_kernel() -> RuntimeKernel:
     global _kernel
     if _kernel is None:
         db = get_db()
-        from cogito_agent.config_loader import build_multimodel_adapter, load_config as load_yaml_config
+        from cogito_agent.config_loader import build_multimodel_adapter
+        from cogito_agent.config_loader import load_config as load_yaml_config
         adapter = build_multimodel_adapter(load_yaml_config())
         if adapter is None:
             from cogito_agent.cli.config_manager import build_model_adapter_from_config
@@ -457,15 +490,13 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
             request.state.request_id, status_code=404,
         )
 
-    text = req.text or ""
+    content_parts = req.get_content_parts()
+    text_projection = req.text or ""
     payload: dict[str, object] = {
-        "text": text,
+        "text": text_projection,
         "_request_id": request.state.request_id,
+        "content": [p.model_dump(exclude_none=True) for p in content_parts],
     }
-    if req.content:
-        payload["content"] = [
-            c.model_dump(exclude_none=True) for c in req.content
-        ]
     if req.preferred_role:
         payload["_preferred_role"] = req.preferred_role
 
@@ -599,10 +630,31 @@ def action_candidate(req: CandidateAction, request: Request) -> dict[str, object
 
 
 class ChatStreamRequest(BaseModel):
-    text: str | None = None
     session_id: str
     workspace_id: str
+    text: str | None = None
     content: list[ContentItem] = Field(default_factory=list)
+
+    def get_content_parts(self) -> list[ContentPart]:
+        parts: list[ContentPart] = []
+        if self.text:
+            parts.append(TextPart(text=self.text))
+        for item in self.content:
+            ptype = item.type
+            if ptype == "image":
+                parts.append(ImagePart(
+                    uri=item.uri or "",
+                    mime_type=item.mime_type or "image/png",
+                ))
+            elif ptype == "file":
+                parts.append(FilePart(
+                    uri=item.uri or "",
+                    mime_type=item.mime_type or "application/octet-stream",
+                    filename=item.text or "file",
+                ))
+            else:
+                parts.append(TextPart(text=item.text or ""))
+        return parts
 
 
 class SkillInstallRequest(BaseModel):
@@ -631,16 +683,14 @@ def chat_stream(req: ChatStreamRequest, request: Request) -> StreamingResponse:
             request.state.request_id, status_code=404,
         )
 
-    text = req.text or ""
+    content_parts = req.get_content_parts()
+    text_projection = req.text or ""
     payload: dict[str, object] = {
-        "text": text,
+        "text": text_projection,
         "_request_id": request.state.request_id,
         "channel": "api_stream",
+        "content": [p.model_dump(exclude_none=True) for p in content_parts],
     }
-    if req.content:
-        payload["content"] = [
-            c.model_dump(exclude_none=True) for c in req.content
-        ]
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
         session_id=req.session_id,

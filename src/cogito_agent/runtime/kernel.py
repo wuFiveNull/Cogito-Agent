@@ -28,6 +28,9 @@ from cogito_agent.models import (
     StreamGenerator,
     ToolIntent,
 )
+from cogito_agent.models.messages import (
+    normalize_content,
+)
 from cogito_agent.shared import (
     DecisionType,
     EventType,
@@ -697,10 +700,11 @@ class RuntimeKernel:
                 )
             except Exception:
                 memories = self._mem_retriever.list_recent(event.workspace_id)
+        text_projection = str(event.payload.get("text", "") or "")
         ctx_items = self._ctx_engine.build(
             recent_messages=recent_messages,
             memories=memories,
-            current_message=str(event.payload.get("text", "") or ""),
+            current_message=text_projection,
             db=self._db,
             trace_id="",
             workspace_id=event.workspace_id,
@@ -736,20 +740,7 @@ class RuntimeKernel:
     def _get_extra_content(self, event: RuntimeEvent) -> list:
         raw = event.payload.get("content", [])
         if isinstance(raw, list):
-            result = []
-            for item in raw:
-                if isinstance(item, dict):
-                    ptype = item.get("type", "text")
-                    if ptype == "image":
-                        from cogito_agent.shared.multimodal import ImagePart
-                        result.append(ImagePart.model_validate(item))
-                    elif ptype == "file":
-                        from cogito_agent.shared.multimodal import FilePart
-                        result.append(FilePart.model_validate(item))
-                    elif ptype == "text":
-                        from cogito_agent.shared.multimodal import TextPart
-                        result.append(TextPart(text=str(item.get("text", ""))))
-            return result
+            return normalize_content(raw)
         return []
 
     def _generate_reply(
