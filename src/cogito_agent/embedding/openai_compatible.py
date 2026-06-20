@@ -9,6 +9,8 @@ from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urljoin
 
+import httpx
+
 from .exceptions import (
     EmbeddingAPIError,
     EmbeddingAuthenticationError,
@@ -18,8 +20,8 @@ from .exceptions import (
     EmbeddingResponseError,
     EmbeddingTimeoutError,
 )
-from .interface import EmbeddingHealth
-from .registry import get_model_info
+from .interface import EmbeddingHealth, EmbeddingProvider
+from .registry import MODEL_REGISTRY, get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ class OpenAICompatibleEmbeddingProvider:
         self._verify_norm = verify_norm
         self._max_input_tokens = max_input_tokens
         self._http_client = http_client
+        self._own_client: httpx.Client | None = None
 
         if not self._expected_dimension:
             info = get_model_info(model)
@@ -165,30 +168,32 @@ class OpenAICompatibleEmbeddingProvider:
             status_code=0,
         )
 
+    def _get_client(self) -> httpx.Client:
+        if self._http_client is not None:
+            return self._http_client
+        if self._own_client is None:
+            self._own_client = httpx.Client(
+                timeout=httpx.Timeout(
+                    self._timeout_seconds,
+                    connect=self._connect_timeout_seconds,
+                ),
+            )
+        return self._own_client
+
+    def close(self) -> None:
+        if self._own_client is not None:
+            self._own_client.close()
+            self._own_client = None
+
     def _do_request(
         self, url: str, headers: dict[str, str],
         body: dict[str, object], attempt: int,
     ) -> Any:
-        import httpx
-
+        client = self._get_client()
         try:
-            if self._http_client:
-                resp = self._http_client.post(
-                    url, headers=headers, json=body,
-                    timeout=httpx.Timeout(
-                        self._timeout_seconds,
-                        connect=self._connect_timeout_seconds,
-                    ),
-                )
-            else:
-                with httpx.Client() as client:
-                    resp = client.post(
-                        url, headers=headers, json=body,
-                        timeout=httpx.Timeout(
-                            self._timeout_seconds,
-                            connect=self._connect_timeout_seconds,
-                        ),
-                    )
+            resp = client.post(
+                url, headers=headers, json=body,
+            )
         except httpx.TimeoutException as e:
             raise EmbeddingTimeoutError(str(e)) from e
         except httpx.ConnectError as e:
@@ -283,12 +288,18 @@ class OpenAICompatibleEmbeddingProvider:
                     f"Invalid value (NaN/Inf) at index {index}"
                 )
 
+        norm = math.sqrt(sum(x * x for x in vec))
+        if norm <= 1e-12:
+            raise EmbeddingResponseError(
+                f"Embedding vector at index {index} has zero norm"
+            )
+
         if self._normalize:
-            norm = math.sqrt(sum(x * x for x in vec))
-            if self._verify_norm and abs(norm - 1.0) > 0.01:
-                pass
-            if norm > 0:
-                vec[:] = [x / norm for x in vec]
+            vec[:] = [x / norm for x in vec]
+        elif self._verify_norm and abs(norm - 1.0) > 0.01:
+            raise EmbeddingResponseError(
+                f"Embedding at index {index} norm={norm:.4f}, expected ~1.0"
+            )
 
     def _backoff_delay(
         self, attempt: int, retry_after: int | None = None,
