@@ -12,6 +12,20 @@ from cogito_agent.storage.repositories import (
 )
 
 
+def _get_app_svc(db: Database | None = None) -> Any:
+    """Return ApplicationServices via bootstrap factory."""
+    from cogito_agent.bootstrap import build_application_services
+    from cogito_agent.config import Settings
+    from cogito_agent.storage import Database as _Db
+
+    if db is None:
+        db = _Db()
+        db.initialize()
+        db.migrate()
+    cfg = Settings.get()
+    return build_application_services(db, config=cfg.memory)
+
+
 def _run_memory_list(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
@@ -114,17 +128,11 @@ def _run_memory_accept(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
     db.initialize()
-    audit = AuditLogger(db)
-    repo = MemoryCandidateRepository(db)
-    result = repo.accept(ns.candidate_id)
+    db.migrate()
+    svc = _get_app_svc(db)
+    result = svc.memory_application.accept_candidate(ns.candidate_id, actor_id="cli")
     if result:
         print(f"  Accepted: {str(result.get('text', ''))[:60]}")
-        audit.log(
-            actor_id="cli", action="memory.accept",
-            resource=f"candidate:{ns.candidate_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user approved",
-        )
     else:
         print("  Candidate not found or already resolved.")
     db.close()
@@ -134,17 +142,11 @@ def _run_memory_reject(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
     db.initialize()
-    audit = AuditLogger(db)
-    repo = MemoryCandidateRepository(db)
-    result = repo.reject(ns.candidate_id)
+    db.migrate()
+    svc = _get_app_svc(db)
+    result = svc.memory_application.reject_candidate(ns.candidate_id, actor_id="cli")
     if result:
         print(f"  Rejected: {str(result.get('text', ''))[:60]}")
-        audit.log(
-            actor_id="cli", action="memory.reject",
-            resource=f"candidate:{ns.candidate_id}",
-            workspace_id=ns.workspace_id,
-            decision="deny", reason="user rejected",
-        )
     else:
         print("  Candidate not found or already resolved.")
     db.close()
@@ -154,16 +156,10 @@ def _run_memory_delete(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
     db.initialize()
-    audit = AuditLogger(db)
-    repo = MemoryEditRepository(db)
-    if repo.hard_delete(ns.memory_id, ns.workspace_id):
+    db.migrate()
+    svc = _get_app_svc(db)
+    if svc.memory_application.delete_memory(ns.memory_id, ns.workspace_id, actor_id="cli"):
         print(f"  Deleted memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.delete",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user deleted",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -174,22 +170,10 @@ def _run_memory_pin(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
-    from datetime import UTC, datetime
-    db.connection.execute(
-        "UPDATE memories SET pinned_at = ?"
-        " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-        (datetime.now(UTC).isoformat(), ns.memory_id, ns.workspace_id),
-    )
-    if db.connection.total_changes:
-        db.connection.commit()
+    from cogito_agent.storage.repositories import MemoryRepository
+    repo = MemoryRepository(db)
+    if repo.pin(ns.memory_id, ns.workspace_id):
         print(f"  Pinned memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.pin",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user pinned",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -199,18 +183,10 @@ def _run_memory_consolidate(args: Any) -> None:
     ns = args
     db = Database(ns.db_path)
     db.initialize()
-    audit = AuditLogger(db)
-    from cogito_agent.runtime.drift import DriftMaintenance
-    dm = DriftMaintenance(db)
-    count = dm.consolidate_memories(ns.workspace_id)
+    db.migrate()
+    svc = _get_app_svc(db)
+    count = svc.memory_application.consolidate_memories(ns.workspace_id, actor_id="cli")
     print(f"  Consolidated: {count} duplicate(s) removed")
-    if count:
-        audit.log(
-            actor_id="cli", action="memory.consolidate",
-            resource="memory",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason=f"removed {count} duplicates",
-        )
     db.close()
 
 
@@ -219,17 +195,10 @@ def _run_memory_edit(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
-    repo = MemoryRepository(db)
-    success = repo.edit_text(ns.memory_id, ns.workspace_id, ns.text)
+    svc = _get_app_svc(db)
+    success = svc.memory_application.edit_memory(ns.memory_id, ns.workspace_id, ns.text, actor_id="cli")
     if success:
         print(f"  Edited memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.edit",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user edited",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -240,17 +209,10 @@ def _run_memory_correct(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
-    repo = MemoryRepository(db)
-    success = repo.correct_text(ns.memory_id, ns.workspace_id, ns.text)
+    svc = _get_app_svc(db)
+    success = svc.memory_application.correct_memory(ns.memory_id, ns.workspace_id, ns.text, actor_id="cli")
     if success:
         print(f"  Corrected memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.correct",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user corrected",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -261,17 +223,10 @@ def _run_memory_archive(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
-    repo = MemoryRepository(db)
-    success = repo.archive(ns.memory_id, ns.workspace_id)
+    svc = _get_app_svc(db)
+    success = svc.memory_application.archive_memory(ns.memory_id, ns.workspace_id, actor_id="cli")
     if success:
         print(f"  Archived memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.archive",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user archived",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -282,17 +237,10 @@ def _run_memory_unarchive(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
-    repo = MemoryRepository(db)
-    success = repo.unarchive(ns.memory_id, ns.workspace_id)
+    svc = _get_app_svc(db)
+    success = svc.memory_application.restore_memory(ns.memory_id, ns.workspace_id, actor_id="cli")
     if success:
         print(f"  Unarchived memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.unarchive",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user unarchived",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -303,17 +251,11 @@ def _run_memory_unpin(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
+    from cogito_agent.storage.repositories import MemoryRepository
     repo = MemoryRepository(db)
     success = repo.unpin(ns.memory_id, ns.workspace_id)
     if success:
         print(f"  Unpinned memory: {ns.memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.unpin",
-            resource=f"memory:{ns.memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user unpinned",
-        )
     else:
         print("  Memory not found.")
     db.close()
@@ -324,17 +266,10 @@ def _run_memory_merge(args: Any) -> None:
     db = Database(ns.db_path)
     db.initialize()
     db.migrate()
-    audit = AuditLogger(db)
-    repo = MemoryRepository(db)
-    success = repo.merge(ns.source_memory_id, ns.target_memory_id, ns.workspace_id)
+    svc = _get_app_svc(db)
+    success = svc.memory_application.merge_memories(ns.source_memory_id, ns.target_memory_id, ns.workspace_id, actor_id="cli")
     if success:
         print(f"  Merged {ns.source_memory_id} into {ns.target_memory_id}")
-        audit.log(
-            actor_id="cli", action="memory.merge",
-            resource=f"memory:merge:{ns.source_memory_id}->{ns.target_memory_id}",
-            workspace_id=ns.workspace_id,
-            decision="allow", reason="user merged",
-        )
     else:
         print("  One or both memories not found.")
     db.close()
