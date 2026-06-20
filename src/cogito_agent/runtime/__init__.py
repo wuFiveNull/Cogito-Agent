@@ -1,6 +1,7 @@
 from .budget import TurnBudget
 from .drift import DriftMaintenance, DriftRuntime
 from .kernel import RuntimeKernel, TurnResult
+from .multimodal import MultimodalCoordinator, PreparedPrimaryInput
 from .result_composer import (
     ArtifactReference,
     Citation,
@@ -15,6 +16,8 @@ __all__ = [
     "RuntimeKernel",
     "TurnResult",
     "TurnBudget",
+    "MultimodalCoordinator",
+    "PreparedPrimaryInput",
     "DriftRuntime",
     "DriftMaintenance",
     "SubagentManager",

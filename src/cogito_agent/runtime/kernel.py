@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from collections.abc import Generator
@@ -29,7 +30,14 @@ from cogito_agent.models import (
     ToolIntent,
 )
 from cogito_agent.models.messages import (
+    ContentPart,
+    ImagePart,
+    TextPart,
+    has_image,
     normalize_content,
+)
+from cogito_agent.models.messages import (
+    extract_text as _extract_text_from_parts,
 )
 from cogito_agent.shared import (
     DecisionType,
@@ -47,6 +55,7 @@ from cogito_agent.storage.repositories import ApprovalRepository
 from cogito_agent.trace import SourceLineage, Tracer
 
 from .budget import TurnBudget
+from .multimodal import MultimodalCoordinator
 from .result_composer import ComposedResult, ResultComposer
 
 
@@ -72,6 +81,9 @@ class TurnResult:
         self.approval_id = approval_id
         self.trace_id = trace_id
         self.composed_result = composed_result
+
+
+logger = logging.getLogger(__name__)
 
 
 class BudgetError(Exception):
@@ -124,7 +136,127 @@ class RuntimeKernel:
         self._prompt_builder = PromptBuilder()
         self._result_composer = ResultComposer()
         self._compression = SessionCompressionService(db)
-        self._extra_content: list = []
+        self._extra_content: list[ContentPart] = []
+        self._multimodal_coordinator: MultimodalCoordinator | None = None
+
+    def _run_vision_pipeline(
+        self,
+        extra_content: list[ContentPart],
+        user_text: str,
+        trace: object,
+        span: object,
+        event: RuntimeEvent | None = None,
+    ) -> tuple[list[ContentPart], str]:
+        """If images present in content, run vision pipeline and return modified content.
+
+        Returns:
+            Tuple of (modified_content, user_text_without_images).
+            If no images, content and text are returned unchanged.
+        """
+        if not has_image(extra_content) or self._model_adapter is None:
+            return extra_content, user_text
+
+        image_parts = [p for p in extra_content if isinstance(p, ImagePart)]
+        text_parts = [p for p in extra_content if not isinstance(p, ImagePart)]
+        primary_text = _extract_text_from_parts(text_parts) or user_text  # type: ignore[arg-type]
+
+        try:
+            call_start = datetime.now(UTC)
+            vision_msgs = self._build_vision_messages(image_parts, primary_text)
+            if event is not None:
+                self._bind_route_observer(event, trace, span)
+            vision_resp = self._model_adapter.chat(
+                vision_msgs,
+                _route_role="vision_worker",
+                _route_task_kind="vision_understanding",
+            )
+            vision_latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
+
+            self._model_call_count += 1
+            self._tracer.log_model_call(
+                trace_id=str(getattr(trace, "id", "")),
+                span_id=str(getattr(span, "id", "")),
+                provider=vision_resp.provider,
+                model=vision_resp.model,
+                input_token_count=vision_resp.input_tokens,
+                output_token_count=vision_resp.output_tokens,
+                prompt_summary=f"vision analysis ({len(image_parts)} images)",
+                response_summary=vision_resp.content[:200] if vision_resp.content else "",
+                latency_ms=vision_latency,
+                stop_reason=vision_resp.stop_reason,
+                error=vision_resp.error,
+            )
+
+            if vision_resp.error:
+                raise RuntimeError(f"Vision model error: {vision_resp.error}")
+
+            from cogito_agent.models.vision import VisionObservation, _extract_json, _repair_json
+
+            parsed = _extract_json(vision_resp.content)
+            if parsed is None:
+                parsed = _repair_json(vision_resp.content)
+            if parsed is None:
+                raise RuntimeError(
+                    f"Vision model returned unparseable JSON: {vision_resp.content[:200]}"
+                )
+            observation = VisionObservation.model_validate(parsed)
+
+            call_id = f"vision_{uuid.uuid4().hex[:12]}"
+            self._tool_results.append({
+                "tool": "vision.observe",
+                "summary": observation.model_dump_json(),
+                "status": "ok",
+                "tool_call_id": call_id,
+            })
+
+            logger.info(
+                "Vision pipeline succeeded: %s via %s (%d images, %dms)",
+                observation.summary[:80], vision_resp.model,
+                len(image_parts), vision_latency,
+            )
+            return text_parts, primary_text  # type: ignore[return-value]
+
+        except Exception as exc:
+            logger.error("Vision pipeline failed: %s", exc)
+            raise RuntimeError(
+                f"Vision analysis failed: {exc}. "
+                f"Cannot proceed with primary model - images cannot be directly processed."
+            ) from exc
+
+    @staticmethod
+    def _build_vision_messages(
+        image_parts: list[ImagePart], instruction: str,
+    ) -> list[dict[str, object]]:
+        """Build legacy dict messages for vision model."""
+        from cogito_agent.models.messages import ChatMessage, MessageRole
+
+        vision_prompt = (
+            "You are a vision analysis model. Analyze the provided image(s) and "
+            "output a structured JSON observation. Do NOT include markdown fences "
+            "or extra commentary. Output ONLY valid JSON matching this schema:\n"
+            '{"summary": "...", "ocr_text": [...], "objects": [...], '
+            '"ui_elements": [...], '
+            '"spatial_relations": [...], "uncertainties": [...]}'
+        )
+        sys_msg = ChatMessage(
+            role=MessageRole.system,
+            content=[TextPart(text=vision_prompt)],
+        )
+        user_msg = ChatMessage(
+            role=MessageRole.user,
+            content=[*image_parts],
+        )
+        msgs: list[dict[str, object]] = [
+            sys_msg.to_legacy_dict(),
+            user_msg.to_legacy_dict(),
+        ]
+        if instruction.strip():
+            inst_msg = ChatMessage(
+                role=MessageRole.user,
+                content=[TextPart(text=instruction)],
+            )
+            msgs.append(inst_msg.to_legacy_dict())
+        return msgs
 
     @property
     def state(self) -> TurnState:
@@ -295,7 +427,10 @@ class RuntimeKernel:
         streaming_enabled: bool = True,
         max_retries: int = 2,
     ) -> Generator[StreamEvent, None, ModelResponse]:
-        if not message.strip() and not event.payload.get("content"):
+        extra_content = self._get_extra_content(event)
+        has_multimodal = bool(extra_content) or bool(event.payload.get("content"))
+        has_text = bool(message.strip())
+        if not has_text and not has_multimodal:
             yield StreamEvent(
                 type=StreamEventType.delta,
                 data={"delta": "I didn't receive any message."},
@@ -306,15 +441,12 @@ class RuntimeKernel:
         self._bind_route_observer(event, trace, span)
         call_start = datetime.now(UTC)
 
-        extra_content = self._get_extra_content(event)
-        has_image = any(getattr(p, 'type', None) == 'image' for p in extra_content)
-        preferred_role = event.payload.get("_preferred_role", "")
+        preferred_role = str(event.payload.get("_preferred_role", "") or "")
 
         echo = f"You said: {message}" if self._model_adapter is None else ""
         gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
                               streaming_enabled=streaming_enabled,
                               tool_schemas=tool_schemas,
-                              has_image=has_image,
                               route_role=preferred_role)
 
         attempt = 0
@@ -336,7 +468,8 @@ class RuntimeKernel:
                     raise
                 gen = StreamGenerator(self._model_adapter, msgs, echo_text=echo,
                                       streaming_enabled=streaming_enabled,
-                                      tool_schemas=tool_schemas)
+                                      tool_schemas=tool_schemas,
+                                      route_role=preferred_role)
 
         latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
         self._model_call_count += 1
@@ -695,6 +828,15 @@ class RuntimeKernel:
             try:
                 raw = event.payload.get("text", "")
                 query = str(raw) if raw is not None else ""
+                if not query.strip():
+                    content_raw = event.payload.get("content", [])
+                    if isinstance(content_raw, list):
+                        text_from_content = " ".join(
+                            str(c.get("text", ""))
+                            for c in content_raw
+                            if isinstance(c, dict) and c.get("text")
+                        )
+                        query = text_from_content if text_from_content.strip() else ""
                 memories = self._mem_retriever.search(
                     event.workspace_id, query
                 )
@@ -713,7 +855,8 @@ class RuntimeKernel:
             ),
         )
         # Store extra content for multimodal routing
-        self._extra_content = event.payload.get("content", [])
+        raw = event.payload.get("content", [])
+        self._extra_content = raw if isinstance(raw, list) else []
         return ctx_items
 
     def _update_session_summary(self, event: RuntimeEvent) -> None:
@@ -730,6 +873,22 @@ class RuntimeKernel:
         if ctx is None:
             ctx = self._build_context(event)
         extra_content = self._get_extra_content(event)
+        span = getattr(trace, "_current_span", None) or trace
+
+        should_delegate_vision = (
+            has_image(extra_content) and not self._supports_vision()
+        )
+        if should_delegate_vision:
+            text_only_content, text_only_message = self._run_vision_pipeline(
+                extra_content, message, trace, span, event=event,
+            )
+            return self._prompt_builder.build(
+                ctx_items=ctx,
+                current_message=text_only_message,
+                tool_results=self._tool_results,
+                extra_content=text_only_content,
+            )
+
         return self._prompt_builder.build(
             ctx_items=ctx,
             current_message=message,
@@ -737,7 +896,21 @@ class RuntimeKernel:
             extra_content=extra_content,
         )
 
-    def _get_extra_content(self, event: RuntimeEvent) -> list:
+    def _supports_vision(self) -> bool:
+        """Check if the primary model adapter supports vision natively."""
+        adapter = self._model_adapter
+        if adapter is None:
+            return False
+        router = getattr(adapter, "_router", None)
+        if router is None:
+            return False
+        candidates = getattr(router, "_candidates", {})
+        return any(
+            "image" in c.input_modalities or "vision" in c.capabilities
+            for c in candidates.values()
+        )
+
+    def _get_extra_content(self, event: RuntimeEvent) -> list[ContentPart]:
         raw = event.payload.get("content", [])
         if isinstance(raw, list):
             return normalize_content(raw)
@@ -749,7 +922,10 @@ class RuntimeKernel:
         ctx: list[ContextItem] | None = None,
         max_retries: int = 2,
     ) -> ModelResponse:
-        if not message.strip() and not event.payload.get("content"):
+        extra_content = self._get_extra_content(event)
+        has_multimodal = bool(extra_content) or bool(event.payload.get("content"))
+        has_text = bool(message.strip())
+        if not has_text and not has_multimodal:
             return ModelResponse(content="I didn't receive any message.")
         if self._model_adapter is None:
             text = message or " "
@@ -761,10 +937,7 @@ class RuntimeKernel:
         kwargs: dict[str, object] = {}
         if tool_schemas:
             kwargs["tools"] = tool_schemas
-        extra_content = self._get_extra_content(event)
-        if any(getattr(p, 'type', None) == 'image' for p in extra_content):
-            kwargs["_has_image"] = True
-        preferred_role = event.payload.get("_preferred_role", "")
+        preferred_role = str(event.payload.get("_preferred_role", "") or "")
         if preferred_role:
             kwargs["_route_role"] = preferred_role
 
@@ -1122,15 +1295,32 @@ class RuntimeKernel:
     def _persist_user_message(self, event: RuntimeEvent) -> None:
         raw = event.payload.get("text", "")
         user_text = str(raw) if raw is not None else ""
-        if user_text.strip():
+        content_raw = event.payload.get("content", [])
+        has_multimodal = bool(content_raw) and (
+            not user_text.strip() or any(
+                isinstance(c, dict) and c.get("type") in ("image", "file")
+                for c in (content_raw if isinstance(content_raw, list) else [])
+            )
+        )
+        persist_text = user_text or "[multimodal message]" if has_multimodal else (user_text or "")
+        if persist_text.strip():
             mid = str(uuid.uuid4())
-            self._msg_repo.create(mid, event.workspace_id, event.session_id, "user", user_text)
+            meta = {}
+            if has_multimodal:
+                meta["content_types"] = list({
+                    (c.get("type", "text") if isinstance(c, dict) else "text")
+                    for c in (content_raw if isinstance(content_raw, list) else [])
+                })
+            self._msg_repo.create(
+                mid, event.workspace_id, event.session_id, "user", persist_text,
+            )
+            title = user_text[:80] if user_text.strip() else "[multimodal]"
             self._db.connection.execute(
                 "UPDATE sessions SET title = CASE"
                 " WHEN title IS NULL OR title = '' THEN ? ELSE title END,"
                 " updated_at = datetime('now')"
                 " WHERE id = ? AND workspace_id = ?",
-                (user_text[:80], event.session_id, event.workspace_id),
+                (title, event.session_id, event.workspace_id),
             )
             self._db.connection.commit()
 

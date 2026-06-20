@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from urllib.parse import urljoin
 
 from .adapter import ModelResponse, ToolIntent
+from .codec import OpenAICompatibleCodec, ProviderMessageCodec
 
 
 def _merge_streaming_tool_calls(
@@ -55,12 +56,14 @@ class OpenAICompatibleAdapter:
         base_url: str | None = None,
         model: str | None = None,
         timeout_sec: int = 60,
+        codec: ProviderMessageCodec | None = None,
     ) -> None:
         self.api_key = api_key or os.environ.get("MODEL_API_KEY", "")
         base = base_url or os.environ.get("MODEL_BASE_URL", "https://api.openai.com/v1")
         self.base_url = base.rstrip("/") + "/"
         self.model = model or os.environ.get("MODEL_NAME", "gpt-4o-mini")
         self.timeout_sec = timeout_sec
+        self.codec = codec or OpenAICompatibleCodec()
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -106,9 +109,59 @@ class OpenAICompatibleAdapter:
             ))
         return intents
 
+    def _legacy_dicts_to_chat_messages(
+        self, messages: list[dict[str, object]]
+    ) -> list:  # type: ignore[type-arg]
+        """Convert legacy dict messages to ChatMessage objects for codec."""
+        from .messages import ChatMessage, FilePart, ImagePart, MessageRole, TextPart
+
+        result: list[ChatMessage] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content_raw = msg.get("content", "")
+            parts: list[TextPart | ImagePart | FilePart]
+            if isinstance(content_raw, str):
+                parts = [TextPart(text=content_raw)]
+            elif isinstance(content_raw, list):
+                parts = []
+                for item in content_raw:
+                    if isinstance(item, dict):
+                        ptype = item.get("type", "text")
+                        if ptype == "image":
+                            parts.append(ImagePart(
+                                uri=str(item.get("uri", item.get("image_url", {}).get("url", ""))),
+                                mime_type=str(item.get("mime_type", "image/png")),
+                            ))
+                        elif ptype == "file":
+                            parts.append(FilePart(
+                                uri=str(item.get("uri", "")),
+                                mime_type=str(item.get("mime_type", "application/octet-stream")),
+                                filename=str(item.get("filename", "file")),
+                            ))
+                        else:
+                            parts.append(TextPart(text=str(item.get("text", ""))))
+                    else:
+                        parts.append(TextPart(text=str(item)))
+            else:
+                parts = [TextPart(text=str(content_raw))]
+            role_val = (
+                MessageRole(role)
+                if role in ("user", "assistant", "system", "tool")
+                else MessageRole.user
+            )
+            cm = ChatMessage(role=role_val, content=parts)
+            if msg.get("tool_call_id"):
+                cm.tool_call_id = str(msg["tool_call_id"])
+            if msg.get("name"):
+                cm.name = str(msg["name"])
+            result.append(cm)
+        return result
+
     def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
+        chat_msgs = self._legacy_dicts_to_chat_messages(messages)
+        encoded = self.codec.encode_messages(chat_msgs)
         url = urljoin(self.base_url, "chat/completions")
-        body = self._build_body(messages, **kwargs)
+        body = self._build_body(encoded, **kwargs)
         data = json.dumps(body).encode("utf-8")
 
         req = urllib.request.Request(
@@ -162,8 +215,10 @@ class OpenAICompatibleAdapter:
     def stream_chat(
         self, messages: list[dict[str, object]], **kwargs: object
     ) -> Iterator[str]:
+        chat_msgs = self._legacy_dicts_to_chat_messages(messages)
+        encoded = self.codec.encode_messages(chat_msgs)
         url = urljoin(self.base_url, "chat/completions")
-        body = self._build_body(messages, stream=True, **kwargs)
+        body = self._build_body(encoded, stream=True, **kwargs)
         data = json.dumps(body).encode("utf-8")
 
         req = urllib.request.Request(
