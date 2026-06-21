@@ -1,7 +1,6 @@
 """Tests for the enhanced NotificationGate.evaluate() with AutonomyEvent."""
 
 from cogito_agent.autonomy import AutonomyEvent, DecisionAction, NotificationGate, PriorityLevel
-from cogito_agent.autonomy.gate import NotificationGate as NGate
 
 
 def test_evaluate_push(gate: NotificationGate, wid: str):
@@ -97,10 +96,58 @@ def test_list_decisions_empty(gate: NotificationGate, wid: str):
 
 
 def test_count_push_recent(gate: NotificationGate, wid: str):
-    from datetime import UTC, datetime, timedelta
     before = gate.count_push_recent(wid, minutes=60)
     event = AutonomyEvent(title="count test", workspace_id=wid)
     d = gate.evaluate(event)
     gate.persist_decision(d)
     after = gate.count_push_recent(wid, minutes=60)
     assert after >= before
+
+
+# ── LLM Judge tests ──────────────────────────────────────────────────────
+
+
+class _MockLLM:
+    """Mock LLM that returns a canned JSON response."""
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+
+    def chat(self, messages: list, **kwargs: object) -> object:
+        from types import SimpleNamespace
+        return SimpleNamespace(content=self.response)
+
+
+def test_judge_llm_high_scores_pushes(gate: NotificationGate, wid: str):
+    """When LLM returns all 5s, the judge should approve."""
+    gate.set_llm_adapter(
+        _MockLLM('{"information_gap": 5, "relevance": 5, "expected_impact": 5}')
+    )
+    event = AutonomyEvent(title="important update", workspace_id=wid)
+    decision = gate.evaluate(event)
+    assert decision.action == DecisionAction.push
+    assert decision.reason_code == "allowed"
+    assert decision.llm_dimensions == {"information_gap": 5, "relevance": 5, "expected_impact": 5}
+
+
+def test_judge_llm_low_dimension_vetoes(gate: NotificationGate, wid: str):
+    """When any LLM dimension < judge_veto_llm_dim_min (default 2), skip."""
+    gate.set_llm_adapter(
+        _MockLLM('{"information_gap": 1, "relevance": 5, "expected_impact": 5}')
+    )
+    event = AutonomyEvent(title="low value", workspace_id=wid)
+    decision = gate.evaluate(event)
+    assert decision.action == DecisionAction.skip
+    assert decision.reason_code == "llm_veto"
+    assert "information_gap" in decision.reason
+
+
+def test_judge_no_llm_fail_open(gate: NotificationGate, wid: str):
+    """Without LLM adapter, the gate should fall back to deterministic dims."""
+    gate.set_llm_adapter(None)
+    event = AutonomyEvent(title="no llm test", workspace_id=wid)
+    decision = gate.evaluate(event)
+    # Should still work (deterministic dims only) and push
+    assert decision.action == DecisionAction.push
+    assert decision.reason_code == "allowed"
+    assert decision.llm_dimensions == {}

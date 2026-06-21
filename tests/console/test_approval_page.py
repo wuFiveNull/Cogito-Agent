@@ -68,8 +68,8 @@ class TestApprovalDetail:
 
 @pytest.fixture(autouse=True)
 def _ensure_workspace() -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
     from cogito_agent.api.app import get_db
+    from cogito_agent.storage.repositories import WorkspaceRepository
 
     db = get_db()
     ws = WorkspaceRepository(db).get_by_id("default")

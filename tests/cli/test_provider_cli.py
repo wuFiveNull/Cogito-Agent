@@ -1,4 +1,5 @@
 """Tests for provider CLI commands."""
+
 from __future__ import annotations
 
 import os
@@ -8,8 +9,6 @@ from cogito_agent.cli.provider_cli import (
     _check_secret_available,
     _get_provider_info,
     _health_strategy,
-    provider_list,
-    provider_test,
 )
 
 
@@ -22,6 +21,7 @@ def test_api_key_can_be_resolved_from_config_file() -> None:
 def _ns(**kwargs):
     class NS:
         pass
+
     n = NS()
     for k, v in kwargs.items():
         setattr(n, k, v)
@@ -47,7 +47,8 @@ def test_check_secret_available_config_ref():
     """When secret_ref is configured and available, returns True."""
     with patch.dict(os.environ, {"MODEL_API_KEY": ""}, clear=True):
         from cogito_agent.cli.config_manager import get_config
-        cfg = get_config()
+
+        get_config()
         # No secret_ref, no api_key_env -> should be False
         result = _check_secret_available()
         # This depends on environment - just verify it returns bool

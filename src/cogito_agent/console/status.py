@@ -16,8 +16,10 @@ try:
 
     _CONFIG_LOADER = get_config
 except Exception:
+
     def _empty_config() -> dict[str, str]:
         return {}
+
     _CONFIG_LOADER = _empty_config
 
 
@@ -39,6 +41,17 @@ def _count(table: str, column: str = "id", where: str = "") -> int:
 def _count_since(table: str, column: str = "id", hours: int = 24) -> int:
     cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
     return _count(table, where=f"created_at >= '{cutoff}'")
+
+
+def _pending_candidates_count() -> int:
+    try:
+        db = Database()
+        row = db.connection.execute(
+            "SELECT COUNT(*) as c FROM memory_items WHERE status='active'"
+        ).fetchone()
+        return row["c"] if row else 0
+    except Exception:
+        return 0
 
 
 def _db_info() -> dict[str, object]:
@@ -89,15 +102,9 @@ def build_status() -> dict[str, object]:
         "secrets": secrets,
         "counts": {
             "memories": _count("memories"),
-            "memory_candidates_pending": _count(
-                "memory_candidates", where="status = 'pending'"
-            ),
-            "approvals_pending": _count(
-                "approval_records", where="status = 'pending'"
-            ),
-            "autonomy_outbox_pending": _count(
-                "outbox_messages", where="status = 'pending'"
-            ),
+            "memory_candidates_pending": _pending_candidates_count(),
+            "approvals_pending": _count("approval_records", where="status = 'pending'"),
+            "autonomy_outbox_pending": _count("outbox_messages", where="status = 'pending'"),
             "autonomy_decisions_24h": _count_since("notification_decisions"),
             "audit_events_24h": _count_since("audit_logs"),
             "traces_24h": _count_since("traces"),

@@ -1,4 +1,3 @@
-
 from cogito_agent.shared.skill import (
     SkillManifest,
     SkillRiskLevel,
@@ -17,7 +16,9 @@ MANIFEST = SkillManifest(
     outputs={},
     steps=[
         SkillStep(
-            id="s1", name="step1", kind=StepKind.transform,
+            id="s1",
+            name="step1",
+            kind=StepKind.transform,
             input_mapping={"val": "$text"},
         ),
     ],

@@ -18,7 +18,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         lambda: None,
     )
     monkeypatch.setattr(
-        "cogito_agent.config_loader.build_multimodel_adapter",
+        "cogito_agent.config.loader.build_multimodel_adapter",
         lambda config=None: None,
     )
     return TestClient(app)
@@ -31,11 +31,14 @@ def _setup(client: TestClient) -> tuple[str, str]:
 
 def test_chat_endpoint(client: TestClient) -> None:
     _, sid = _setup(client)
-    resp = client.post("/chat", json={
-        "text": "hello",
-        "session_id": sid,
-        "workspace_id": "ws-1",
-    })
+    resp = client.post(
+        "/chat",
+        json={
+            "text": "hello",
+            "session_id": sid,
+            "workspace_id": "ws-1",
+        },
+    )
     assert resp.status_code == 200, f"Got {resp.status_code}: {resp.text}"
     data = resp.json()
     assert "output" in data
@@ -45,19 +48,25 @@ def test_chat_endpoint(client: TestClient) -> None:
 
 def test_chat_invalid_session(client: TestClient) -> None:
     _setup(client)
-    resp = client.post("/chat", json={
-        "text": "hello",
-        "session_id": "nonexistent",
-        "workspace_id": "ws-1",
-    })
+    resp = client.post(
+        "/chat",
+        json={
+            "text": "hello",
+            "session_id": "nonexistent",
+            "workspace_id": "ws-1",
+        },
+    )
     assert resp.status_code == 404
 
 
 def test_create_session(client: TestClient) -> None:
-    resp = client.post("/sessions", json={
-        "workspace_id": "ws-1",
-        "title": "New Session",
-    })
+    resp = client.post(
+        "/sessions",
+        json={
+            "workspace_id": "ws-1",
+            "title": "New Session",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["title"] == "New Session"
@@ -75,11 +84,14 @@ def test_list_sessions(client: TestClient) -> None:
 
 def test_get_trace(client: TestClient) -> None:
     _setup(client)
-    resp = client.post("/chat", json={
-        "text": "hi",
-        "session_id": "nonexistent",
-        "workspace_id": "ws-1",
-    })
+    resp = client.post(
+        "/chat",
+        json={
+            "text": "hi",
+            "session_id": "nonexistent",
+            "workspace_id": "ws-1",
+        },
+    )
     traces_resp = client.get("/sessions", params={"workspace_id": "ws-1"})
     assert traces_resp.status_code == 200 or resp.status_code == 404
 
@@ -91,10 +103,13 @@ def test_trace_not_found(client: TestClient) -> None:
 
 def test_candidates_endpoint(client: TestClient) -> None:
     _setup(client)
-    resp = client.post("/candidates", json={
-        "candidate_id": "nonexistent",
-        "action": "accept",
-    })
+    resp = client.post(
+        "/candidates",
+        json={
+            "candidate_id": "nonexistent",
+            "action": "accept",
+        },
+    )
     assert resp.status_code == 404
 
 
@@ -194,7 +209,9 @@ def test_chat_with_configured_provider() -> None:
 
     fake_adapter = MagicMock(spec=ModelAdapter)
     fake_adapter.chat.return_value = ModelResponse(
-        content="Hello from config", provider="config", model="test",
+        content="Hello from config",
+        provider="config",
+        model="test",
     )
 
     mod = sys.modules["cogito_agent.api.app"]
@@ -203,12 +220,15 @@ def test_chat_with_configured_provider() -> None:
     mod._kernel = None
     mod._db = None
     try:
-        with patch(
-            "cogito_agent.cli.config_manager.build_model_adapter_from_config",
-            return_value=fake_adapter,
-        ), patch(
-            "cogito_agent.config_loader.build_multimodel_adapter",
-            return_value=None,
+        with (
+            patch(
+                "cogito_agent.cli.config_manager.build_model_adapter_from_config",
+                return_value=fake_adapter,
+            ),
+            patch(
+                "cogito_agent.config.loader.build_multimodel_adapter",
+                return_value=None,
+            ),
         ):
             client = TestClient(app)
             ws_resp = client.post("/workspaces", params={"name": "config-test"})
@@ -217,11 +237,14 @@ def test_chat_with_configured_provider() -> None:
             sess_resp = client.post("/sessions", json={"workspace_id": wid, "title": "test"})
             assert sess_resp.status_code == 200
             sid = sess_resp.json()["id"]
-            resp = client.post("/chat", json={
-                "text": "hello",
-                "session_id": sid,
-                "workspace_id": wid,
-            })
+            resp = client.post(
+                "/chat",
+                json={
+                    "text": "hello",
+                    "session_id": sid,
+                    "workspace_id": wid,
+                },
+            )
             assert resp.status_code == 200, f"Got {resp.status_code}: {resp.text}"
             data = resp.json()
             assert data["output"] == "Hello from config"
@@ -233,11 +256,14 @@ def test_chat_with_configured_provider() -> None:
 
 def test_chat_stream_endpoint(client: TestClient) -> None:
     _, sid = _setup(client)
-    resp = client.post("/chat/stream", json={
-        "text": "hello",
-        "session_id": sid,
-        "workspace_id": "ws-1",
-    })
+    resp = client.post(
+        "/chat/stream",
+        json={
+            "text": "hello",
+            "session_id": sid,
+            "workspace_id": "ws-1",
+        },
+    )
     assert resp.status_code == 200
     assert resp.headers.get("content-type", "").startswith("text/event-stream")
     body = resp.text
@@ -245,11 +271,14 @@ def test_chat_stream_endpoint(client: TestClient) -> None:
 
 
 def test_chat_stream_no_session(client: TestClient) -> None:
-    resp = client.post("/chat/stream", json={
-        "text": "hello",
-        "session_id": "nonexistent",
-        "workspace_id": "ws-1",
-    })
+    resp = client.post(
+        "/chat/stream",
+        json={
+            "text": "hello",
+            "session_id": "nonexistent",
+            "workspace_id": "ws-1",
+        },
+    )
     assert resp.status_code == 404
 
 
@@ -266,8 +295,7 @@ def test_list_memories(client: TestClient) -> None:
 
 
 def test_update_memory_not_found(client: TestClient) -> None:
-    resp = client.put("/memories/nonexistent?workspace_id=ws-1",
-                      json={"text": "new text"})
+    resp = client.put("/memories/nonexistent?workspace_id=ws-1", json={"text": "new text"})
     assert resp.status_code == 404
 
 
@@ -283,21 +311,24 @@ def test_approvals_empty(client: TestClient) -> None:
 
 
 def test_create_and_resolve_approval(client: TestClient) -> None:
-    resp = client.post("/approvals", params={
-        "workspace_id": "ws-1", "actor_id": "user",
-        "capability_name": "read_file", "operation": "read",
-    })
+    resp = client.post(
+        "/approvals",
+        params={
+            "workspace_id": "ws-1",
+            "actor_id": "user",
+            "capability_name": "read_file",
+            "operation": "read",
+        },
+    )
     assert resp.status_code == 200
     aid = resp.json()["id"]
-    resolve = client.post(f"/approvals/{aid}/resolve",
-                          json={"decision": "allow"})
+    resolve = client.post(f"/approvals/{aid}/resolve", json={"decision": "allow"})
     assert resolve.status_code == 200
     assert resolve.json()["status"] == "allow"
 
 
 def test_resolve_nonexistent_approval(client: TestClient) -> None:
-    resp = client.post("/approvals/nonexistent/resolve",
-                       json={"decision": "allow"})
+    resp = client.post("/approvals/nonexistent/resolve", json={"decision": "allow"})
     assert resp.status_code == 404
 
 
@@ -309,9 +340,10 @@ def test_workspace_settings(client: TestClient) -> None:
 
 
 def test_update_workspace_settings(client: TestClient) -> None:
-    resp = client.put("/workspaces/ws-1/settings",
-                      json={"timezone": "Asia/Shanghai",
-                            "max_daily_notifications": 5})
+    resp = client.put(
+        "/workspaces/ws-1/settings",
+        json={"timezone": "Asia/Shanghai", "max_daily_notifications": 5},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["timezone"] == "Asia/Shanghai"

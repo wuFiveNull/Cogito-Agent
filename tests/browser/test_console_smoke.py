@@ -84,9 +84,7 @@ def test_console_overview_to_chat(browser: Browser, console_url: str) -> None:
     console_errors: list[str] = []
     page.on(
         "console",
-        lambda message: (
-            console_errors.append(message.text) if message.type == "error" else None
-        ),
+        lambda message: console_errors.append(message.text) if message.type == "error" else None,
     )
 
     page.goto(f"{console_url}/console/overview", wait_until="networkidle")

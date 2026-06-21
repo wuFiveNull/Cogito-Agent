@@ -21,6 +21,7 @@ def get_provider_from_config(config: dict[str, str] | None = None) -> SecretProv
     """
     if config is None:
         from cogito_agent.cli.config_manager import get_config
+
         config = get_config()
     backend = config.get("secrets.backend", "dev_sqlite")
     service_name = config.get("secrets.service_name", "cogito-agent")

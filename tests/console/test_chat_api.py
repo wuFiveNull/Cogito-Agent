@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from unittest.mock import ANY, patch
-
-import pytest
 from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app

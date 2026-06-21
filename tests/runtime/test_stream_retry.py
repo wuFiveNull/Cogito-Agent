@@ -1,12 +1,11 @@
 """Tests: streaming retry behavior with max_retries."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
-from cogito_agent.models import ModelAdapter, ModelResponse, StreamGenerator
-from cogito_agent.runtime.kernel import RuntimeKernel
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
+from cogito_agent.models import ModelAdapter, ModelResponse
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 from cogito_agent.shared.stream_events import StreamEventType
 from cogito_agent.storage import Database
@@ -21,8 +20,11 @@ def _setup(db: Database) -> tuple[str, str]:
 
 def _event(wid: str, sid: str) -> RuntimeEvent:
     return RuntimeEvent(
-        id="evt-retry", workspace_id=wid, session_id=sid,
-        actor_id="user", source=EventSource.api,
+        id="evt-retry",
+        workspace_id=wid,
+        session_id=sid,
+        actor_id="user",
+        source=EventSource.api,
         type=EventType.user_message,
         payload={"text": "hello", "channel": "api_stream"},
     )
@@ -37,9 +39,12 @@ def test_stream_retry_max_retries_zero_no_retry(db: Database) -> None:
     adapter.chat.return_value = ModelResponse(content="fallback")
 
     kernel = RuntimeKernel(db, model_adapter=adapter)
-    events = list(kernel.process_stream(
-        _event(wid, sid), max_retries=0,
-    ))
+    events = list(
+        kernel.process_stream(
+            _event(wid, sid),
+            max_retries=0,
+        )
+    )
     errors = [e for e in events if e.type == StreamEventType.error]
     assert len(errors) >= 1, "Expected error event"
     err = errors[0].data.get("error", {})
@@ -65,9 +70,12 @@ def test_stream_retry_before_first_delta(db: Database) -> None:
     adapter.chat.return_value = ModelResponse(content="fallback")
 
     kernel = RuntimeKernel(db, model_adapter=adapter)
-    events = list(kernel.process_stream(
-        _event(wid, sid), max_retries=2,
-    ))
+    events = list(
+        kernel.process_stream(
+            _event(wid, sid),
+            max_retries=2,
+        )
+    )
     errors = [e for e in events if e.type == StreamEventType.error]
     deltas = [e for e in events if e.type == StreamEventType.delta]
     finals = [e for e in events if e.type == StreamEventType.final]
@@ -84,9 +92,12 @@ def test_stream_retry_exhaustion(db: Database) -> None:
     adapter.stream_chat.side_effect = RuntimeError("persistent failure")
 
     kernel = RuntimeKernel(db, model_adapter=adapter)
-    events = list(kernel.process_stream(
-        _event(wid, sid), max_retries=2,
-    ))
+    events = list(
+        kernel.process_stream(
+            _event(wid, sid),
+            max_retries=2,
+        )
+    )
     errors = [e for e in events if e.type == StreamEventType.error]
     assert len(errors) >= 1, "Expected error event after retry exhaustion"
     err = errors[0].data.get("error", {})
@@ -103,9 +114,12 @@ def test_stream_retry_no_error_traceback(db: Database) -> None:
     adapter.stream_chat.side_effect = RuntimeError("internal detail")
 
     kernel = RuntimeKernel(db, model_adapter=adapter)
-    events = list(kernel.process_stream(
-        _event(wid, sid), max_retries=0,
-    ))
+    events = list(
+        kernel.process_stream(
+            _event(wid, sid),
+            max_retries=0,
+        )
+    )
     body = str([e.to_sse() for e in events])
     assert "Traceback" not in body
     # API-level redaction is tested in test_stream_redaction.py
@@ -129,9 +143,12 @@ def test_after_first_delta_failure_no_retry(db: Database) -> None:
     adapter.chat.return_value = ModelResponse(content="fallback")
 
     kernel = RuntimeKernel(db, model_adapter=adapter)
-    events = list(kernel.process_stream(
-        _event(wid, sid), max_retries=2,
-    ))
+    events = list(
+        kernel.process_stream(
+            _event(wid, sid),
+            max_retries=2,
+        )
+    )
     deltas = [e for e in events if e.type == StreamEventType.delta]
     delta_texts = [str(e.data.get("delta", "")) for e in deltas]
     combined = "".join(delta_texts)

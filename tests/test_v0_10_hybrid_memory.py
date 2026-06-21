@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 import tempfile
 
@@ -10,8 +9,8 @@ from cogito_agent.memory.vector import (
     EmbeddingService,
     HybridRetriever,
     MockEmbeddingService,
-    _pack_embedding,
     _cosine_similarity,
+    _pack_embedding,
 )
 from cogito_agent.storage import Database
 
@@ -30,9 +29,17 @@ def db() -> Database:
     os.unlink(path)
 
 
-def _add_memory(db: Database, mid: str, ws: str, text: str, mtype: str = "general",
-                confidence: float = 0.5, pinned: bool = False) -> None:
+def _add_memory(
+    db: Database,
+    mid: str,
+    ws: str,
+    text: str,
+    mtype: str = "general",
+    confidence: float = 0.5,
+    pinned: bool = False,
+) -> None:
     import datetime
+
     now = datetime.datetime.utcnow().isoformat()
     pinned_at = now if pinned else None
     db.connection.execute(
@@ -42,8 +49,11 @@ def _add_memory(db: Database, mid: str, ws: str, text: str, mtype: str = "genera
     )
     db.connection.execute(
         "INSERT INTO memories_fts (rowid, text, summary) VALUES (?, ?, ?)",
-        (db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,)).fetchone()[0],
-         text, text[:100]),
+        (
+            db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,)).fetchone()[0],
+            text,
+            text[:100],
+        ),
     )
     db.connection.commit()
 
@@ -109,12 +119,18 @@ def test_hybrid_retriever_search_with_mock_embeddings(db: Database) -> None:
 
     # Create mock embeddings
     svc = MockEmbeddingService()
-    for mid, text in [("h1", "apple banana fruit"), ("h2", "cat dog animal"), ("h3", "python programming code")]:
+    for mid, text in [
+        ("h1", "apple banana fruit"),
+        ("h2", "cat dog animal"),
+        ("h3", "python programming code"),
+    ]:
         vec = svc.encode(text)
         db.connection.execute(
-            "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, model_name)"
-            " VALUES (?, ?, ?)",
-            (mid, _pack_embedding(vec), svc.model_name),
+            "INSERT OR REPLACE INTO memory_embeddings_v2"
+            " (memory_id, workspace_id, provider_name, model_name, dimension, embedding,"
+            "  content_hash, embedding_version, status)"
+            " VALUES (?, ?, ?, ?, ?, ?, '', '2', 'active')",
+            (mid, ws_id, "mock", svc.model_name, svc.dimension, _pack_embedding(vec)),
         )
     db.connection.commit()
 
@@ -146,9 +162,11 @@ def test_hybrid_retriever_workspace_isolation(db: Database) -> None:
     svc = MockEmbeddingService()
     vec = svc.encode("secret data")
     db.connection.execute(
-        "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, model_name)"
-        " VALUES (?, ?, ?)",
-        ("i1", _pack_embedding(vec), svc.model_name),
+        "INSERT OR REPLACE INTO memory_embeddings_v2"
+        " (memory_id, workspace_id, provider_name, model_name, dimension, embedding,"
+        "  content_hash, embedding_version, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, '', '2', 'active')",
+        ("i1", ws_a, "mock", svc.model_name, svc.dimension, _pack_embedding(vec)),
     )
     db.connection.commit()
 
@@ -169,9 +187,11 @@ def test_hybrid_retriever_pinned_boost(db: Database) -> None:
     for mid, text in [("p1", "important data"), ("p2", "other data")]:
         vec = svc.encode(text)
         db.connection.execute(
-            "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, model_name)"
-            " VALUES (?, ?, ?)",
-            (mid, _pack_embedding(vec), svc.model_name),
+            "INSERT OR REPLACE INTO memory_embeddings_v2"
+            " (memory_id, workspace_id, provider_name, model_name, dimension, embedding,"
+            "  content_hash, embedding_version, status)"
+            " VALUES (?, ?, ?, ?, ?, ?, '', '2', 'active')",
+            (mid, ws_id, "mock", svc.model_name, svc.dimension, _pack_embedding(vec)),
         )
     db.connection.commit()
 
@@ -186,6 +206,7 @@ def test_hybrid_retriever_archived_excluded(db: Database) -> None:
     ws_id = "ws-arch2"
     db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "test"))
     import datetime
+
     now = datetime.datetime.utcnow().isoformat()
     db.connection.execute(
         "INSERT INTO memories (id, workspace_id, text, type, status, created_at, updated_at)"
@@ -193,16 +214,19 @@ def test_hybrid_retriever_archived_excluded(db: Database) -> None:
         ("arch-mem", ws_id, "archived content", now, now),
     )
     db.connection.execute(
-        "UPDATE memories SET archived_at = ? WHERE id = ?", (now, "arch-mem"),
+        "UPDATE memories SET archived_at = ? WHERE id = ?",
+        (now, "arch-mem"),
     )
     db.connection.commit()
 
     svc = MockEmbeddingService()
     vec = svc.encode("archived content")
     db.connection.execute(
-        "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, model_name)"
-        " VALUES (?, ?, ?)",
-        ("arch-mem", _pack_embedding(vec), svc.model_name),
+        "INSERT OR REPLACE INTO memory_embeddings_v2"
+        " (memory_id, workspace_id, provider_name, model_name, dimension, embedding,"
+        "  content_hash, embedding_version, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, '', '2', 'active')",
+        ("arch-mem", ws_id, "mock", svc.model_name, svc.dimension, _pack_embedding(vec)),
     )
     db.connection.commit()
 

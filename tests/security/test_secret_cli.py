@@ -1,4 +1,5 @@
 """Tests for secrets CLI."""
+
 from __future__ import annotations
 
 import os
@@ -13,12 +14,12 @@ from cogito_agent.cli.secrets import (
     _show_secret,
     _test_secret,
 )
-from cogito_agent.security import LocalSecretsProvider
 
 
 def _make_ns(db_path: str, **kwargs):
     class NS:
         pass
+
     ns = NS()
     ns.db_path = db_path
     ns.secret_name = ""
@@ -30,7 +31,11 @@ def _make_ns(db_path: str, **kwargs):
 
 
 def _secrets_db_path(db_path: str) -> str:
-    return db_path.replace(".db", "_secrets.db") if db_path and ".db" in db_path else db_path + "_secrets.db"
+    return (
+        db_path.replace(".db", "_secrets.db")
+        if db_path and ".db" in db_path
+        else db_path + "_secrets.db"
+    )
 
 
 def test_list_empty(capsys):
@@ -43,10 +48,14 @@ def test_list_empty(capsys):
         captured = capsys.readouterr()
         assert "No secrets" in captured.out
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_set_and_list(capsys):
@@ -64,10 +73,14 @@ def test_set_and_list(capsys):
         captured = capsys.readouterr()
         assert "my_test_key" in captured.out
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_show_secret(capsys):
@@ -85,10 +98,14 @@ def test_show_secret(capsys):
         assert "[REDACTED]" in captured.out
         assert "show_val" not in captured.out
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_test_secret_available(capsys):
@@ -104,10 +121,14 @@ def test_test_secret_available(capsys):
         assert "available" in captured.out.lower()
         assert "not shown" in captured.out
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_test_secret_missing(capsys):
@@ -120,10 +141,14 @@ def test_test_secret_missing(capsys):
         captured = capsys.readouterr()
         assert "not found" in captured.out.lower()
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_delete_secret(capsys):
@@ -139,10 +164,14 @@ def test_delete_secret(capsys):
         assert "deleted" in captured.out.lower()
         assert provider.get_secret("del_key") is None
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_delete_secret_missing(capsys):
@@ -155,10 +184,14 @@ def test_delete_secret_missing(capsys):
         captured = capsys.readouterr()
         assert "not found" in captured.out.lower()
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_rotate_secret(capsys):
@@ -176,10 +209,14 @@ def test_rotate_secret(capsys):
         assert sv is not None
         assert sv.value == "new_val"
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_rotate_secret_missing(capsys):
@@ -192,10 +229,14 @@ def test_rotate_secret_missing(capsys):
         captured = capsys.readouterr()
         assert "not found" in captured.out.lower()
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_set_writes_audit_log():
@@ -206,6 +247,7 @@ def test_set_writes_audit_log():
         ns = _make_ns(db_path, secret_name="audit_test_key", value="audit_val")
         _set_secret(ns)
         from cogito_agent.storage import Database
+
         db = Database(db_path)
         db.initialize()
         cur = db.connection.execute(
@@ -216,10 +258,14 @@ def test_set_writes_audit_log():
         assert len(rows) >= 1
         assert rows[0][0] == "secret.set"
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_delete_writes_audit_log():
@@ -232,6 +278,7 @@ def test_delete_writes_audit_log():
         ns = _make_ns(db_path, secret_name="audit_del_key")
         _delete_secret(ns)
         from cogito_agent.storage import Database
+
         db = Database(db_path)
         db.initialize()
         cur = db.connection.execute(
@@ -242,10 +289,14 @@ def test_delete_writes_audit_log():
         assert len(rows) >= 1
         assert rows[0][0] == "secret.delete"
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass
 
 
 def test_rotate_writes_audit_log():
@@ -258,6 +309,7 @@ def test_rotate_writes_audit_log():
         ns = _make_ns(db_path, secret_name="audit_rot_key", value="new")
         _rotate_secret(ns)
         from cogito_agent.storage import Database
+
         db = Database(db_path)
         db.initialize()
         cur = db.connection.execute(
@@ -268,7 +320,11 @@ def test_rotate_writes_audit_log():
         assert len(rows) >= 1
         assert rows[0][0] == "secret.rotate"
     finally:
-        try: os.unlink(db_path)
-        except: pass
-        try: os.unlink(sdb)
-        except: pass
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(sdb)
+        except OSError:
+            pass

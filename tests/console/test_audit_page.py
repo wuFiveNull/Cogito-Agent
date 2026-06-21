@@ -61,7 +61,10 @@ class TestAuditDetail:
         db = get_db()
         logger = AuditLogger(db)
         logger.log(
-            "user", "test_action_detail", "test_resource_detail", "default",
+            "user",
+            "test_action_detail",
+            "test_resource_detail",
+            "default",
             details='{"key": "value", "secret": "sk-mykey123"}',
         )
 
@@ -84,7 +87,10 @@ class TestAuditDetail:
         db = get_db()
         logger = AuditLogger(db)
         logger.log(
-            "assistant", "call_tool", "workspace_file", "default",
+            "assistant",
+            "call_tool",
+            "workspace_file",
+            "default",
             details='{"operation": "write", "path": "sk-abc123secret"}',
         )
 
@@ -115,11 +121,15 @@ class TestAuditSecurity:
         db = get_db()
         logger = AuditLogger(db)
         logger.log(
-            "user", '<script>alert("xss")</script>', "test_resource", "default",
+            "user",
+            '<script>alert("xss")</script>',
+            "test_resource",
+            "default",
         )
 
         cur = db.connection.execute(
-            "SELECT id FROM audit_logs WHERE action LIKE '%script%' ORDER BY created_at DESC LIMIT 1",
+            "SELECT id FROM audit_logs WHERE action LIKE '%script%'"
+            " ORDER BY created_at DESC LIMIT 1",
         )
         row = cur.fetchone()
         assert row is not None

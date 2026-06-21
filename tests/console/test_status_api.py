@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app
+from cogito_agent.version import APP_VERSION
 
 client = TestClient(app)
 
@@ -21,7 +22,7 @@ class TestStatusAPI:
     def test_status_version(self) -> None:
         resp = client.get("/api/v1/status")
         data = resp.json()
-        assert data["version"] == "0.16.0-dev"
+        assert data["version"] == APP_VERSION
 
     def test_status_db_fields(self) -> None:
         resp = client.get("/api/v1/status")

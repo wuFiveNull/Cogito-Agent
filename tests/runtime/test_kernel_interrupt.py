@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.models import ModelAdapter, ModelResponse
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import (
     EventSource,
     EventType,
@@ -76,5 +76,6 @@ def test_interrupt_saves_event_json(db: Database) -> None:
     row = cur.fetchone()
     assert row is not None
     import json
+
     saved = json.loads(row["event_json"])
     assert saved["workspace_id"] == "ws-1"

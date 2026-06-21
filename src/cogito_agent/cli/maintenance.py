@@ -44,9 +44,7 @@ class MaintenanceWorker:
         return result
 
     def run(self) -> None:
-        maintenance_seconds = max(
-            60, self._settings.maintenance_interval_hours * 3600
-        )
+        maintenance_seconds = max(60, self._settings.maintenance_interval_hours * 3600)
         backup_every = max(1, self._settings.backup_interval_hours)
         cycles = 0
         while not self._stop_event.is_set():

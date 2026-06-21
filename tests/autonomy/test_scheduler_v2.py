@@ -53,6 +53,7 @@ def test_invocation_calls_capability(db: Database, wid: str) -> None:
     registry = CapabilityRegistry()
     _register_cap(registry)
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db, capability_registry=registry)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -73,6 +74,7 @@ def test_invocation_calls_capability(db: Database, wid: str) -> None:
 
 def test_invocation_nonexistent_capability(db: Database, wid: str) -> None:
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -94,6 +96,7 @@ def test_invocation_capability_error(db: Database, wid: str) -> None:
     registry = CapabilityRegistry()
     _register_failing(registry)
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db, capability_registry=registry)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -116,6 +119,7 @@ def test_retry_on_failure(db: Database, wid: str) -> None:
     registry = CapabilityRegistry()
     _register_failing(registry, "retry_cap")
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db, capability_registry=registry)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -142,6 +146,7 @@ def test_retry_exhausted(db: Database, wid: str) -> None:
     registry = CapabilityRegistry()
     _register_failing(registry, "exhaust_cap")
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db, capability_registry=registry)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -167,6 +172,7 @@ def test_running_status_during_execution(db: Database, wid: str) -> None:
     registry = CapabilityRegistry()
     _register_failing(registry, "slow_cap")
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db, capability_registry=registry)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -186,10 +192,13 @@ def test_running_status_during_execution(db: Database, wid: str) -> None:
 
 
 def test_policy_denied_skips_job(db: Database, wid: str) -> None:
-    policy = PolicyEngine(rules=[
-        PolicyRule("*", "execute", "background", DecisionType.deny, capability="*"),
-    ])
+    policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "execute", "background", DecisionType.deny, capability="*"),
+        ]
+    )
     from cogito_agent.autonomy import SchedulerEngine
+
     scheduler = SchedulerEngine(db, policy_engine=policy)
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     job = ScheduleJob(
@@ -209,6 +218,7 @@ def test_policy_denied_skips_job(db: Database, wid: str) -> None:
 
 def test_audit_on_quiet_hours_skip(scheduler, wid: str) -> None:
     from datetime import UTC, datetime, timedelta
+
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     scheduler._gate.set_quiet_hours(wid, start="00:00", end="23:59")
     job = ScheduleJob(
@@ -222,8 +232,7 @@ def test_audit_on_quiet_hours_skip(scheduler, wid: str) -> None:
     scheduler.schedule(job)
     scheduler.tick()
     cur = scheduler._db.connection.execute(
-        "SELECT COUNT(*) AS cnt FROM audit_logs"
-        " WHERE action = 'job.skipped' AND resource = ?",
+        "SELECT COUNT(*) AS cnt FROM audit_logs WHERE action = 'job.skipped' AND resource = ?",
         (f"job:{job.id}",),
     )
     assert cur.fetchone()["cnt"] >= 1
@@ -231,6 +240,7 @@ def test_audit_on_quiet_hours_skip(scheduler, wid: str) -> None:
 
 def test_interval_job_reschedules_after_tick(scheduler, wid: str) -> None:
     from datetime import UTC, datetime, timedelta
+
     past = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
     job = ScheduleJob(
         id=str(uuid.uuid4()),
@@ -254,15 +264,25 @@ def test_interval_job_reschedules_after_tick(scheduler, wid: str) -> None:
 
 def test_tick_with_mixed_job_types(scheduler, wid: str) -> None:
     from datetime import UTC, datetime, timedelta
+
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     one_shot = ScheduleJob(
-        id=str(uuid.uuid4()), name="one-shot-mixed", workspace_id=wid,
-        capability_name="read_file", dry_run=True, next_run_at=past,
+        id=str(uuid.uuid4()),
+        name="one-shot-mixed",
+        workspace_id=wid,
+        capability_name="read_file",
+        dry_run=True,
+        next_run_at=past,
     )
     interval = ScheduleJob(
-        id=str(uuid.uuid4()), name="interval-mixed", workspace_id=wid,
-        capability_name="read_file", schedule_type="interval",
-        interval_seconds=300, dry_run=True, next_run_at=past,
+        id=str(uuid.uuid4()),
+        name="interval-mixed",
+        workspace_id=wid,
+        capability_name="read_file",
+        schedule_type="interval",
+        interval_seconds=300,
+        dry_run=True,
+        next_run_at=past,
     )
     scheduler.schedule(one_shot)
     scheduler.schedule(interval)

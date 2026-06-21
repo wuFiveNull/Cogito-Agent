@@ -45,7 +45,9 @@ def tmp_root() -> Path:
     return Path(tempfile.mkdtemp())
 
 
-def _setup_files(db: Database, ws: str, tmp_root: Path) -> tuple[WorkspaceFileRegistry, FileIngestionService, str]:
+def _setup_files(
+    db: Database, ws: str, tmp_root: Path
+) -> tuple[WorkspaceFileRegistry, FileIngestionService, str]:
     registry = WorkspaceFileRegistry(db)
     ing = FileIngestionService(db)
     root = registry.register_root(ws, str(tmp_root))
@@ -63,7 +65,9 @@ def _setup_files(db: Database, ws: str, tmp_root: Path) -> tuple[WorkspaceFileRe
 
 
 class TestFTSFileSearch:
-    def test_search_returns_results(self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path) -> None:
+    def test_search_returns_results(
+        self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path
+    ) -> None:
         _setup_files(db, ws, tmp_root)
         results = retriever.search(ws, "greet", use_embedding=False)
         assert len(results) >= 1
@@ -74,12 +78,16 @@ class TestFTSFileSearch:
         assert isinstance(lineage, dict)
         assert "file_name" in lineage
 
-    def test_search_no_results(self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path) -> None:
+    def test_search_no_results(
+        self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path
+    ) -> None:
         _setup_files(db, ws, tmp_root)
         results = retriever.search(ws, "xyznonexistent12345", use_embedding=False)
         assert len(results) == 0
 
-    def test_search_includes_path_and_lines(self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path) -> None:
+    def test_search_includes_path_and_lines(
+        self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path
+    ) -> None:
         _setup_files(db, ws, tmp_root)
         results = retriever.search(ws, "greet", use_embedding=False)
         if results:
@@ -92,7 +100,9 @@ class TestFTSFileSearch:
 
 
 class TestEmbeddingFallback:
-    def test_embedding_fallback_to_fts(self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path) -> None:
+    def test_embedding_fallback_to_fts(
+        self, db: Database, ws: str, retriever: FileRetriever, tmp_root: Path
+    ) -> None:
         _setup_files(db, ws, tmp_root)
         results = retriever.search(ws, "greet", use_embedding=True)
         assert len(results) >= 1

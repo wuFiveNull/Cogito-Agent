@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import uuid
 from typing import Any
@@ -15,7 +16,19 @@ class MCPClient:
         self._tools: list[dict[str, Any]] = []
 
     def connect(self) -> None:
-        env = {**self._config.env} if self._config.env else None
+        safe_env_names = (
+            "PATH",
+            "SYSTEMROOT",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
+        )
+        env = {
+            name: value for name in safe_env_names if (value := os.environ.get(name)) is not None
+        }
+        env.update(self._config.env)
         self._process = subprocess.Popen(
             [self._config.command, *self._config.args],
             stdin=subprocess.PIPE,
@@ -23,11 +36,15 @@ class MCPClient:
             stderr=subprocess.PIPE,
             text=True,
             env=env,
+            cwd=self._config.cwd,
         )
-        resp = self._send_request("initialize", {
-            "protocolVersion": "2024-11-05",
-            "clientInfo": {"name": "cogito-agent", "version": "0.1.0"},
-        })
+        resp = self._send_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "clientInfo": {"name": "cogito-agent", "version": "0.1.0"},
+            },
+        )
         if resp and "result" in resp:
             self._send_notification("initialized")
 
@@ -62,10 +79,13 @@ class MCPClient:
         return resp is not None and "result" in resp
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        resp = self._send_request("tools/call", {
-            "name": name,
-            "arguments": arguments,
-        })
+        resp = self._send_request(
+            "tools/call",
+            {
+                "name": name,
+                "arguments": arguments,
+            },
+        )
         if resp and "result" in resp:
             result = resp["result"]
             return dict(result) if isinstance(result, dict) else {"data": str(result)}

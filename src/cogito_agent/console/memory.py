@@ -1,5 +1,8 @@
+"""Console memory pages — Memory v2. Reads from memory_items + memories tables."""
+
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import uuid
@@ -10,7 +13,6 @@ from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from cogito_agent.storage import Database as _Database
 from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
@@ -24,164 +26,167 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 memory_router = APIRouter()
 
 CONSOLE_WORKSPACE_ID = "default"
+CONSOLE_ACTOR = "console"
 
 
-# ─── helpers ─────────────────────────────────────────────────────────────────
+def _get_db():
+    from cogito_agent.api.app import get_db
+    return get_db()
 
 
-def _get_db() -> _Database:
-    from cogito_agent.api.app import get_db as _get_shared_db
+def _content_id(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
-    return _get_shared_db()
+
+# ─── Stats ────────────────────────────────────────────────────────────
 
 
 def _mem_stats(workspace_id: str) -> dict[str, int]:
-    db = _get_db()
-    sql_total = "SELECT COUNT(*) FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
-    sql_pending = (
-        "SELECT COUNT(*) FROM memory_candidates WHERE"
-        " workspace_id=? AND status='pending'"
-    )
-    sql_active = (
-        "SELECT COUNT(*) FROM memories WHERE workspace_id=?"
-        " AND deleted_at IS NULL AND status='active'"
-    )
-    sql_archived = (
-        "SELECT COUNT(*) FROM memories WHERE workspace_id=?"
-        " AND archived_at IS NOT NULL AND deleted_at IS NULL"
-    )
-    sql_stale = (
-        "SELECT COUNT(*) FROM memories WHERE workspace_id=?"
-        " AND status='stale'"
-    )
-    cur = db.connection
-    total = cur.execute(sql_total, (workspace_id,)).fetchone()[0]
-    pending = cur.execute(sql_pending, (workspace_id,)).fetchone()[0]
-    accepted = cur.execute(sql_active, (workspace_id,)).fetchone()[0]
-    archived = cur.execute(sql_archived, (workspace_id,)).fetchone()[0]
-    stale = cur.execute(sql_stale, (workspace_id,)).fetchone()[0]
-    return {
-        "total": total,
-        "pending": pending,
-        "accepted": accepted,
-        "archived": archived,
-        "stale": stale,
-    }
+    try:
+        db = _get_db()
+        v2_count = db.connection.execute(
+            "SELECT COUNT(*) as c FROM memory_items WHERE workspace_id=? AND status='active'"
+            " AND memory_type != '_recent_context'",
+            (workspace_id,),
+        ).fetchone()["c"]
+        old_count = db.connection.execute(
+            "SELECT COUNT(*) as c FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
+            " AND archived_at IS NULL",
+            (workspace_id,),
+        ).fetchone()["c"]
+        archived = db.connection.execute(
+            "SELECT COUNT(*) as c FROM memories WHERE workspace_id=? AND archived_at IS NOT NULL"
+            " AND deleted_at IS NULL",
+            (workspace_id,),
+        ).fetchone()["c"]
+        return {
+            "total": v2_count + old_count + archived,
+            "pending": 0,
+            "accepted": v2_count + old_count,
+            "archived": archived,
+            "stale": 0,
+        }
+    except Exception:
+        return {"total": 0, "pending": 0, "accepted": 0, "archived": 0, "stale": 0}
 
 
-def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
-
-    db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+# ─── List helpers (memory_items + memories tables) ────────────────────
 
 
-def _list_candidates(
+def _list_all(
     workspace_id: str,
-    status: str = "",
-    type_: str = "",
-    q: str = "",
-) -> list[dict[str, object]]:
-    db = _get_db()
-    sql = "SELECT * FROM memory_candidates WHERE workspace_id=?"
-    params: list[Any] = [workspace_id]
-    if status:
-        sql += " AND status=?"
-        params.append(status)
-    if type_:
-        sql += " AND type=?"
-        params.append(type_)
-    if q:
-        sql += " AND (text LIKE ? OR reason LIKE ?)"
-        like = f"%{q}%"
-        params.append(like)
-        params.append(like)
-    sql += " ORDER BY created_at DESC"
-    rows = db.connection.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
-
-
-def _list_memories(
-    workspace_id: str,
-    status: str = "",
     type_: str = "",
     q: str = "",
     archived_filter: str = "",
 ) -> list[dict[str, object]]:
-    db = _get_db()
-    sql = "SELECT * FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
-    params: list[Any] = [workspace_id]
-    if status:
-        sql += " AND status=?"
-        params.append(status)
-    if type_:
-        sql += " AND type=?"
-        params.append(type_)
-    if archived_filter == "no":
-        sql += " AND archived_at IS NULL"
-    elif archived_filter == "yes":
-        sql += " AND archived_at IS NOT NULL"
-    if q:
-        sql += " AND (text LIKE ? OR summary LIKE ?)"
-        like = f"%{q}%"
-        params.append(like)
-        params.append(like)
-    sql += " ORDER BY created_at DESC"
-    rows = db.connection.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    """List memories from both memory_items (v2) and memories (legacy) tables."""
+    items: list[dict[str, object]] = []
+    try:
+        db = _get_db()
+
+        # Memory v2 items
+        sql = (
+            "SELECT id, summary as text, memory_type as type, reinforcement,"
+            " emotional_weight, created_at, updated_at FROM memory_items"
+            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
+        )
+        params: list[Any] = [workspace_id]
+        if type_:
+            sql += " AND memory_type=?"
+            params.append(type_)
+        if q:
+            sql += " AND summary LIKE ?"
+            params.append(f"%{q}%")
+        sql += " ORDER BY updated_at DESC"
+        for row in db.connection.execute(sql, params).fetchall():
+            d = dict(row)
+            d["id"] = str(d["id"])
+            d["section"] = d.get("type", "general")
+            d["status"] = "active"
+            d["confidence"] = min(1.0, float(d.get("reinforcement", 1) or 1) * 0.1)
+            d["summary"] = ""
+            items.append(d)
+
+        # Legacy memories table
+        sql2 = (
+            "SELECT id, text, type, confidence, created_at, updated_at, archived_at"
+            " FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
+        )
+        params2: list[Any] = [workspace_id]
+        if type_:
+            sql2 += " AND type=?"
+            params2.append(type_)
+        if archived_filter == "no":
+            sql2 += " AND archived_at IS NULL"
+        elif archived_filter == "yes":
+            sql2 += " AND archived_at IS NOT NULL"
+        if q:
+            sql2 += " AND (text LIKE ? OR summary LIKE ?)"
+            like = f"%{q}%"
+            params2.append(like)
+            params2.append(like)
+        sql2 += " ORDER BY created_at DESC"
+        for row in db.connection.execute(sql2, params2).fetchall():
+            d = dict(row)
+            d["id"] = str(d["id"])
+            d["section"] = d.get("type", "general")
+            d["status"] = "archived" if d.get("archived_at") else "active"
+            d["summary"] = ""
+            items.append(d)
+    except Exception:
+        pass
+    return items
 
 
-def _get_memory_or_candidate(
-    id: str, workspace_id: str
-) -> tuple[dict[str, object] | None, str]:
-    db = _get_db()
-    sql = "SELECT * FROM memories WHERE id=? AND workspace_id=?"
-    cur = db.connection.execute(sql, (id, workspace_id))
-    row = cur.fetchone()
-    if row:
-        return dict(row), "memory"
-    cur = db.connection.execute("SELECT * FROM memory_candidates WHERE id=?", (id,))
-    row = cur.fetchone()
-    if row:
-        return dict(row), "candidate"
-    return None, ""
+def _get_one(id: str, workspace_id: str) -> dict[str, object] | None:
+    """Look up a memory by id from memory_items or memories table."""
+    try:
+        db = _get_db()
+        row = db.connection.execute(
+            "SELECT id, summary as text, memory_type as type,"
+            " reinforcement, emotional_weight, created_at FROM memory_items"
+            " WHERE id=? AND workspace_id=? AND status='active'",
+            (id, workspace_id),
+        ).fetchone()
+        if row:
+            d = dict(row)
+            d["section"] = d.get("type", "general")
+            d["status"] = "active"
+            return d
+        row = db.connection.execute(
+            "SELECT id, text, type, confidence, created_at, archived_at"
+            " FROM memories WHERE id=? AND workspace_id=? AND deleted_at IS NULL",
+            (id, workspace_id),
+        ).fetchone()
+        if row:
+            d = dict(row)
+            d["section"] = d.get("type", "general")
+            d["status"] = "archived" if d.get("archived_at") else "active"
+            return d
+    except Exception:
+        pass
+    return None
+
+
+# ─── Redaction ────────────────────────────────────────────────────────
 
 
 def _redact_item(item: dict[str, object]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for k, v in item.items():
-        if isinstance(v, str):
-            result[k] = redact_html(v)
-        else:
-            result[k] = v
-    return result
+    return {k: redact_html(v) if isinstance(v, str) else v for k, v in item.items()}
 
 
-def _audit_log(
-    actor: str,
-    action: str,
-    resource: str,
-    workspace_id: str,
-    details: dict[str, object] | None = None,
-    request_id: str = "",
-) -> None:
+def _audit_log(actor: str, action: str, resource: str, workspace_id: str,
+               details: dict[str, object] | None = None) -> None:
     from cogito_agent.governance.audit import AuditLogger
-
-    db = _get_db()
-    AuditLogger(db).log(
-        actor_id=actor,
-        action=action,
-        resource=resource,
+    AuditLogger(_get_db()).log(
+        actor_id=actor, action=action, resource=resource,
         workspace_id=workspace_id,
         details=json.dumps(details or {}, default=str),
         redact_details=True,
     )
 
 
-# ─── Main list page ──────────────────────────────────────────────────────────
+# ─── Routes ───────────────────────────────────────────────────────────
 
 
 @memory_router.get("", response_class=HTMLResponse, include_in_schema=False)
@@ -192,246 +197,101 @@ async def memory_page(
     type: str = Query(""),
     q: str = Query(""),
 ) -> HTMLResponse:
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
     stats = _mem_stats(CONSOLE_WORKSPACE_ID)
-
-    items: list[dict[str, object]] = []
-    is_candidate_map: dict[str, bool] = {}
-
-    if tab in ("all", "candidates"):
-        cands = _list_candidates(CONSOLE_WORKSPACE_ID, status, type, q)
-        for c in cands:
-            items.append(_redact_item(c))
-            is_candidate_map[str(c.get("id", ""))] = True
-
-    if tab in ("all", "memories"):
-        mems = _list_memories(CONSOLE_WORKSPACE_ID, status, type, q)
-        for m in mems:
-            items.append(_redact_item(m))
-            is_candidate_map[str(m.get("id", ""))] = False
-
+    items = _list_all(CONSOLE_WORKSPACE_ID, type, q)
     if tab == "all":
         items.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
-
     ctx: dict[str, object] = {
-        "request": request,
-        "title": "Memory",
-        "version": APP_VERSION,
-        "stats": stats,
-        "tab": tab,
-        "status": status,
-        "type": type,
-        "q": q,
-        "items": items,
-        "is_candidate": is_candidate_map,
+        "request": request, "title": "Memory", "version": APP_VERSION,
+        "stats": stats, "tab": tab, "status": status, "type": type, "q": q,
+        "items": [_redact_item(i) for i in items],
+        "is_candidate": {},
         "menu": _menu_items(),
     }
     return templates.TemplateResponse(request, "console/memory.html", ctx)
 
 
-# ─── Detail page ─────────────────────────────────────────────────────────────
-
-
 @memory_router.get("/{id}", response_class=HTMLResponse, include_in_schema=False)
 async def memory_detail(request: Request, id: str) -> HTMLResponse:
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    item, item_type = _get_memory_or_candidate(id, CONSOLE_WORKSPACE_ID)
+    item = _get_one(id, CONSOLE_WORKSPACE_ID)
     if item is None:
-        ctx: dict[str, object] = {
-            "request": request,
-            "title": "Not Found",
-            "message": f"Memory or candidate '{id}' not found.",
-            "menu": _menu_items(),
-        }
-        return templates.TemplateResponse(request, "console/error.html", ctx, status_code=404)
-
-    item = _redact_item(item)
+        return templates.TemplateResponse(
+            request, "console/error.html",
+            {"request": request, "title": "Not Found",
+             "message": f"Memory '{id}' not found.", "menu": _menu_items()},
+            status_code=404,
+        )
     ctx = {
-        "request": request,
-        "title": "Memory Detail",
-        "version": APP_VERSION,
-        "item": item,
-        "item_type": item_type,
-        "menu": _menu_items(),
+        "request": request, "title": "Memory Detail", "version": APP_VERSION,
+        "item": _redact_item(item), "item_type": "memory", "menu": _menu_items(),
     }
     return templates.TemplateResponse(request, "console/memory_detail.html", ctx)
 
 
-# ─── Actions: Candidates ─────────────────────────────────────────────────────
-
-
-@memory_router.post(
-    "/candidates/{candidate_id}/accept",
-    response_class=HTMLResponse, include_in_schema=False,
-)
-async def candidate_accept(request: Request, candidate_id: str) -> HTMLResponse:
-    from cogito_agent.storage.repositories import MemoryCandidateRepository
-
-    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    repo = MemoryCandidateRepository(db)
-    result = repo.accept(candidate_id)
-    if result is None:
-        return _error_partial(request, "Candidate not found", rid)
-    _audit_log(
-        CONSOLE_ACTOR, "memory.accept", f"candidate:{candidate_id}",
-        CONSOLE_WORKSPACE_ID, request_id=rid,
-    )
-    return templates.TemplateResponse(
-        request, "console/components/memory_success.html",
-        {"request": request, "message": "Candidate accepted.", "menu": _menu_items()},
-    )
-
-
-@memory_router.post(
-    "/candidates/{candidate_id}/reject",
-    response_class=HTMLResponse, include_in_schema=False,
-)
-async def candidate_reject(request: Request, candidate_id: str) -> HTMLResponse:
-    from cogito_agent.storage.repositories import MemoryCandidateRepository
-
-    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    repo = MemoryCandidateRepository(db)
-    result = repo.reject(candidate_id)
-    if result is None:
-        return _error_partial(request, "Candidate not found", rid)
-    _audit_log(
-        CONSOLE_ACTOR, "memory.reject", f"candidate:{candidate_id}",
-        CONSOLE_WORKSPACE_ID, request_id=rid,
-    )
-    return templates.TemplateResponse(
-        request, "console/components/memory_success.html",
-        {"request": request, "message": "Candidate rejected.", "menu": _menu_items()},
-    )
-
-
-@memory_router.post(
-    "/candidates/{candidate_id}/edit",
-    response_class=HTMLResponse, include_in_schema=False,
-)
-async def candidate_edit(
-    request: Request, candidate_id: str,
-    text: str = Form(...),
-    type: str = Form("general"),
-    confidence: float = Form(0.5),
-) -> HTMLResponse:
-    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    old_row = db.connection.execute(
-        "SELECT * FROM memory_candidates WHERE id=?", (candidate_id,)
-    ).fetchone()
-    if old_row is None:
-        return _error_partial(request, "Candidate not found", rid)
-    db.connection.execute(
-        "UPDATE memory_candidates SET text=?, type=?, confidence=? WHERE id=?",
-        (text, type, confidence, candidate_id),
-    )
-    db.connection.commit()
-    _audit_log(
-        CONSOLE_ACTOR, "memory.candidate.edit",
-        f"candidate:{candidate_id}", CONSOLE_WORKSPACE_ID,
-        details={"before_text_preview": str(old_row["text"])[:80], "after_text_preview": text[:80]},
-        request_id=rid,
-    )
-    return templates.TemplateResponse(
-        request, "console/components/memory_success.html",
-        {"request": request, "message": "Candidate updated.", "menu": _menu_items()},
-    )
-
-
-# ─── Actions: Memories ───────────────────────────────────────────────────────
-
-
 @memory_router.post("/{memory_id}/edit", response_class=HTMLResponse, include_in_schema=False)
-async def memory_edit(
-    request: Request, memory_id: str,
-    text: str = Form(...),
-) -> HTMLResponse:
-    from cogito_agent.storage.repositories import MemoryRepository
-
-    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    repo = MemoryRepository(db)
-    old = repo.get_by_id(memory_id, CONSOLE_WORKSPACE_ID)
-    if old is None:
-        return _error_partial(request, "Memory not found", rid)
-    ok = repo.edit_text(memory_id, CONSOLE_WORKSPACE_ID, text, actor_id=CONSOLE_ACTOR)
-    if not ok:
-        return _error_partial(request, "Failed to update memory", rid)
-    _audit_log(
-        CONSOLE_ACTOR, "memory.edit",
-        f"memory:{memory_id}", CONSOLE_WORKSPACE_ID,
-        details={"before_text_preview": str(old["text"])[:80], "after_text_preview": text[:80]},
-        request_id=rid,
-    )
-    return templates.TemplateResponse(
-        request, "console/components/memory_success.html",
-        {"request": request, "message": "Memory updated.", "menu": _menu_items()},
-    )
+async def memory_edit(request: Request, memory_id: str, text: str = Form(...)) -> HTMLResponse:
+    rid = str(uuid.uuid4())
+    try:
+        from cogito_agent.memory.application import MemoryApplicationService
+        from cogito_agent.governance import AuditLogger
+        svc = MemoryApplicationService(_get_db(), audit=AuditLogger(_get_db()))
+        ok = svc.edit_memory(memory_id, CONSOLE_WORKSPACE_ID, text, actor_id=CONSOLE_ACTOR)
+        if not ok:
+            return _error_partial(request, "Memory not found", rid)
+        _audit_log(CONSOLE_ACTOR, "memory.edit", f"memory:{memory_id}", CONSOLE_WORKSPACE_ID)
+        return templates.TemplateResponse(
+            request, "console/components/memory_success.html",
+            {"request": request, "message": "Memory updated.", "menu": _menu_items()},
+        )
+    except Exception as e:
+        return _error_partial(request, f"Failed: {e}", rid)
 
 
 @memory_router.post("/{memory_id}/archive", response_class=HTMLResponse, include_in_schema=False)
 async def memory_archive(request: Request, memory_id: str) -> HTMLResponse:
-    from cogito_agent.storage.repositories import MemoryRepository
-
-    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    repo = MemoryRepository(db)
-    ok = repo.archive(memory_id, CONSOLE_WORKSPACE_ID)
-    if not ok:
-        return _error_partial(request, "Memory not found or already archived", rid)
-    _audit_log(
-        CONSOLE_ACTOR, "memory.archive", f"memory:{memory_id}",
-        CONSOLE_WORKSPACE_ID, request_id=rid,
-    )
-    return templates.TemplateResponse(
-        request, "console/components/memory_success.html",
-        {"request": request, "message": "Memory archived.", "menu": _menu_items()},
-    )
+    rid = str(uuid.uuid4())
+    try:
+        from cogito_agent.memory.application import MemoryApplicationService
+        from cogito_agent.governance import AuditLogger
+        svc = MemoryApplicationService(_get_db(), audit=AuditLogger(_get_db()))
+        ok = svc.archive_memory(memory_id, CONSOLE_WORKSPACE_ID, actor_id=CONSOLE_ACTOR)
+        if not ok:
+            return _error_partial(request, "Memory not found", rid)
+        _audit_log(CONSOLE_ACTOR, "memory.archive", f"memory:{memory_id}", CONSOLE_WORKSPACE_ID)
+        return templates.TemplateResponse(
+            request, "console/components/memory_success.html",
+            {"request": request, "message": "Memory archived.", "menu": _menu_items()},
+        )
+    except Exception as e:
+        return _error_partial(request, f"Failed: {e}", rid)
 
 
 @memory_router.post("/{memory_id}/delete", response_class=HTMLResponse, include_in_schema=False)
 async def memory_delete(request: Request, memory_id: str) -> HTMLResponse:
-    from cogito_agent.storage.repositories import MemoryRepository
-
-    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
-    _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    repo = MemoryRepository(db)
-    old = repo.get_by_id(memory_id, CONSOLE_WORKSPACE_ID)
-    if old is None:
-        return _error_partial(request, "Memory not found", rid)
-    repo.soft_delete(memory_id, CONSOLE_WORKSPACE_ID)
-    _audit_log(
-        CONSOLE_ACTOR, "memory.delete",
-        f"memory:{memory_id}", CONSOLE_WORKSPACE_ID,
-        details={"text_preview": str(old["text"])[:80]},
-        request_id=rid,
-    )
-    return templates.TemplateResponse(
-        request, "console/components/memory_success.html",
-        {"request": request, "message": "Memory deleted.", "menu": _menu_items()},
-    )
+    rid = str(uuid.uuid4())
+    try:
+        from cogito_agent.memory.application import MemoryApplicationService
+        from cogito_agent.governance import AuditLogger
+        svc = MemoryApplicationService(_get_db(), audit=AuditLogger(_get_db()))
+        ok = svc.soft_delete_memory(memory_id, CONSOLE_WORKSPACE_ID, actor_id=CONSOLE_ACTOR)
+        if not ok:
+            return _error_partial(request, "Memory not found", rid)
+        _audit_log(CONSOLE_ACTOR, "memory.delete", f"memory:{memory_id}", CONSOLE_WORKSPACE_ID)
+        return templates.TemplateResponse(
+            request, "console/components/memory_success.html",
+            {"request": request, "message": "Memory deleted.", "menu": _menu_items()},
+        )
+    except Exception as e:
+        return _error_partial(request, f"Failed: {e}", rid)
 
 
-# ─── Shared ──────────────────────────────────────────────────────────────────
-
-CONSOLE_ACTOR = "console"
+# ─── Error partial ────────────────────────────────────────────────────
 
 
 def _error_partial(request: Request, message: str, request_id: str) -> HTMLResponse:
-    ctx: dict[str, object] = {
-        "request": request,
-        "error": redact_html(message),
-        "request_id": request_id,
-        "menu": _menu_items(),
-    }
     return templates.TemplateResponse(
-        request, "console/components/error_banner.html", ctx, status_code=404,
+        request, "console/components/error_banner.html",
+        {"request": request, "error": redact_html(message),
+         "request_id": request_id, "menu": _menu_items()},
+        status_code=404,
     )

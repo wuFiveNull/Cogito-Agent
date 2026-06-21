@@ -121,8 +121,10 @@ def create_backup(
                 cfg_data = json.loads(config_path.read_text(encoding="utf-8"))
                 if not include_secrets:
                     for k in list(cfg_data.keys()):
-                        if any(secret_kw in k.lower() for secret_kw in
-                               ("api_key", "secret", "password", "token", "bearer")):
+                        if any(
+                            secret_kw in k.lower()
+                            for secret_kw in ("api_key", "secret", "password", "token", "bearer")
+                        ):
                             cfg_data[k] = "[REDACTED]"
                 config_target.write_text(json.dumps(cfg_data, indent=2), encoding="utf-8")
                 manifest["files"].append("config.json")
@@ -147,9 +149,7 @@ def create_backup(
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM audit_logs ORDER BY created_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM audit_logs ORDER BY created_at DESC").fetchall()
             audit_data = [dict(r) for r in rows]
             (tmp / "audit_logs.json").write_text(
                 json.dumps(audit_data, indent=2, default=str), encoding="utf-8"
@@ -163,9 +163,7 @@ def create_backup(
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM traces ORDER BY started_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM traces ORDER BY started_at DESC").fetchall()
             trace_data = [dict(r) for r in rows]
             (tmp / "traces.json").write_text(
                 json.dumps(trace_data, indent=2, default=str), encoding="utf-8"
@@ -197,9 +195,7 @@ def create_backup(
         }
 
         # Write manifest after inventory and checksums are final.
-        (tmp / "manifest.json").write_text(
-            json.dumps(manifest, indent=2), encoding="utf-8"
-        )
+        (tmp / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         # Create ZIP
         out_path_parent = Path(out_path).parent
@@ -264,9 +260,7 @@ def restore_backup(
             for relative_path, expected in checksums.items():
                 candidate = tmp / str(relative_path)
                 if not candidate.is_file() or _sha256(candidate) != expected:
-                    result["errors"].append(
-                        f"Checksum mismatch: {relative_path}"
-                    )
+                    result["errors"].append(f"Checksum mismatch: {relative_path}")
 
         db_target = tmp / "cogito.db"
         if db_target.exists():
@@ -303,9 +297,7 @@ def restore_backup(
                     f"{destination.name}.pre-restore.{timestamp}.bak"
                 )
                 _sqlite_copy(str(destination), str(safety_copy))
-                result["actions"].append(
-                    f"Created pre-restore safety copy at {safety_copy}"
-                )
+                result["actions"].append(f"Created pre-restore safety copy at {safety_copy}")
             _sqlite_copy(str(db_target), str(destination))
             result["actions"].append(f"Restored SQLite DB to {db_path}")
 
@@ -362,36 +354,28 @@ def export_data(
 
     if "memories" in sections:
         try:
-            rows = conn.execute(
-                "SELECT * FROM memories ORDER BY created_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM memories ORDER BY created_at DESC").fetchall()
             export["sections"]["memories"] = [dict(r) for r in rows]
         except Exception:
             export["sections"]["memories"] = []
 
     if "traces" in sections:
         try:
-            rows = conn.execute(
-                "SELECT * FROM traces ORDER BY started_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM traces ORDER BY started_at DESC").fetchall()
             export["sections"]["traces"] = [dict(r) for r in rows]
         except Exception:
             export["sections"]["traces"] = []
 
     if "audit" in sections:
         try:
-            rows = conn.execute(
-                "SELECT * FROM audit_logs ORDER BY created_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM audit_logs ORDER BY created_at DESC").fetchall()
             export["sections"]["audit"] = [dict(r) for r in rows]
         except Exception:
             export["sections"]["audit"] = []
 
     if "messages" in sections:
         try:
-            rows = conn.execute(
-                "SELECT * FROM messages ORDER BY created_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM messages ORDER BY created_at DESC").fetchall()
             export["sections"]["messages"] = [dict(r) for r in rows]
         except Exception:
             export["sections"]["messages"] = []
@@ -400,9 +384,7 @@ def export_data(
         config_path = Path(data_dir) / "config.json"
         if config_path.exists():
             try:
-                export["sections"]["config"] = json.loads(
-                    config_path.read_text(encoding="utf-8")
-                )
+                export["sections"]["config"] = json.loads(config_path.read_text(encoding="utf-8"))
             except Exception:
                 export["sections"]["config"] = {}
 

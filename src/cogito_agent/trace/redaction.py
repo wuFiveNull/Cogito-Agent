@@ -26,9 +26,12 @@ class PatternRule:
 
 # Re-export for backward compatibility
 __all__ = [
-    "RedactionRule", "PatternRule",
-    "SecretProvider", "SecretValue",
-    "EnvSecretProvider", "KeychainSecretProvider",
+    "RedactionRule",
+    "PatternRule",
+    "SecretProvider",
+    "SecretValue",
+    "EnvSecretProvider",
+    "KeychainSecretProvider",
     "RedactionHelper",
 ]
 

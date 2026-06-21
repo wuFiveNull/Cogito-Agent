@@ -1,6 +1,6 @@
 [project]
 name = "cogito-agent"
-version = "0.16.0-dev"
+version = "0.17.0-dev"
 description = "A local-first personal Agent runtime with memory, governed capabilities, traceable execution, reusable skills, and constrained proactive behavior."
 requires-python = ">=3.12"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.2",
     "pytest>=8",
     "ruff>=0.5",
     "mypy>=1.10",
@@ -52,6 +53,7 @@ disallow_any_unimported = false
 cogito = "cogito_agent.cli:run_cli"
 cogito-demo = "cogito_agent.cli.e2e_demo:run_e2e_demo"
 cogito-daemon = "cogito_agent.cli.daemon:main"
+cogito-console = "cogito_agent.api.app:run_api"
 
 [tool.setuptools.package-data]
 cogito_agent = [

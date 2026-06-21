@@ -95,6 +95,7 @@ def create_cache_key(
 ) -> str:
     import hashlib
     import json
+
     stable = json.dumps(
         {
             "w": workspace_id,

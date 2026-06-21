@@ -10,9 +10,7 @@ from cogito_agent.skill import SkillRunner
 from cogito_agent.storage.repositories import ApprovalRepository
 
 
-def _run_and_get_ids(
-    db_runner: SkillRunner, manifest: SkillManifest
-) -> tuple[str, str]:
+def _run_and_get_ids(db_runner: SkillRunner, manifest: SkillManifest) -> tuple[str, str]:
     """Run a skill manifest and return (run_log_id, approval_id)."""
     log = db_runner.run(manifest, workspace_id="ws-run")
     assert log.status == "pending_approval"
@@ -38,14 +36,20 @@ def _make_manifest(name: str = "resume-test") -> SkillManifest:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="condition-true", kind=StepKind.condition,
+                id="c1",
+                name="condition-true",
+                kind=StepKind.condition,
                 condition_expression="1 == 1",
             ),
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
             SkillStep(
-                id="t1", name="transform-after", kind=StepKind.transform,
+                id="t1",
+                name="transform-after",
+                kind=StepKind.transform,
                 input_mapping={"out": "ran-after-approval"},
             ),
         ],
@@ -119,7 +123,9 @@ def test_resume_non_pending_status(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="t1", name="simple", kind=StepKind.transform,
+                id="t1",
+                name="simple",
+                kind=StepKind.transform,
                 input_mapping={"out": "hello"},
             ),
         ],

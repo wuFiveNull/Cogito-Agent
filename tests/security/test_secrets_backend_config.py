@@ -1,4 +1,5 @@
 """Tests: secrets.backend config controls which SecretProvider is used."""
+
 from __future__ import annotations
 
 import tempfile
@@ -23,10 +24,12 @@ def test_backend_env():
 
 
 def test_backend_keychain():
-    provider = get_provider_from_config({
-        "secrets.backend": "keychain",
-        "secrets.service_name": "cogito-test",
-    })
+    provider = get_provider_from_config(
+        {
+            "secrets.backend": "keychain",
+            "secrets.service_name": "cogito-test",
+        }
+    )
     assert isinstance(provider, KeychainSecretProvider)
     # May or may not be available - that's fine
     assert hasattr(provider, "available")
@@ -34,8 +37,10 @@ def test_backend_keychain():
 
 def test_backend_local_with_path():
     path = str(Path(tempfile.gettempdir()) / "cogito_test_secrets.db")
-    provider = get_provider_from_config({
-        "secrets.backend": "local",
-        "secrets.local_path": path,
-    })
+    provider = get_provider_from_config(
+        {
+            "secrets.backend": "local",
+            "secrets.local_path": path,
+        }
+    )
     assert isinstance(provider, LocalSecretsProvider)

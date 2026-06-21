@@ -30,7 +30,9 @@ def _unpack_embedding(data: bytes) -> list[float]:
 
 class MemoryEmbeddingIndexService:
     def __init__(
-        self, db: Database, provider: EmbeddingProvider | None = None,
+        self,
+        db: Database,
+        provider: EmbeddingProvider | None = None,
     ) -> None:
         self._db = db
         self._provider = provider
@@ -99,7 +101,7 @@ class MemoryEmbeddingIndexService:
                 continue
             batch.append((mid, str(row["text"]), _content_hash(str(row["text"]))))
         for start in range(0, len(batch), batch_size):
-            chunk = batch[start:start + batch_size]
+            chunk = batch[start : start + batch_size]
             try:
                 texts = [item[1] for item in chunk]
                 if self._provider:
@@ -123,7 +125,11 @@ class MemoryEmbeddingIndexService:
         return results
 
     def rebuild_workspace(
-        self, workspace_id: str, *, force: bool = False, batch_size: int = 32,
+        self,
+        workspace_id: str,
+        *,
+        force: bool = False,
+        batch_size: int = 32,
     ) -> dict[str, Any]:
         if not self._provider:
             return {"status": "error", "message": "No embedding provider configured"}
@@ -143,27 +149,43 @@ class MemoryEmbeddingIndexService:
             content_hash = _content_hash(text)
             if not force:
                 existing = self._get_existing_embedding(mid)
-                if existing and existing.get("status") == "ready" and existing.get("embedding_version") == _EMBEDDING_VERSION and existing.get("model_name") == self._provider.model_name and existing.get("content_hash") == content_hash:
+                if (
+                    existing
+                    and existing.get("status") == "ready"
+                    and existing.get("embedding_version") == _EMBEDDING_VERSION
+                    and existing.get("model_name") == self._provider.model_name
+                    and existing.get("content_hash") == content_hash
+                ):
                     skipped += 1
                     continue
             pending.append((mid, text, content_hash))
 
         for start in range(0, len(pending), batch_size):
-            batch = pending[start:start + batch_size]
+            batch = pending[start : start + batch_size]
             texts = [item[1] for item in batch]
             try:
                 vectors = self._provider.embed_batch(texts)
             except Exception as e:
                 logger.warning("Batch embedding failed for %d items: %s", len(batch), e)
                 for item in batch:
-                    self._upsert_embedding(item[0], workspace_id, item[2], "failed", error_code=str(e)[:200])
+                    self._upsert_embedding(
+                        item[0], workspace_id, item[2], "failed", error_code=str(e)[:200]
+                    )
                     failed += 1
                 continue
 
             if len(vectors) != len(batch):
-                logger.warning("Batch response count %d != input count %d", len(vectors), len(batch))
+                logger.warning(
+                    "Batch response count %d != input count %d", len(vectors), len(batch)
+                )
                 for item in batch:
-                    self._upsert_embedding(item[0], workspace_id, item[2], "failed", error_code="response_count_mismatch")
+                    self._upsert_embedding(
+                        item[0],
+                        workspace_id,
+                        item[2],
+                        "failed",
+                        error_code="response_count_mismatch",
+                    )
                     failed += 1
                 continue
 
@@ -182,8 +204,7 @@ class MemoryEmbeddingIndexService:
 
     def mark_stale(self, memory_id: str) -> None:
         self._db.connection.execute(
-            "UPDATE memory_embeddings_v2 SET status = 'stale', updated_at = ?"
-            " WHERE memory_id = ?",
+            "UPDATE memory_embeddings_v2 SET status = 'stale', updated_at = ? WHERE memory_id = ?",
             (datetime.now(UTC).isoformat(), memory_id),
         )
         self._db.connection.commit()
@@ -221,8 +242,12 @@ class MemoryEmbeddingIndexService:
             " AND me.provider_name = ? AND me.model_name = ?"
             " AND me.embedding_version = ?"
             " GROUP BY me.status",
-            (workspace_id, self._provider.provider_name,
-             self._provider.model_name, _EMBEDDING_VERSION),
+            (
+                workspace_id,
+                self._provider.provider_name,
+                self._provider.model_name,
+                _EMBEDDING_VERSION,
+            ),
         ).fetchall()
 
         status_counts = {row["status"]: row["cnt"] for row in counts}
@@ -254,14 +279,18 @@ class MemoryEmbeddingIndexService:
             " AND me.status = 'failed'"
             " AND me.provider_name = ? AND me.model_name = ?"
             " AND me.embedding_version = ?",
-            (workspace_id, self._provider.provider_name,
-             self._provider.model_name, _EMBEDDING_VERSION),
+            (
+                workspace_id,
+                self._provider.provider_name,
+                self._provider.model_name,
+                _EMBEDDING_VERSION,
+            ),
         ).fetchall()
         items = [(str(r["memory_id"]), str(r["text"]), _content_hash(str(r["text"]))) for r in rows]
         succeeded = 0
         failed = 0
         for start in range(0, len(items), batch_size):
-            chunk = items[start:start + batch_size]
+            chunk = items[start : start + batch_size]
             try:
                 vectors = self._provider.embed_batch([item[1] for item in chunk])
             except Exception:
@@ -306,7 +335,8 @@ class MemoryEmbeddingIndexService:
         ws_id = workspace_id
         if not ws_id:
             row = self._db.connection.execute(
-                "SELECT workspace_id FROM memories WHERE id = ?", (memory_id,),
+                "SELECT workspace_id FROM memories WHERE id = ?",
+                (memory_id,),
             ).fetchone()
             if row:
                 ws_id = str(row["workspace_id"])
@@ -318,12 +348,18 @@ class MemoryEmbeddingIndexService:
             "  created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                memory_id, ws_id,
+                memory_id,
+                ws_id,
                 self._provider.provider_name if self._provider else "",
                 self._provider.model_name if self._provider else "",
                 self._provider.dimension if self._provider else 0,
-                blob, content_hash, _EMBEDDING_VERSION,
-                status, error_code, now, now,
+                blob,
+                content_hash,
+                _EMBEDDING_VERSION,
+                status,
+                error_code,
+                now,
+                now,
             ),
         )
         self._db.connection.commit()
@@ -351,7 +387,8 @@ class MemoryEmbeddingIndexService:
 
 
 def create_embedding_provider_from_config(
-    cfg: Any, secrets_provider: Any = None,
+    cfg: Any,
+    secrets_provider: Any = None,
 ) -> EmbeddingProvider | None:
     from cogito_agent.config.loader import EmbeddingSettings
 
@@ -372,10 +409,12 @@ def create_embedding_provider_from_config(
             api_key = ""
     if not api_key and es.api_key_env:
         import os
+
         api_key = os.environ.get(es.api_key_env, "")
 
     if provider_type == "openai_compatible":
         from .openai_compatible import OpenAICompatibleEmbeddingProvider
+
         return OpenAICompatibleEmbeddingProvider(
             base_url=es.base_url,
             model=es.model,
@@ -392,9 +431,11 @@ def create_embedding_provider_from_config(
         )
     elif provider_type == "local_sentence_transformer":
         from .local import LocalSentenceTransformerEmbeddingProvider
+
         return LocalSentenceTransformerEmbeddingProvider(model_name=es.model)
     elif provider_type == "mock":
         from .mock import MockEmbeddingProvider
+
         return MockEmbeddingProvider(dimension=es.expected_dimension or 384)
     elif provider_type == "disabled" or provider_type == "none":
         return None

@@ -4,13 +4,16 @@ from .compression import (
     SessionCompressionService,
     SummaryStrategy,
 )
-from .engine import ContextEngine, ContextItem
-from .prompt_builder import PromptBuilder
+from .engine import ContextEngine, ContextItem, ContextTraceSink
+from .prompt_builder import PromptAssembly, PromptBuilder, PromptLayerStats
 
 __all__ = [
     "ContextEngine",
     "ContextItem",
+    "ContextTraceSink",
     "PromptBuilder",
+    "PromptAssembly",
+    "PromptLayerStats",
     "CompressionPolicy",
     "DeterministicSummaryStrategy",
     "SessionCompressionService",

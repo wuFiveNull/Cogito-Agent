@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import uuid
 
+from cogito_agent.application import ChatApplicationService, build_runtime_kernel, default_workspace_path
 from cogito_agent.models import get_adapter, list_providers
-from cogito_agent.runtime import RuntimeKernel
+from cogito_agent.runtime import RuntimeKernel, TurnResult
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SkillManifest
 from cogito_agent.skill import SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database, SessionRepository, WorkspaceRepository
@@ -27,11 +28,12 @@ def run_cli(db_path: str = ":memory:") -> None:
 
     cfg = get_config()
     current_provider = cfg.get("model.provider", "mock")
-    from cogito_agent.config_loader import build_multimodel_adapter, load_config as load_yaml_config
-    adapter = build_multimodel_adapter(load_yaml_config())
+    from cogito_agent.config.loader import build_multimodel_adapter, load_config
+
+    adapter = build_multimodel_adapter(load_config())
     if adapter is None:
         adapter = build_model_adapter_from_config()
-    kernel = RuntimeKernel(db, model_adapter=adapter) if adapter else RuntimeKernel(db)
+    kernel = build_runtime_kernel(db, model_adapter=adapter, workspace_path=default_workspace_path(workspace_id))
 
     print("Cogito-Agent CLI  (type 'exit' to quit, '/help' for commands)")
     print("-" * 50)
@@ -41,6 +43,7 @@ def run_cli(db_path: str = ":memory:") -> None:
 
     # Print recent context once at session start
     from cogito_agent.storage.repositories import MessageRepository
+
     msg_repo = MessageRepository(db)
     recent_msgs = msg_repo.list_by_session(session_id, workspace_id)
     if recent_msgs:
@@ -61,7 +64,13 @@ def run_cli(db_path: str = ":memory:") -> None:
         if user_input.lower() in ("exit", "quit", "/exit"):
             break
         if user_input.lower() == "/help":
-            print("Commands: exit, /help, /ws list, /ws switch, /ws create, /ws delete, /memory list, /memory edit, /memory delete, /approvals, /approve, /deny, /skill list, /skill run, /trace list, /trace show, /stream, /provider, /export, /ws settings")  # noqa: E501
+            print(
+                "Commands: exit, /help, /ws list, /ws switch, /ws create, "
+                "/ws delete, /memory list, /memory edit, /memory delete, "
+                "/approvals, /approve, /deny, /skill list, /skill run, "
+                "/trace list, /trace show, /stream, /provider, /export, "
+                "/ws settings"
+            )  # noqa: E501
             continue
         if user_input.lower() == "/provider":
             provs = list_providers()
@@ -162,7 +171,7 @@ def run_cli(db_path: str = ":memory:") -> None:
             payload={"text": user_input},
         )
 
-        result = kernel.process(event)
+        result = ChatApplicationService(kernel).process(event)
 
         _display_result(result, workspace_id, session_id, kernel)
 
@@ -171,42 +180,31 @@ def run_cli(db_path: str = ":memory:") -> None:
 
 
 def _show_memory_candidates(db: Database, workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import MemoryCandidateRepository
-
-    repo = MemoryCandidateRepository(db)
-    pending = repo.list_pending(workspace_id)
-    if not pending:
-        print("No pending memory candidates.")
-        return
-    print(f"\nPending memory candidates ({len(pending)}):")
-    for c in pending:
-        cid = str(c.get("id", ""))
-        print(f"  [{cid[:8]}] {str(c.get('text', ''))[:60]}")
-    print("  Accept: /approve <id_prefix>  |  Deny: /deny <id_prefix>")
-
-
-def _find_candidate(db: Database, prefix: str) -> str | None:
-    cur = db.connection.execute(
-        "SELECT id FROM memory_candidates WHERE status = 'pending'"
-    )
-    for row in cur.fetchall():
-        cid = str(row["id"])
-        if cid.startswith(prefix):
-            return cid
-    return None
+    """Memory v2: show recent memories (no pending buffer)."""
+    try:
+        rows = db.connection.execute(
+            "SELECT id, summary, memory_type, reinforcement FROM memory_items"
+            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
+            " ORDER BY updated_at DESC LIMIT 10",
+            (workspace_id,),
+        ).fetchall()
+        if not rows:
+            print("No memories found.")
+            return
+        print(f"\nRecent memories ({len(rows)}):")
+        for r in rows:
+            rid = str(r["id"])[:8]
+            text = str(r["summary"])[:60]
+            mtype = str(r["memory_type"])
+            reinf = int(r["reinforcement"])
+            print(f"  [{rid}] ({mtype}, x{reinf}) {text}")
+    except Exception as e:
+        print(f"Error listing memories: {e}")
 
 
 def _handle_approve(db: Database, prefix: str) -> None:
-    from cogito_agent.storage.repositories import MemoryCandidateRepository
-
-    cid = _find_candidate(db, prefix)
-    if not cid:
-        print(f"Candidate '{prefix}' not found.")
-        return
-    repo = MemoryCandidateRepository(db)
-    result = repo.accept(cid)
-    if result:
-        print(f"Accepted: {str(result.get('text', ''))[:60]}")
+    """Memory v2: memories stored directly, no pending approval needed."""
+    print("Memory v2: memories go directly to storage without pending approval.")
 
 
 def _list_skills(db: Database, workspace_id: str) -> None:
@@ -252,9 +250,7 @@ def _run_skill(db: Database, workspace_id: str, session_id: str, args: str) -> N
         print(f"  [{step['status']}] {step.get('output', '')}"[:80])
 
 
-def _handle_stream(
-    db: Database, workspace_id: str, session_id: str, provider: str
-) -> None:
+def _handle_stream(db: Database, workspace_id: str, session_id: str, provider: str) -> None:
     try:
         user_input = input("Stream input: ")
     except (EOFError, KeyboardInterrupt):
@@ -279,8 +275,8 @@ def _handle_stream(
         type=EventType.user_message,
         payload={"text": user_input},
     )
-    kernel = RuntimeKernel(db)
-    kernel.process(event)
+    kernel = build_runtime_kernel(db, workspace_path=default_workspace_path(workspace_id))
+    ChatApplicationService(kernel).process(event)
 
 
 def _list_all_memories(db: Database, workspace_id: str) -> None:
@@ -341,10 +337,11 @@ def _list_approvals(db: Database, workspace_id: str) -> None:
 
 
 def _display_result(
-    result: object, workspace_id: str, session_id: str, kernel: object,
+    result: object,
+    workspace_id: str,
+    session_id: str,
+    kernel: RuntimeKernel,
 ) -> None:
-    from cogito_agent.runtime import TurnResult
-
     tr = result
     if not isinstance(tr, TurnResult):
         print(str(result))
@@ -368,10 +365,12 @@ def _display_result(
         if ans in ("y", "yes"):
             if db:
                 from cogito_agent.storage.repositories import ApprovalRepository
+
                 repo = ApprovalRepository(db)
                 repo.resolve(aid, "approved", "user")
                 print("  Approved. Resuming...")
                 from cogito_agent.shared import RuntimeEvent
+
                 resume_event = RuntimeEvent(
                     workspace_id=workspace_id,
                     session_id=session_id,
@@ -380,13 +379,14 @@ def _display_result(
                     type=EventType.resume,
                     payload={"approval_id": aid},
                 )
-                resumed = kernel.resume(resume_event) if hasattr(kernel, "resume") else None
+                resumed = ChatApplicationService(kernel).resume(resume_event)
                 if resumed:
                     _display_result(resumed, workspace_id, session_id, kernel)
                     return
         else:
             if db:
                 from cogito_agent.storage.repositories import ApprovalRepository
+
                 repo = ApprovalRepository(db)
                 repo.resolve(aid, "denied", "user")
             print("  Denied.")
@@ -478,16 +478,20 @@ def _switch_workspace(db: Database, target: str) -> str | None:
 
 
 def _handle_deny(db: Database, prefix: str) -> None:
-    from cogito_agent.storage.repositories import MemoryCandidateRepository
+    """Memory v2: no pending buffer to deny from."""
+    print("Memory v2: no pending buffer — memories go directly to storage.")
 
-    cid = _find_candidate(db, prefix)
-    if not cid:
-        print(f"Candidate '{prefix}' not found.")
-        return
-    repo = MemoryCandidateRepository(db)
-    result = repo.reject(cid)
-    if result:
-        print(f"Rejected: {str(result.get('text', ''))[:60]}")
+
+def _tag_to_section(tag: str) -> str:
+    _TAG_TO_SECTION: dict[str, str] = {
+        "profile": "用户事实",
+        "preference": "用户偏好",
+        "requested_memory": "用户明确要求记住的内容",
+        "task": "用户明确要求记住的内容",
+        "fact": "用户事实",
+        "general": "用户事实",
+    }
+    return _TAG_TO_SECTION.get(tag, "用户事实")
 
 
 def _list_traces(db: Database, workspace_id: str) -> None:

@@ -1,12 +1,12 @@
 """Tests: RuntimeKernel.process_stream() yields proper StreamEvent sequence."""
+
 from __future__ import annotations
 
-from cogito_agent.runtime import RuntimeKernel
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 from cogito_agent.shared.stream_events import StreamEventType
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import SessionRepository, WorkspaceRepository
-
 from tests.models.mock_model import MockModel
 
 
@@ -94,8 +94,10 @@ def test_process_stream_empty_message(db: Database) -> None:
     kernel = RuntimeKernel(db, model_adapter=MockModel())
     evt = RuntimeEvent(
         id="evt-empty",
-        workspace_id=wid, session_id=sid,
-        actor_id="user", source=EventSource.api,
+        workspace_id=wid,
+        session_id=sid,
+        actor_id="user",
+        source=EventSource.api,
         type=EventType.user_message,
         payload={"text": "", "channel": "api_stream"},
     )
@@ -109,13 +111,16 @@ def test_process_stream_empty_message(db: Database) -> None:
 def test_process_stream_model_error(db: Database) -> None:
     wid, sid = _setup(db)
     from cogito_agent.storage.repositories import SessionRepository
+
     SessionRepository(db).create("sess-err", wid, "error-test")
     adapter = MockModel(response_text="", fail_on_prompt="error")
     kernel = RuntimeKernel(db, model_adapter=adapter)
     evt = RuntimeEvent(
         id="evt-err",
-        workspace_id=wid, session_id="sess-err",
-        actor_id="user", source=EventSource.api,
+        workspace_id=wid,
+        session_id="sess-err",
+        actor_id="user",
+        source=EventSource.api,
         type=EventType.user_message,
         payload={"text": "trigger error", "channel": "api_stream"},
     )

@@ -65,7 +65,7 @@ class ChatWorkspaceService:
         all_messages = self._messages.list_by_session(session_id, workspace_id)
         end = len(all_messages) - (page - 1) * page_size
         start = max(0, end - page_size)
-        selected = all_messages[start:max(0, end)] if end > 0 else []
+        selected = all_messages[start : max(0, end)] if end > 0 else []
         messages: list[dict[str, object]] = []
         for message in selected:
             metadata = self._parse_json(str(message.get("metadata_json", "{}")))
@@ -128,9 +128,7 @@ class ChatWorkspaceService:
             return None
         branch_id = str(uuid.uuid4())
         source_title = str(source.get("title", "Chat")) or "Chat"
-        branch = self._sessions.create(
-            branch_id, workspace_id, f"{source_title[:67]} — branch"
-        )
+        branch = self._sessions.create(branch_id, workspace_id, f"{source_title[:67]} — branch")
         for message in self._messages.list_by_session(session_id, workspace_id):
             self._messages.create(
                 str(uuid.uuid4()),
@@ -151,9 +149,7 @@ class ChatWorkspaceService:
         )
         return branch
 
-    def get_turn_inspector(
-        self, workspace_id: str, trace_id: str
-    ) -> dict[str, object] | None:
+    def get_turn_inspector(self, workspace_id: str, trace_id: str) -> dict[str, object] | None:
         trace = self._db.connection.execute(
             "SELECT * FROM traces WHERE id = ? AND workspace_id = ?",
             (trace_id, workspace_id),

@@ -27,12 +27,10 @@ from cogito_agent.security import (
     DevSqliteSecretProvider,
     EnvSecretProvider,
     LocalEncryptedSecretProvider,
-    LocalSecretsProvider,
     get_provider_from_config,
 )
 from cogito_agent.storage import Database
 from cogito_agent.trace import Tracer
-
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -78,8 +76,10 @@ def policy():
 class TestDeliveryAdapter:
     def test_local_inbox_adapter_deliver_success(self, db, outbox):
         mid = outbox.enqueue(
-            event_id="e1", decision_id="d1",
-            title="Test Notification", body="Hello",
+            event_id="e1",
+            decision_id="d1",
+            title="Test Notification",
+            body="Hello",
         )
         message = outbox.get_message(mid)
         adapter = LocalInboxDeliveryAdapter()
@@ -96,8 +96,10 @@ class TestDeliveryAdapter:
 
     def test_local_inbox_adapter_deliver_failure(self, db, outbox):
         mid = outbox.enqueue(
-            event_id="e2", decision_id="d2",
-            title="Test", body="Body",
+            event_id="e2",
+            decision_id="d2",
+            title="Test",
+            body="Body",
         )
         message = outbox.get_message(mid)
         adapter = LocalInboxDeliveryAdapter()
@@ -109,8 +111,10 @@ class TestDeliveryAdapter:
 
     def test_console_notification_adapter_deliver(self, db, outbox):
         mid = outbox.enqueue(
-            event_id="e3", decision_id="d3",
-            title="Console Test", body="Body",
+            event_id="e3",
+            decision_id="d3",
+            title="Console Test",
+            body="Body",
             workspace_id="default",
         )
         message = outbox.get_message(mid)
@@ -128,7 +132,8 @@ class TestDeliveryAdapter:
 
     def test_delivery_result_model(self):
         result = DeliveryResult(
-            message_id="m1", status="sent",
+            message_id="m1",
+            status="sent",
             delivered_at="2026-01-01T00:00:00",
             trace_id="trace1",
         )
@@ -145,11 +150,16 @@ class TestDeliveryAdapter:
 class TestOutboxDispatcher:
     def test_dispatcher_sends_pending_message(self, db, outbox, tracer, audit, policy):
         mid = outbox.enqueue(
-            event_id="e10", decision_id="d10",
-            title="Dispatch Test", body="Body",
+            event_id="e10",
+            decision_id="d10",
+            title="Dispatch Test",
+            body="Body",
         )
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=policy,
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=policy,
         )
         processed = dispatcher.process_batch()
         assert mid in processed
@@ -160,20 +170,30 @@ class TestOutboxDispatcher:
 
     def test_dispatcher_respects_policy_deny(self, db, outbox, tracer, audit):
         deny_rule = PolicyRule(
-            actor="*", operation="send", context="*",
-            decision=DecisionType.deny, capability="notification.send",
+            actor="*",
+            operation="send",
+            context="*",
+            decision=DecisionType.deny,
+            capability="notification.send",
         )
         allow_call = PolicyRule(
-            actor="*", operation="call_model", context="*",
+            actor="*",
+            operation="call_model",
+            context="*",
             decision=DecisionType.allow,
         )
         strict_policy = PolicyEngine(rules=[deny_rule, allow_call])
         mid = outbox.enqueue(
-            event_id="e11", decision_id="d11",
-            title="Denied", body="Should be skipped",
+            event_id="e11",
+            decision_id="d11",
+            title="Denied",
+            body="Should be skipped",
         )
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=strict_policy,
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=strict_policy,
         )
         processed = dispatcher.process_batch()
         assert mid in processed
@@ -185,8 +205,10 @@ class TestOutboxDispatcher:
     def test_dispatcher_retry_and_dead_letter(self, db, outbox, tracer, audit):
         """Force failures to trigger retry and eventually dead_letter."""
         mid = outbox.enqueue(
-            event_id="e12", decision_id="d12",
-            title="Retry Test", body="Will fail",
+            event_id="e12",
+            decision_id="d12",
+            title="Retry Test",
+            body="Will fail",
         )
 
         # Set a low delivery_attempts to trigger immediate retry logic
@@ -209,8 +231,11 @@ class TestOutboxDispatcher:
                 )
 
         dispatcher = OutboxDispatcher(
-            db, delivery_adapter=FailingAdapter(),
-            audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            delivery_adapter=FailingAdapter(),
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         processed = dispatcher.process_batch()
         assert mid in processed
@@ -222,30 +247,39 @@ class TestOutboxDispatcher:
     def test_dispatcher_skips_future_retry(self, db, outbox, tracer, audit):
         """Messages with future next_retry_at should be skipped."""
         mid = outbox.enqueue(
-            event_id="e13", decision_id="d13",
-            title="Future Retry", body="Not yet",
+            event_id="e13",
+            decision_id="d13",
+            title="Future Retry",
+            body="Not yet",
         )
         db.connection.execute(
-            "UPDATE outbox_messages SET status = 'retrying',"
-            " next_retry_at = ? WHERE id = ?",
+            "UPDATE outbox_messages SET status = 'retrying', next_retry_at = ? WHERE id = ?",
             ((datetime.now(UTC) + timedelta(hours=1)).isoformat(), mid),
         )
         db.connection.commit()
 
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         processed = dispatcher.process_batch()
         assert mid not in processed
 
     def test_dispatcher_redaction(self, db, outbox, tracer, audit):
         """Payload should be redacted in audit logs."""
-        mid = outbox.enqueue(
-            event_id="e14", decision_id="d14",
-            title="Secret: sk-abc123", body="Bearer token123",
+        outbox.enqueue(
+            event_id="e14",
+            decision_id="d14",
+            title="Secret: sk-abc123",
+            body="Bearer token123",
         )
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         dispatcher.process_batch()
 
@@ -262,20 +296,23 @@ class TestOutboxDispatcher:
 
     def test_dispatcher_workspace_isolation(self, db, outbox, tracer, audit):
         """Non-matching workspace should not be dispatched."""
-        db.connection.execute(
-            "INSERT INTO workspaces (id, name) VALUES (?, ?)", ("ws2", "ws2")
-        )
+        db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", ("ws2", "ws2"))
         db.connection.commit()
 
         mid = outbox.enqueue(
-            event_id="e15", decision_id="d15",
-            title="WS Isolated", body="Only for ws2",
+            event_id="e15",
+            decision_id="d15",
+            title="WS Isolated",
+            body="Only for ws2",
             workspace_id="ws2",
         )
 
         # Create dispatcher with default workspace
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         processed = dispatcher.process_batch()
         # The dispatcher doesn't filter by workspace by default, it processes all pending
@@ -284,34 +321,39 @@ class TestOutboxDispatcher:
 
     def test_dispatcher_trace_and_audit(self, db, outbox, tracer, audit):
         """Each delivery attempt must write trace spans and audit logs."""
-        mid = outbox.enqueue(
-            event_id="e16", decision_id="d16",
-            title="Trace Test", body="Body",
+        outbox.enqueue(
+            event_id="e16",
+            decision_id="d16",
+            title="Trace Test",
+            body="Body",
         )
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         dispatcher.process_batch()
 
         # Check trace was created
         cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM traces"
-            " WHERE root_event_id LIKE 'delivery.%'"
+            "SELECT COUNT(*) AS cnt FROM traces WHERE root_event_id LIKE 'delivery.%'"
         )
         assert cur.fetchone()["cnt"] > 0
 
         # Check audit log
         cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM audit_logs"
-            " WHERE action LIKE 'delivery.%'"
+            "SELECT COUNT(*) AS cnt FROM audit_logs WHERE action LIKE 'delivery.%'"
         )
         assert cur.fetchone()["cnt"] > 0
 
     def test_dispatcher_retry_message(self, db, outbox, tracer, audit):
         """retry_message should reset a failed message to pending."""
         mid = outbox.enqueue(
-            event_id="e17", decision_id="d17",
-            title="Retry Me", body="Body",
+            event_id="e17",
+            decision_id="d17",
+            title="Retry Me",
+            body="Body",
         )
         db.connection.execute(
             "UPDATE outbox_messages SET status='failed', last_error='err' WHERE id=?",
@@ -320,7 +362,10 @@ class TestOutboxDispatcher:
         db.connection.commit()
 
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         assert dispatcher.retry_message(mid)
 
@@ -331,11 +376,16 @@ class TestOutboxDispatcher:
     def test_dispatcher_loop_run_once(self, db, outbox, tracer, audit):
         """Run the dispatcher in single-batch mode."""
         mid = outbox.enqueue(
-            event_id="e18", decision_id="d18",
-            title="Loop Test", body="Body",
+            event_id="e18",
+            decision_id="d18",
+            title="Loop Test",
+            body="Body",
         )
         dispatcher = OutboxDispatcher(
-            db, audit_logger=audit, tracer=tracer, policy_engine=PolicyEngine(),
+            db,
+            audit_logger=audit,
+            tracer=tracer,
+            policy_engine=PolicyEngine(),
         )
         processed = dispatcher.process_all()
         assert mid in processed
@@ -380,6 +430,7 @@ class TestSecretProviders:
 
     def test_dev_sqlite_provider_warning(self):
         import tempfile
+
         path = tempfile.mktemp(suffix=".db")
         with pytest.warns(UserWarning, match="plaintext in SQLite"):
             provider = DevSqliteSecretProvider(db_path=path)
@@ -411,10 +462,9 @@ class TestSecretProviders:
 
             # Verify the data is encrypted at rest
             import sqlite3
+
             conn = sqlite3.connect(db_path)
-            row = conn.execute(
-                "SELECT value FROM secrets WHERE key='enc_key'"
-            ).fetchone()
+            row = conn.execute("SELECT value FROM secrets WHERE key='enc_key'").fetchone()
             conn.close()
             assert row is not None
             raw = row[0]
@@ -461,6 +511,7 @@ class TestSecretProviders:
 
     def test_provider_rotate_delete(self):
         import tempfile
+
         path = tempfile.mktemp(suffix=".db")
         with pytest.warns(UserWarning):
             provider = DevSqliteSecretProvider(db_path=path)
@@ -498,9 +549,12 @@ class TestBackup:
             conn.close()
 
             from cogito_agent.cli.backup import create_backup
+
             manifest = create_backup(
-                out_path=out_path, db_path=db_path,
-                include_secrets=False, data_dir=tmp,
+                out_path=out_path,
+                db_path=db_path,
+                include_secrets=False,
+                data_dir=tmp,
             )
             assert os.path.isfile(out_path)
             assert "cogito.db" in manifest.get("files", [])
@@ -516,14 +570,19 @@ class TestBackup:
             conn.close()
 
             from cogito_agent.cli.backup import create_backup, restore_backup
-            manifest = create_backup(
-                out_path=out_path, db_path=db_path,
-                include_secrets=False, data_dir=tmp,
+
+            create_backup(
+                out_path=out_path,
+                db_path=db_path,
+                include_secrets=False,
+                data_dir=tmp,
             )
 
             result = restore_backup(
-                backup_path=out_path, db_path=db_path,
-                dry_run=True, data_dir=tmp,
+                backup_path=out_path,
+                db_path=db_path,
+                dry_run=True,
+                data_dir=tmp,
             )
             assert result.get("dry_run") is True
             assert len(result.get("actions", [])) > 0
@@ -539,8 +598,11 @@ class TestBackup:
             conn.close()
 
             from cogito_agent.cli.backup import export_data
+
             result = export_data(
-                out_path=out_path, db_path=db_path, sections=["memories"],
+                out_path=out_path,
+                db_path=db_path,
+                sections=["memories"],
                 data_dir=tmp,
             )
             assert os.path.isfile(out_path)
@@ -557,8 +619,11 @@ class TestBackup:
             conn.close()
 
             from cogito_agent.cli.backup import export_data
+
             result = export_data(
-                out_path=out_path, db_path=db_path, sections=["traces"],
+                out_path=out_path,
+                db_path=db_path,
+                sections=["traces"],
                 data_dir=tmp,
             )
             assert os.path.isfile(out_path)
@@ -574,20 +639,28 @@ class TestBackup:
             conn.migrate()
             # Simulate a secret in a config
             config_path = Path(tmp) / "config.json"
-            config_path.write_text(json.dumps({
-                "api_key": "sk-real-key-12345",
-                "model": "gpt-4",
-            }))
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "api_key": "sk-real-key-12345",
+                        "model": "gpt-4",
+                    }
+                )
+            )
             conn.close()
 
             from cogito_agent.cli.backup import create_backup
-            manifest = create_backup(
-                out_path=out_path, db_path=db_path,
-                include_secrets=False, data_dir=tmp,
+
+            create_backup(
+                out_path=out_path,
+                db_path=db_path,
+                include_secrets=False,
+                data_dir=tmp,
             )
 
             # The config should be redacted in the backup
             import zipfile
+
             with zipfile.ZipFile(out_path, "r") as zf:
                 if "config.json" in zf.namelist():
                     cfg_data = json.loads(zf.read("config.json"))
@@ -604,9 +677,12 @@ class TestBackup:
             conn.close()
 
             from cogito_agent.cli.backup import create_backup
+
             manifest = create_backup(
-                out_path=out_path, db_path=db_path,
-                include_secrets=False, data_dir=tmp,
+                out_path=out_path,
+                db_path=db_path,
+                include_secrets=False,
+                data_dir=tmp,
             )
             assert manifest.get("include_secrets") is False
 

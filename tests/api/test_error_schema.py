@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app
 
-import cogito_agent.api.app as _  # Ensure module is loaded into sys.modules
 _app_module = _sys.modules["cogito_agent.api.app"]
 
 
@@ -43,8 +42,12 @@ def test_not_found_returns_correct_schema() -> None:
 
 def test_internal_error_returns_correct_schema() -> None:
     resp = _app_module._error_response(
-        "INTERNAL_ERROR", "Internal server error", "req-123",
-        trace_id="trace-456", retryable=False, status_code=500,
+        "INTERNAL_ERROR",
+        "Internal server error",
+        "req-123",
+        trace_id="trace-456",
+        retryable=False,
+        status_code=500,
     )
     assert resp.status_code == 500
     data = _json.loads(resp.body)
@@ -58,7 +61,10 @@ def test_internal_error_returns_correct_schema() -> None:
 
 def test_internal_error_message_redacted() -> None:
     resp = _app_module._error_response(
-        "INTERNAL_ERROR", "Bearer sk-secret-key-123456", "req-1", status_code=500,
+        "INTERNAL_ERROR",
+        "Bearer sk-secret-key-123456",
+        "req-1",
+        status_code=500,
     )
     data = _json.loads(resp.body)
     assert "[REDACTED]" in data["error"]["message"]

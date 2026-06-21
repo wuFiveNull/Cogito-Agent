@@ -56,16 +56,18 @@ def run_task_extraction(
             s = dict(s_raw)
             title = str(s.get("title", ""))
             if title and title not in ("Console Chat", ""):
-                candidates.append({
-                    "title": f"Follow up: {title[:80]}",
-                    "description": f"Session '{title}' may need follow-up",
-                    "source": "session",
-                    "source_id": str(s["id"]),
-                    "due_date": "",
-                    "priority": "normal",
-                    "confidence": 0.5,
-                    "requires_confirmation": True,
-                })
+                candidates.append(
+                    {
+                        "title": f"Follow up: {title[:80]}",
+                        "description": f"Session '{title}' may need follow-up",
+                        "source": "session",
+                        "source_id": str(s["id"]),
+                        "due_date": "",
+                        "priority": "normal",
+                        "confidence": 0.5,
+                        "requires_confirmation": True,
+                    }
+                )
 
         recent_memories = db.connection.execute(
             "SELECT * FROM memories WHERE workspace_id = ?"
@@ -79,16 +81,18 @@ def run_task_extraction(
             text = str(m.get("text", ""))
             status = str(m.get("status", ""))
             if status in ("active", "") and len(text) > 20:
-                candidates.append({
-                    "title": f"Review task: {text[:80]}",
-                    "description": text[:200],
-                    "source": "memory",
-                    "source_id": str(m["id"]),
-                    "due_date": str(m.get("created_at", ""))[:10],
-                    "priority": "normal",
-                    "confidence": 0.6,
-                    "requires_confirmation": True,
-                })
+                candidates.append(
+                    {
+                        "title": f"Review task: {text[:80]}",
+                        "description": text[:200],
+                        "source": "memory",
+                        "source_id": str(m["id"]),
+                        "due_date": str(m.get("created_at", ""))[:10],
+                        "priority": "normal",
+                        "confidence": 0.6,
+                        "requires_confirmation": True,
+                    }
+                )
 
         pending_inbox = db.connection.execute(
             "SELECT * FROM inbox_items WHERE workspace_id = ?"
@@ -99,16 +103,18 @@ def run_task_extraction(
         for item_raw in pending_inbox:
             item = dict(item_raw)
             title = str(item.get("title", "Untitled inbox item"))[:80]
-            candidates.append({
-                "title": f"Inbox: {title}",
-                "description": str(item.get("body", ""))[:200],
-                "source": "inbox",
-                "source_id": str(item["id"]),
-                "due_date": "",
-                "priority": "normal",
-                "confidence": 0.7,
-                "requires_confirmation": False,
-            })
+            candidates.append(
+                {
+                    "title": f"Inbox: {title}",
+                    "description": str(item.get("body", ""))[:200],
+                    "source": "inbox",
+                    "source_id": str(item["id"]),
+                    "due_date": "",
+                    "priority": "normal",
+                    "confidence": 0.7,
+                    "requires_confirmation": False,
+                }
+            )
 
         recent_artifacts = db.connection.execute(
             "SELECT * FROM artifacts WHERE workspace_id = ?"
@@ -120,16 +126,18 @@ def run_task_extraction(
             art = dict(art_raw)
             title = str(art.get("title", ""))[:80]
             if title:
-                candidates.append({
-                    "title": f"Review artifact: {title}",
-                    "description": f"Artifact from {art.get('source_type', 'unknown')}",
-                    "source": "artifact",
-                    "source_id": str(art["id"]),
-                    "due_date": "",
-                    "priority": "low",
-                    "confidence": 0.4,
-                    "requires_confirmation": True,
-                })
+                candidates.append(
+                    {
+                        "title": f"Review artifact: {title}",
+                        "description": f"Artifact from {art.get('source_type', 'unknown')}",
+                        "source": "artifact",
+                        "source_id": str(art["id"]),
+                        "due_date": "",
+                        "priority": "low",
+                        "confidence": 0.4,
+                        "requires_confirmation": True,
+                    }
+                )
 
         tracer.log_tool_call(
             span_id=span.id,
@@ -156,8 +164,10 @@ def run_task_extraction(
     tracer.end_span(span)
 
     from cogito_agent.workspace import ArtifactService
+
     art_svc = ArtifactService(db)
     import json
+
     proposal_json = json.dumps({"candidates": candidates}, indent=2, default=str)
     artifact = art_svc.create_artifact(
         workspace_id=workspace_id,
@@ -203,6 +213,7 @@ def _inbox_notify(
 ) -> None:
     try:
         import uuid
+
         nid = str(uuid.uuid4())
         title = f"Task Extraction: {candidate_count} candidates"
         body = (

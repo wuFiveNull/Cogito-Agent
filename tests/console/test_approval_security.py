@@ -30,8 +30,12 @@ class TestApprovalSecurity:
         db = get_db()
         repo = ApprovalRepository(db)
         rec = repo.create(
-            "default", "user", "test_tool", "write",
-            "my api key is sk-abc123secret", "test reason",
+            "default",
+            "user",
+            "test_tool",
+            "write",
+            "my api key is sk-abc123secret",
+            "test reason",
         )
         aid = str(rec["id"])
 
@@ -46,8 +50,12 @@ class TestApprovalSecurity:
         db = get_db()
         repo = ApprovalRepository(db)
         rec = repo.create(
-            "default", "user", "test_tool", "write",
-            '<script>alert("xss")</script>', "test",
+            "default",
+            "user",
+            "test_tool",
+            "write",
+            '<script>alert("xss")</script>',
+            "test",
         )
         aid = str(rec["id"])
 
@@ -81,7 +89,9 @@ class TestApprovalAuth:
 
     def test_auth_allows_valid_token(self) -> None:
         os.environ["COGITO_API_KEY"] = "test-approval-key"
-        resp = client.get("/console/approval", headers={"Authorization": "Bearer test-approval-key"})
+        resp = client.get(
+            "/console/approval", headers={"Authorization": "Bearer test-approval-key"}
+        )
         assert resp.status_code == 200
 
     def test_auth_action_endpoints(self) -> None:

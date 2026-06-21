@@ -125,9 +125,7 @@ def analyze_image(
             resp: ModelResponse = adapter.chat(legacy_msgs)
             if resp.error:
                 last_error = resp.error
-                logger.warning(
-                    "Vision model attempt %d error: %s", attempt + 1, resp.error
-                )
+                logger.warning("Vision model attempt %d error: %s", attempt + 1, resp.error)
                 if attempt < max_repair_attempts:
                     continue
                 break
@@ -152,8 +150,7 @@ def analyze_image(
             break
 
     raise RuntimeError(
-        f"Vision analysis failed after {1 + max_repair_attempts} attempts. "
-        f"Last error: {last_error}"
+        f"Vision analysis failed after {1 + max_repair_attempts} attempts. Last error: {last_error}"
     )
 
 

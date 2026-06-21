@@ -1,4 +1,5 @@
-from cogito_agent.runtime import RuntimeKernel, TurnBudget
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
+from cogito_agent.runtime import TurnBudget
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, TurnState
 from cogito_agent.storage import (
     Database,

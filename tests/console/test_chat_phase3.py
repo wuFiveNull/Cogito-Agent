@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.console.markdown import render_safe_markdown
 from cogito_agent.console.services import ChatWorkspaceService
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, SpanKind
 from cogito_agent.storage import Database, MessageRepository, SessionRepository
 from cogito_agent.storage.repositories import WorkspaceRepository
@@ -38,7 +38,7 @@ def test_safe_markdown_renders_allowlisted_content() -> None:
 
 def test_safe_markdown_blocks_xss_unsafe_links_and_secrets() -> None:
     rendered = render_safe_markdown(
-        '<script>alert(1)</script> [bad](javascript:alert(1)) Bearer sk-secret-value'
+        "<script>alert(1)</script> [bad](javascript:alert(1)) Bearer sk-secret-value"
     )
 
     assert "<script>" not in rendered
@@ -63,13 +63,9 @@ def test_chat_service_paginates_latest_messages(db: Database) -> None:
     SessionRepository(db).create("session", "default", "Session")
     messages = MessageRepository(db)
     for index in range(45):
-        messages.create(
-            f"message-{index}", "default", "session", "user", f"message {index}"
-        )
+        messages.create(f"message-{index}", "default", "session", "user", f"message {index}")
 
-    page = ChatWorkspaceService(db).get_messages(
-        "default", "session", page=1, page_size=40
-    )
+    page = ChatWorkspaceService(db).get_messages("default", "session", page=1, page_size=40)
 
     assert page is not None
     assert len(page["messages"]) == 40
@@ -80,9 +76,7 @@ def test_chat_service_paginates_latest_messages(db: Database) -> None:
 def test_rename_and_branch_are_audited(db: Database) -> None:
     sessions = SessionRepository(db)
     sessions.create("source", "default", "Original")
-    MessageRepository(db).create(
-        "message", "default", "source", "user", "branch context"
-    )
+    MessageRepository(db).create("message", "default", "source", "user", "branch context")
     service = ChatWorkspaceService(db)
 
     renamed = service.rename_session("default", "source", "  Renamed   session ")

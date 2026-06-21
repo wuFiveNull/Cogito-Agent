@@ -14,26 +14,41 @@ def _seed_trace(db: Database, tracer: Tracer) -> str:
     span = tracer.create_span(trace.id, "context-build", SpanKind.context)
     tracer.end_span(span)
     tracer.log_model_call(
-        trace_id=trace.id, span_id=span.id,
-        provider="openai", model="gpt-4o-mini",
-        input_token_count=100, output_token_count=50,
-        prompt_summary="Hello", response_summary="Hi there",
+        trace_id=trace.id,
+        span_id=span.id,
+        provider="openai",
+        model="gpt-4o-mini",
+        input_token_count=100,
+        output_token_count=50,
+        prompt_summary="Hello",
+        response_summary="Hi there",
         latency_ms=200,
     )
     tracer.log_tool_call(
-        trace_id=trace.id, span_id=span.id,
+        trace_id=trace.id,
+        span_id=span.id,
         capability_name="file.read",
         input_summary="read /tmp/test.txt",
-        decision="allow", status="ok",
-        output_summary="file content", latency_ms=50,
+        decision="allow",
+        status="ok",
+        output_summary="file content",
+        latency_ms=50,
     )
     # Audit log entry
     db.connection.execute(
         "INSERT INTO audit_logs"
         " (actor_id, action, resource, workspace_id, session_id, trace_id, decision, reason)"
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("user", "call_tool", "file.read", "ws-1",
-         "sess-1", trace.id, "allow", "allowed by policy"),
+        (
+            "user",
+            "call_tool",
+            "file.read",
+            "ws-1",
+            "sess-1",
+            trace.id,
+            "allow",
+            "allowed by policy",
+        ),
     )
     db.connection.commit()
     # Source lineage entry
@@ -120,10 +135,12 @@ def test_get_trace_full_redaction(db: Database, tracer: Tracer) -> None:
     tid = str(trace_obj.id)
     span = tracer.create_span(tid, "tool-span", SpanKind.tool)
     tracer.log_tool_call(
-        trace_id=tid, span_id=span.id,
+        trace_id=tid,
+        span_id=span.id,
         capability_name="secret.read",
         input_summary="api_key=sk-abcdef1234567890abcdef12",
-        decision="allow", status="ok",
+        decision="allow",
+        status="ok",
         output_summary="Bearer my-secret-token",
     )
     tracer.end_span(span)

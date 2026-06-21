@@ -4,8 +4,8 @@ import json
 import uuid
 from unittest.mock import MagicMock, patch
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.models import OpenAICompatibleAdapter
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 from cogito_agent.storage import Database
 
@@ -19,26 +19,26 @@ def _mock_openai_response(data: dict) -> MagicMock:
 
 @patch("cogito_agent.models.openai_adapter.urllib.request.urlopen")
 def test_e2e_full_turn(mock_urlopen: MagicMock) -> None:
-    mock_urlopen.return_value = _mock_openai_response({
-        "id": "chatcmpl-demo",
-        "model": "gpt-4o-mini",
-        "choices": [
-            {
-                "message": {"content": "Hello! I'm Cogito-Agent, your local AI assistant."},
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {"prompt_tokens": 15, "completion_tokens": 12},
-    })
+    mock_urlopen.return_value = _mock_openai_response(
+        {
+            "id": "chatcmpl-demo",
+            "model": "gpt-4o-mini",
+            "choices": [
+                {
+                    "message": {"content": "Hello! I'm Cogito-Agent, your local AI assistant."},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 15, "completion_tokens": 12},
+        }
+    )
 
     db = Database(":memory:")
     db.initialize()
 
     ws_id = str(uuid.uuid4())
     sess_id = str(uuid.uuid4())
-    db.connection.execute(
-        "INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo")
-    )
+    db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo"))
     db.connection.execute(
         "INSERT INTO sessions (id, workspace_id, title, status) VALUES (?, ?, ?, ?)",
         (sess_id, ws_id, "E2E Test", "active"),
@@ -71,9 +71,7 @@ def test_e2e_full_turn(mock_urlopen: MagicMock) -> None:
     assert msgs[0]["role"] == "user"
     assert msgs[1]["role"] == "assistant"
 
-    cur_t = db.connection.execute(
-        "SELECT id, status FROM traces WHERE workspace_id = ?", (ws_id,)
-    )
+    cur_t = db.connection.execute("SELECT id, status FROM traces WHERE workspace_id = ?", (ws_id,))
     traces = cur_t.fetchall()
     assert len(traces) >= 1
 
@@ -93,9 +91,7 @@ def test_e2e_model_error(mock_urlopen: MagicMock) -> None:
     db.initialize()
     ws_id = str(uuid.uuid4())
     sess_id = str(uuid.uuid4())
-    db.connection.execute(
-        "INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo")
-    )
+    db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo"))
     db.connection.execute(
         "INSERT INTO sessions (id, workspace_id, title, status) VALUES (?, ?, ?, ?)",
         (sess_id, ws_id, "E2E Error Test", "active"),
@@ -123,9 +119,7 @@ def test_e2e_no_model_echo() -> None:
     db.initialize()
     ws_id = str(uuid.uuid4())
     sess_id = str(uuid.uuid4())
-    db.connection.execute(
-        "INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo")
-    )
+    db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo"))
     db.connection.execute(
         "INSERT INTO sessions (id, workspace_id, title, status) VALUES (?, ?, ?, ?)",
         (sess_id, ws_id, "E2E Echo Test", "active"),

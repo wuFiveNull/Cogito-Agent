@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from cogito_agent.runtime import DriftRuntime
-from cogito_agent.runtime.drift import DriftEvent
+from cogito_agent.runtime.drift import DriftEvent, compute_energy, _next_interval_from_energy
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import SessionRepository, WorkspaceRepository
 
 
-def _setup(db: Database) -> None:
+def _setup(db: Database, *, migrate: bool = False) -> None:
     db.initialize()
+    if migrate:
+        db.migrate()
     ws_repo = WorkspaceRepository(db)
     ws_repo.create("ws-drift", "drift-test")
     sess_repo = SessionRepository(db)
@@ -191,19 +195,19 @@ def test_maintenance_trace_and_audit_logging() -> None:
     tracer.end_span(span)
     tracer.end_trace(trace)
     audit.log(
-        actor_id="maintenance", action="maintenance.test",
-        resource="database", workspace_id="ws_test",
-        trace_id=trace.id, decision="allow", reason="ok",
+        actor_id="maintenance",
+        action="maintenance.test",
+        resource="database",
+        workspace_id="ws_test",
+        trace_id=trace.id,
+        decision="allow",
+        reason="ok",
     )
 
     # verify trace and audit were persisted
-    cur = db.connection.execute(
-        "SELECT COUNT(*) FROM traces WHERE id = ?", (trace.id,)
-    )
+    cur = db.connection.execute("SELECT COUNT(*) FROM traces WHERE id = ?", (trace.id,))
     assert cur.fetchone()[0] > 0
-    cur = db.connection.execute(
-        "SELECT COUNT(*) FROM audit_logs WHERE trace_id = ?", (trace.id,)
-    )
+    cur = db.connection.execute("SELECT COUNT(*) FROM audit_logs WHERE trace_id = ?", (trace.id,))
     assert cur.fetchone()[0] > 0
 
 
@@ -237,3 +241,65 @@ def test_maintenance_policy_deny_shell() -> None:
     )
     dec = policy.evaluate(req)
     assert dec.decision == DecisionType.deny
+
+
+# ── Energy Model tests ──────────────────────────────────────────────────
+
+
+def test_compute_energy_no_interaction() -> None:
+    """Never interacted → energy = 0.0 (always trigger)."""
+    assert compute_energy(None) == 0.0
+
+
+def test_compute_energy_just_interacted() -> None:
+    """Just interacted → energy ≈ 1.0 (very fresh)."""
+    now = datetime.now(UTC)
+    energy = compute_energy(now, now=now)
+    assert energy > 0.99
+
+
+def test_compute_energy_long_ago() -> None:
+    """Days since last interaction → energy near 0."""
+    long_ago = datetime.now(UTC) - timedelta(hours=72)
+    energy = compute_energy(long_ago)
+    assert energy < 0.05
+
+
+def test_compute_energy_one_hour() -> None:
+    """1 hour ago → medium energy (short-term decay has dropped)."""
+    one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
+    energy = compute_energy(one_hour_ago)
+    assert 0.2 < energy < 0.8
+
+
+def test_next_interval_high_energy_longer() -> None:
+    """High energy → longer interval (less frequent ticks)."""
+    high = _next_interval_from_energy(0.9, tick_s1=600, tick_s0=1200, jitter=0)
+    low = _next_interval_from_energy(0.1, tick_s1=600, tick_s0=1200, jitter=0)
+    assert high == 1200  # low base_score → tick_s0
+    assert low == 600    # high base_score → tick_s1
+
+
+def test_update_last_user_at() -> None:
+    """update_last_user_at persists to database and affects energy."""
+    from cogito_agent.storage import Database
+    db = Database(":memory:")
+    _setup(db, migrate=True)
+    engine = DriftRuntime(db, max_workers=1)
+    engine.stop()
+
+    # Initially no interaction → energy = 0
+    assert compute_energy(engine._last_user_at) == 0.0
+
+    # Record interaction
+    now = datetime.now(UTC)
+    engine.update_last_user_at(now)
+    energy = compute_energy(engine._last_user_at, now=now)
+    assert energy > 0.99
+
+    # Verify persisted in PresenceStore (new single source of truth)
+    row = db.connection.execute(
+        "SELECT last_user_at FROM presence WHERE session_key = 'default'"
+    ).fetchone()
+    assert row is not None, "presence table should have a row"
+    assert row["last_user_at"] is not None, "last_user_at should be persisted"

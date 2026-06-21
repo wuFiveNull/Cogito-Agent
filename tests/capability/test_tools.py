@@ -9,6 +9,7 @@ from cogito_agent.capability.tools import _list_files, _read_file, set_sandbox_r
 @pytest.fixture(autouse=True)
 def _sandbox() -> None:
     import cogito_agent.capability.tools as cap_tools
+
     old_root = cap_tools._SANDBOX_ROOT  # type: ignore[attr-defined]
     set_sandbox_root(tempfile.gettempdir())
     yield
@@ -17,6 +18,7 @@ def _sandbox() -> None:
 
 def test_read_file_not_found() -> None:
     import tempfile
+
     d = tempfile.gettempdir()
     result = _read_file(path=d + "/nonexistent_file_xyz.txt")
     assert result.status == "error"
@@ -58,6 +60,7 @@ def test_list_files_success() -> None:
 
 def test_list_files_not_directory() -> None:
     import tempfile
+
     d = tempfile.gettempdir()
     result = _list_files(path=d + "/nonexistent_dir_xyz")
     assert result.status == "error"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from .events import AutonomyEvent, AutonomySourceType, PriorityLevel
+from .events import AutonomyChannel, AutonomyEvent, AutonomySourceType, PriorityLevel
 
 
 def normalize_from_dict(data: dict[str, Any]) -> AutonomyEvent:
@@ -19,6 +19,11 @@ def normalize_from_dict(data: dict[str, Any]) -> AutonomyEvent:
     except ValueError:
         priority = PriorityLevel.normal
 
+    try:
+        channel = AutonomyChannel(str(data.get("channel", "content")))
+    except ValueError:
+        channel = AutonomyChannel.content
+
     event_time_raw = data.get("event_time")
     event_time: datetime | None = None
     if event_time_raw:
@@ -30,6 +35,27 @@ def normalize_from_dict(data: dict[str, Any]) -> AutonomyEvent:
             except (ValueError, TypeError):
                 event_time = None
 
+    expires_at_raw = data.get("expires_at")
+    expires_at: datetime | None = None
+    if isinstance(expires_at_raw, datetime):
+        expires_at = expires_at_raw
+    elif isinstance(expires_at_raw, str) and expires_at_raw:
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+        except ValueError:
+            expires_at = None
+
+    raw_evidence = data.get("evidence", [])
+    evidence = (
+        [
+            {str(key): str(value) for key, value in item.items()}
+            for item in raw_evidence
+            if isinstance(item, dict)
+        ]
+        if isinstance(raw_evidence, list)
+        else []
+    )
+
     return AutonomyEvent(
         source=data.get("source", "cli"),
         source_type=source_type,
@@ -40,7 +66,11 @@ def normalize_from_dict(data: dict[str, Any]) -> AutonomyEvent:
         created_at=data.get("created_at", datetime.now(UTC)),
         event_time=event_time,
         priority=priority,
+        channel=channel,
         category=data.get("category", ""),
+        expires_at=expires_at,
+        evidence=evidence,
+        ack_token=str(data.get("ack_token", "")),
         dedup_key=data.get("dedup_key", ""),
         quiet_hours_override=bool(data.get("quiet_hours_override", False)),
         metadata={k: v for k, v in data.get("metadata", {}).items() if isinstance(v, str)},
@@ -54,8 +84,9 @@ def _resolve_priority(value: str) -> PriorityLevel:
         return PriorityLevel.normal
 
 
-def normalize_manual(title: str, body: str, priority: str = "normal",
-                     workspace_id: str = "*", category: str = "") -> AutonomyEvent:
+def normalize_manual(
+    title: str, body: str, priority: str = "normal", workspace_id: str = "*", category: str = ""
+) -> AutonomyEvent:
     return AutonomyEvent(
         source="cli",
         source_type=AutonomySourceType.manual,

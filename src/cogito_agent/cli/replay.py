@@ -10,7 +10,10 @@ class TraceInspector:
         self._redactor = redactor or RedactionHelper()
 
     def list_traces(
-        self, workspace_id: str, limit: int = 50, offset: int = 0,
+        self,
+        workspace_id: str,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, object]]:
         if workspace_id == "*":
             cur = self._db.connection.execute(
@@ -30,9 +33,7 @@ class TraceInspector:
         return [dict(r) for r in cur.fetchall()]
 
     def get_trace_full(self, trace_id: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM traces WHERE id = ?", (trace_id,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM traces WHERE id = ?", (trace_id,))
         row = cur.fetchone()
         if row is None:
             return None
@@ -121,6 +122,7 @@ class TraceInspector:
             sj = r.get("step_logs_json")
             if isinstance(sj, str):
                 import json
+
                 try:
                     r["steps"] = json.loads(sj)
                 except (json.JSONDecodeError, TypeError):
@@ -135,14 +137,16 @@ class TraceInspector:
         for s in spans:
             kind = str(s.get("kind", ""))
             name = str(s.get("name", ""))
-            path.append({
-                "span_id": s.get("id"),
-                "name": name,
-                "kind": kind,
-                "status": s.get("status"),
-                "started_at": s.get("started_at"),
-                "ended_at": s.get("ended_at"),
-            })
+            path.append(
+                {
+                    "span_id": s.get("id"),
+                    "name": name,
+                    "kind": kind,
+                    "status": s.get("status"),
+                    "started_at": s.get("started_at"),
+                    "ended_at": s.get("ended_at"),
+                }
+            )
         return path
 
     def format_trace_card(self, trace: dict[str, object]) -> str:

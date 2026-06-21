@@ -12,7 +12,7 @@ class TestConsoleRedaction:
         assert "sk-" in result or "REDACTED" in result or "[REDACTED" in result
 
     def test_redact_bearer_token(self) -> None:
-        html = '<p>Bearer tok-1234567890</p>'
+        html = "<p>Bearer tok-1234567890</p>"
         result = redact_html(html)
         assert "Bearer tok-" not in result.replace("Bearer", "")
 
@@ -22,7 +22,7 @@ class TestConsoleRedaction:
         assert "user:pass" not in result
 
     def test_redact_secret_key_value(self) -> None:
-        html = '<code>api_key=super-secret-value</code>'
+        html = "<code>api_key=super-secret-value</code>"
         result = redact_html(html)
         assert "super-secret-value" not in result
 

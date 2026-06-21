@@ -61,9 +61,9 @@ def _show_secret(args: Any) -> None:
             m = provider.metadata(key)
             if m:
                 meta = (
-                    f"  created={m.get('created_at','')[:19]}"
-                    f"  updated={m.get('updated_at','')[:19]}"
-                    f"  last_used={m.get('last_used_at','')[:19] or 'never'}"
+                    f"  created={m.get('created_at', '')[:19]}"
+                    f"  updated={m.get('updated_at', '')[:19]}"
+                    f"  last_used={m.get('last_used_at', '')[:19] or 'never'}"
                 )
         except Exception:
             pass
@@ -80,10 +80,12 @@ def _audit_log(db_path: str, action: str, key: str) -> None:
         db.initialize()
         audit = AuditLogger(db)
         audit.log(
-            actor_id="cli", action=action,
+            actor_id="cli",
+            action=action,
             resource=f"secret:{key}",
             workspace_id="*",
-            decision="allow", reason="user requested",
+            decision="allow",
+            reason="user requested",
             redact_details=False,
         )
     except Exception:

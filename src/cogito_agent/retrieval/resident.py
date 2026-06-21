@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 _RESIDENT_ELIGIBLE_TYPES = {"profile", "preference", "relationship"}
+_RESIDENT_RECENCY_HALF_LIFE_DAYS = 90.0
 
 
 class ResidentMemorySelector:
@@ -80,25 +82,42 @@ class ResidentMemorySelector:
 
     @staticmethod
     def _resident_score(mem: dict[str, object]) -> float:
-        score = 0.0
+        """Compute a normalized [0, ~2] relevance score for resident memories.
+
+        Uses the same signal blend as the retrieval system (confidence +
+        recency + type priority) but without the arbitrary 10x/0.01 constants
+        that the old formula used.
+        """
+        confidence = 0.5
         raw_conf = mem.get("confidence", 0.5)
         if isinstance(raw_conf, (int, float)):
-            score += float(raw_conf) * 10.0
+            confidence = max(0.0, min(1.0, float(raw_conf)))
 
+        recency = 0.0
         raw_updated = mem.get("updated_at") or mem.get("created_at") or ""
         try:
             if isinstance(raw_updated, str) and raw_updated:
                 dt = datetime.fromisoformat(raw_updated)
                 now = datetime.now(UTC)
-                age_hours = (now - dt.replace(tzinfo=UTC) if dt.tzinfo is None
-                             else (now - dt)).total_seconds() / 3600.0
-                score -= age_hours * 0.01
+                age_days = (
+                    now - dt.replace(tzinfo=UTC) if dt.tzinfo is None else (now - dt)
+                ).total_seconds() / 86400.0
+                age_days = max(0.0, age_days)
+                recency = math.exp(-math.log(2) * age_days / _RESIDENT_RECENCY_HALF_LIFE_DAYS)
         except (ValueError, TypeError):
             pass
 
         mem_type = str(mem.get("type", "general"))
-        type_order = {"profile": 50, "preference": 40, "relationship": 30,
-                      "task": 20, "project": 15, "episodic": 10, "skill": 5, "general": 1}
-        score += type_order.get(mem_type, 1)
+        type_priority = {
+            "profile": 1.0,
+            "preference": 0.9,
+            "relationship": 0.8,
+            "task": 0.7,
+            "project": 0.6,
+            "episodic": 0.4,
+            "skill": 0.3,
+            "general": 0.2,
+        }.get(mem_type, 0.2)
 
-        return score
+        # Blend: confidence + recency are both [0,1], type_priority adds at most 1.0
+        return confidence * 0.5 + recency * 0.3 + type_priority * 0.2

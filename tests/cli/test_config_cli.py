@@ -34,6 +34,7 @@ def _isolate_config(monkeypatch: object) -> str:
     tmp = tempfile.mkdtemp()
     if isinstance(monkeypatch, type(None)):
         import pytest
+
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr("cogito_agent.cli.config_manager.CONFIG_DIR", tmp)
         monkeypatch.setattr(
@@ -70,6 +71,7 @@ def test_set_and_get_config_key(monkeypatch) -> None:
 def test_set_unknown_key_raises(monkeypatch) -> None:
     _isolate_config(monkeypatch)
     import pytest
+
     with pytest.raises(ValueError, match="Unknown config key"):
         set_config_key("model.nonexistent", "value")
 

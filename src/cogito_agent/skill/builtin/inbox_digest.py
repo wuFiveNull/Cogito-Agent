@@ -63,8 +63,9 @@ def run_inbox_digest(
             trace_id=trace_id,
             capability_name="inbox_digest.aggregate",
             input_summary=f"aggregated {len(items)} unread items",
-            output_summary=(f"merged {len(items)} to {len(merged)} groups, "
-                            f"{len(noisy_sources)} noisy sources"),
+            output_summary=(
+                f"merged {len(items)} to {len(merged)} groups, {len(noisy_sources)} noisy sources"
+            ),
             decision="allow",
         )
     except Exception:
@@ -84,6 +85,7 @@ def run_inbox_digest(
     tracer.end_span(span)
 
     from cogito_agent.workspace import ArtifactService
+
     art_svc = ArtifactService(db)
     report_body = _build_digest_report(items, merged, noisy_sources, recommendations)
     artifact = art_svc.create_artifact(
@@ -119,7 +121,7 @@ def run_inbox_digest(
         "noisy_sources": noisy_sources,
         "recommendations": recommendations,
         "summary": f"Digested {len(items)} items into {len(merged)} groups, "
-                   f"{len(noisy_sources)} noisy sources identified",
+        f"{len(noisy_sources)} noisy sources identified",
     }
 
 
@@ -160,12 +162,14 @@ def _identify_noisy_sources(
     for source, count in source_counts.most_common():
         ratio = count / total
         if ratio > 0.3 and count >= 3:
-            noisy.append({
-                "source": source,
-                "count": count,
-                "ratio": round(ratio, 2),
-                "suggestion": "reduce_frequency",
-            })
+            noisy.append(
+                {
+                    "source": source,
+                    "count": count,
+                    "ratio": round(ratio, 2),
+                    "suggestion": "reduce_frequency",
+                }
+            )
     return noisy
 
 
@@ -179,19 +183,25 @@ def _generate_recommendations(
         return recs
 
     for item in items:
-        recs.append({
-            "action": "keep",
-            "item_id": str(item.get("id", "")),
-            "title": str(item.get("title", ""))[:80],
-        })
+        recs.append(
+            {
+                "action": "keep",
+                "item_id": str(item.get("id", "")),
+                "title": str(item.get("title", ""))[:80],
+            }
+        )
 
     for ns in noisy_sources:
-        recs.append({
-            "action": "reduce_frequency",
-            "source": str(ns.get("source", "")),
-            "reason": (f"Source '{ns['source']}' accounts for "
-                        f"{float(str(ns.get('ratio', 0))) * 100:.0f}% of all items"),
-        })
+        recs.append(
+            {
+                "action": "reduce_frequency",
+                "source": str(ns.get("source", "")),
+                "reason": (
+                    f"Source '{ns['source']}' accounts for "
+                    f"{float(str(ns.get('ratio', 0))) * 100:.0f}% of all items"
+                ),
+            }
+        )
 
     return recs
 
@@ -228,8 +238,8 @@ def _build_digest_report(
         lines.append("## Noisy Sources")
         lines.append("")
         for ns in noisy_sources:
-            ratio_val = float(str(ns.get('ratio', 0)))
-            lines.append(f"- **{ns['source']}**: {ns['count']} items ({ratio_val*100:.0f}%)")
+            ratio_val = float(str(ns.get("ratio", 0)))
+            lines.append(f"- **{ns['source']}**: {ns['count']} items ({ratio_val * 100:.0f}%)")
             lines.append(f"  - Suggestion: {ns['suggestion']}")
     lines.append("")
 

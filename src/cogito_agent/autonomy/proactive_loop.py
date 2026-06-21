@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.shared import SpanKind
 from cogito_agent.storage import Database
 from cogito_agent.trace import Tracer
+from cogito_agent.trace.redaction import RedactionHelper
 
 from .decision import DecisionAction, NotificationDecision
 from .events import AutonomyEvent, AutonomySourceType, PriorityLevel
@@ -18,6 +20,17 @@ from .gate import NotificationGate
 from .outbox import Outbox
 from .scheduler import SchedulerEngine
 from .store import DecisionStore
+
+
+class AutonomyAckSink(Protocol):
+    def acknowledge(
+        self,
+        ack_token: str,
+        *,
+        status: str,
+        decision_id: str,
+        reason_code: str,
+    ) -> None: ...
 
 
 class ProactiveLoop:
@@ -33,6 +46,7 @@ class ProactiveLoop:
         policy_engine: PolicyEngine | None = None,
         db: Database | None = None,
         tick_interval: float = 30.0,
+        ack_sink: AutonomyAckSink | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._gate = notification_gate
@@ -45,6 +59,45 @@ class ProactiveLoop:
         self._policy = policy_engine or PolicyEngine()
         self._tick_interval = tick_interval
         self._running = False
+        self._ack_sink = ack_sink
+        self._redactor = RedactionHelper()
+
+    @staticmethod
+    def _ack_token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def _persist_ack(
+        self,
+        event: AutonomyEvent,
+        decision: NotificationDecision,
+        status: str,
+        error: str = "",
+    ) -> None:
+        if not event.ack_token:
+            return
+        now = datetime.now(UTC).isoformat()
+        with self._db.connection:
+            self._db.connection.execute(
+                "INSERT INTO autonomy_acks"
+                " (ack_token_hash, event_id, decision_id, status, reason_code,"
+                " error_redacted, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(ack_token_hash) DO UPDATE SET"
+                " decision_id=excluded.decision_id, status=excluded.status,"
+                " reason_code=excluded.reason_code,"
+                " error_redacted=excluded.error_redacted,"
+                " updated_at=excluded.updated_at",
+                (
+                    self._ack_token_hash(event.ack_token),
+                    event.event_id,
+                    decision.decision_id,
+                    status,
+                    decision.reason_code,
+                    self._redactor.redact(error),
+                    now,
+                    now,
+                ),
+            )
 
     def _update_state(self, **kwargs: str | None) -> None:
         if not kwargs or self._db is None:
@@ -90,7 +143,8 @@ class ProactiveLoop:
             )
             trace_id = trace.id
             span_root = tracer.create_span(
-                trace.id, f"autonomy_{event.source_type.value}",
+                trace.id,
+                f"autonomy_{event.source_type.value}",
                 SpanKind.autonomous,
             )
 
@@ -105,10 +159,12 @@ class ProactiveLoop:
                 trace_id=trace_id,
                 decision="allow",
                 reason=f"source={event.source_type.value} priority={event.priority.value}",
-                details=json.dumps({
-                    "title": event.title[:80],
-                    "category": event.category,
-                }),
+                details=json.dumps(
+                    {
+                        "title": event.title[:80],
+                        "category": event.category,
+                    }
+                ),
             )
             self._end_span(span_audit)
 
@@ -118,46 +174,71 @@ class ProactiveLoop:
         self._end_span(span_gate)
 
         span_persist: Any = self._span(trace_id, "decision.persist")
-        self._decision_store.save_decision(
-            decision_id=decision.decision_id,
-            event_id=decision.event_id,
-            workspace_id=decision.workspace_id,
-            user_id=decision.user_id,
-            action=decision.action.value,
-            reason_code=decision.reason_code,
-            reason=decision.reason,
-            cost_score=decision.cost_score,
-            priority_score=decision.priority_score,
-            dedup_hit=decision.dedup_hit,
-            quiet_hours_hit=decision.quiet_hours_hit,
-            quota_hit=decision.quota_hit,
-            requires_approval=decision.requires_approval,
-            trace_id=trace_id,
-        )
+        nid = ""
+        with self._db.connection:
+            self._decision_store.save_decision(
+                decision_id=decision.decision_id,
+                event_id=decision.event_id,
+                workspace_id=decision.workspace_id,
+                user_id=decision.user_id,
+                action=decision.action.value,
+                reason_code=decision.reason_code,
+                reason=decision.reason,
+                cost_score=decision.cost_score,
+                priority_score=decision.priority_score,
+                dedup_hit=decision.dedup_hit,
+                quiet_hours_hit=decision.quiet_hours_hit,
+                quota_hit=decision.quota_hit,
+                requires_approval=decision.requires_approval,
+                trace_id=trace_id,
+                commit=False,
+            )
+            if decision.action == DecisionAction.push:
+                nid = self._gate.record_notification(
+                    workspace_id=event.workspace_id,
+                    title=event.title,
+                    body=event.body,
+                    decision="push",
+                    priority=event.priority.value,
+                    dedup_key=event.build_dedup_key(),
+                    trace_id=trace_id,
+                    commit=False,
+                )
+                self._outbox.enqueue(
+                    event_id=event.event_id,
+                    decision_id=decision.decision_id,
+                    title=event.title,
+                    body=event.body,
+                    workspace_id=event.workspace_id,
+                    user_id=event.user_id,
+                    priority=event.priority.value,
+                    source=event.source,
+                    trace_id=trace_id,
+                    commit=False,
+                )
+            if event.ack_token:
+                now = datetime.now(UTC).isoformat()
+                self._db.connection.execute(
+                    "INSERT INTO autonomy_acks"
+                    " (ack_token_hash, event_id, decision_id, status, reason_code,"
+                    " created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?)"
+                    " ON CONFLICT(ack_token_hash) DO UPDATE SET"
+                    " decision_id=excluded.decision_id, status='pending',"
+                    " reason_code=excluded.reason_code, error_redacted='',"
+                    " updated_at=excluded.updated_at",
+                    (
+                        self._ack_token_hash(event.ack_token),
+                        event.event_id,
+                        decision.decision_id,
+                        decision.reason_code,
+                        now,
+                        now,
+                    ),
+                )
         self._end_span(span_persist)
 
         if decision.action == DecisionAction.push:
             span_push: Any = self._span(trace_id, "outbox.push")
-            nid = self._gate.record_notification(
-                workspace_id=event.workspace_id,
-                title=event.title,
-                body=event.body,
-                decision="push",
-                priority=event.priority.value,
-                dedup_key=event.build_dedup_key(),
-                trace_id=trace_id,
-            )
-            self._outbox.enqueue(
-                event_id=event.event_id,
-                decision_id=decision.decision_id,
-                title=event.title,
-                body=event.body,
-                workspace_id=event.workspace_id,
-                user_id=event.user_id,
-                priority=event.priority.value,
-                source=event.source,
-                trace_id=trace_id,
-            )
             self._end_span(span_push)
             if self._audit:
                 span_notify_audit = self._span(trace_id, "audit.notification_pushed")
@@ -169,10 +250,12 @@ class ProactiveLoop:
                     trace_id=trace_id,
                     decision="allow",
                     reason=decision.reason_code,
-                    details=json.dumps({
-                        "event_id": event.event_id,
-                        "cost_score": decision.cost_score,
-                    }),
+                    details=json.dumps(
+                        {
+                            "event_id": event.event_id,
+                            "cost_score": decision.cost_score,
+                        }
+                    ),
                 )
                 self._end_span(span_notify_audit)
 
@@ -201,16 +284,47 @@ class ProactiveLoop:
                     trace_id=trace_id,
                     decision="deny",
                     reason=decision.reason_code,
-                    details=json.dumps({
-                        "reason_code": decision.reason_code,
-                        "reason": decision.reason,
-                    }),
+                    details=json.dumps(
+                        {
+                            "reason_code": decision.reason_code,
+                            "reason": decision.reason,
+                        }
+                    ),
                 )
                 self._end_span(span_skip_audit)
 
         if tracer:
             tracer.end_span(span_root)
             tracer.end_trace(trace)
+
+        if self._ack_sink is not None and event.ack_token:
+            ack_status = ""
+            if decision.action == DecisionAction.push:
+                ack_status = "queued"
+            elif decision.action == DecisionAction.skip:
+                ack_status = "expired" if decision.reason_code == "expired" else "skipped"
+            if ack_status:
+                try:
+                    self._ack_sink.acknowledge(
+                        event.ack_token,
+                        status=ack_status,
+                        decision_id=decision.decision_id,
+                        reason_code=decision.reason_code,
+                    )
+                except Exception as exc:
+                    self._persist_ack(event, decision, "failed", str(exc))
+                    if self._audit:
+                        self._audit.log(
+                            actor_id="proactive_loop",
+                            action="autonomy.ack_failed",
+                            resource=f"event:{event.event_id}",
+                            workspace_id=event.workspace_id,
+                            trace_id=trace_id,
+                            decision="deny",
+                            reason=str(exc),
+                        )
+                else:
+                    self._persist_ack(event, decision, "acknowledged")
 
         return decision
 
@@ -259,12 +373,15 @@ class ProactiveLoop:
             if row and row["status"] == "running":
                 print("[daemon] WARNING: Previous instance may have crashed")
                 self._update_state(
-                    status="running", started_at=started_iso,
-                    last_heartbeat=started_iso, crash_marker="recovered",
+                    status="running",
+                    started_at=started_iso,
+                    last_heartbeat=started_iso,
+                    crash_marker="recovered",
                 )
             else:
                 self._update_state(
-                    status="running", started_at=started_iso,
+                    status="running",
+                    started_at=started_iso,
                     last_heartbeat=started_iso,
                 )
 
@@ -276,18 +393,13 @@ class ProactiveLoop:
                     processed = self._scheduler.tick()
                     if processed:
                         for job in processed:
-                            print(
-                                f"[daemon] Job '{job.name}' "
-                                f"({job.id[:8]}): {job.status.value}"
-                            )
+                            print(f"[daemon] Job '{job.name}' ({job.id[:8]}): {job.status.value}")
                 except Exception as exc:
                     print(f"[daemon] Tick error: {exc}")
 
                 heartbeat_counter += 1
                 if heartbeat_counter % 10 == 0 and self._db is not None:
-                    self._update_state(
-                        last_heartbeat=datetime.now(UTC).isoformat()
-                    )
+                    self._update_state(last_heartbeat=datetime.now(UTC).isoformat())
 
                 elapsed = time.time() - tick_start
                 sleep_time = max(0.1, self._tick_interval - elapsed)
@@ -296,14 +408,17 @@ class ProactiveLoop:
             if self._db is not None:
                 stopped = datetime.now(UTC).isoformat()
                 self._update_state(
-                    status="stopped", stopped_at=stopped, crash_marker="crash",
+                    status="stopped",
+                    stopped_at=stopped,
+                    crash_marker="crash",
                 )
             raise
         finally:
             if self._db is not None:
                 stopped = datetime.now(UTC).isoformat()
                 self._update_state(
-                    status="stopped", stopped_at=stopped,
+                    status="stopped",
+                    stopped_at=stopped,
                     graceful_shutdown_marker="true",
                 )
             print("[daemon] Proactive loop stopped.")
@@ -317,9 +432,7 @@ class ProactiveLoop:
 
     @staticmethod
     def load_status(db: Database) -> dict[str, Any]:
-        cur = db.connection.execute(
-            "SELECT * FROM daemon_state WHERE id = 'main'"
-        )
+        cur = db.connection.execute("SELECT * FROM daemon_state WHERE id = 'main'")
         row = cur.fetchone()
         if row is None:
             return {"status": "stopped", "started_at": None, "last_heartbeat": None}

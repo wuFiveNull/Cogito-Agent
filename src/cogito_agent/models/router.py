@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable, Iterator
+from enum import StrEnum
 from typing import Protocol
 
 from pydantic import BaseModel, Field, field_validator
 
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
+from .adapter import ModelAdapter, ModelResponse
 
 
 def _default_capabilities() -> set[str]:
@@ -23,11 +18,17 @@ def _default_roles() -> frozenset[str]:
     return frozenset({"chat"})
 
 
-def _default_modalities() -> frozenset[str]:
+def _default_modalities() -> set[str]:
+    return {"text"}
+
+
+def _default_frozen_modalities() -> frozenset[str]:
     return frozenset({"text"})
 
 
-from .adapter import ModelAdapter, ModelResponse
+def _default_frozen_output_formats() -> frozenset[str]:
+    return frozenset()
+
 
 # ── Error codes ───────────────────────────────────────────────────────────
 
@@ -64,8 +65,15 @@ class ModelRole(StrEnum):
 
 
 COMMON_CAPABILITIES: set[str] = {
-    "chat", "vision", "ocr", "tools", "json", "reasoning",
-    "code", "long_context", "streaming",
+    "chat",
+    "vision",
+    "ocr",
+    "tools",
+    "json",
+    "reasoning",
+    "code",
+    "long_context",
+    "streaming",
 }
 
 COMMON_MODALITIES: set[str] = {"text", "image", "file"}
@@ -103,8 +111,8 @@ class ModelCandidate(BaseModel):
     model: str
     capabilities: set[str] = Field(default_factory=_default_capabilities)
     roles: frozenset[str] = Field(default_factory=_default_roles)
-    input_modalities: frozenset[str] = Field(default_factory=_default_modalities)
-    output_formats: frozenset[str] = Field(default_factory=set)
+    input_modalities: frozenset[str] = Field(default_factory=_default_frozen_modalities)
+    output_formats: frozenset[str] = Field(default_factory=_default_frozen_output_formats)
     context_window: int = 8192
     quality_score: float = 0.5
     expected_latency_ms: int = 1000
@@ -201,13 +209,8 @@ class ModelRouter:
         self._candidates.pop(candidate_id, None)
 
     def get_health(self, candidate_id: str) -> ProviderHealth:
-        health = self._health.setdefault(
-            candidate_id, ProviderHealth(candidate_id=candidate_id)
-        )
-        if (
-            health.status == ProviderHealthStatus.unhealthy
-            and self._clock() >= health.opened_until
-        ):
+        health = self._health.setdefault(candidate_id, ProviderHealth(candidate_id=candidate_id))
+        if health.status == ProviderHealthStatus.unhealthy and self._clock() >= health.opened_until:
             health.status = ProviderHealthStatus.probing
         return health.model_copy(deep=True)
 
@@ -215,9 +218,7 @@ class ModelRouter:
         self._health[candidate_id] = ProviderHealth(candidate_id=candidate_id)
 
     def report_failure(self, candidate_id: str, error: str = "") -> ProviderHealth:
-        health = self._health.setdefault(
-            candidate_id, ProviderHealth(candidate_id=candidate_id)
-        )
+        health = self._health.setdefault(candidate_id, ProviderHealth(candidate_id=candidate_id))
         health.consecutive_failures += 1
         health.last_error = error
         if health.consecutive_failures >= self._failure_threshold:
@@ -340,14 +341,10 @@ class ModelRouter:
         preferred_model = bool(
             request.preferred_model
             and candidate.model == request.preferred_model
-            and (
-                not request.preferred_provider
-                or candidate.provider == request.preferred_provider
-            )
+            and (not request.preferred_provider or candidate.provider == request.preferred_provider)
         )
         preferred_provider = bool(
-            request.preferred_provider
-            and candidate.provider == request.preferred_provider
+            request.preferred_provider and candidate.provider == request.preferred_provider
         )
 
         preferred_candidate_idx: int = 9999
@@ -402,9 +399,7 @@ class RoutedModelAdapter:
         self.provider = ""
         self.model = ""
 
-    def chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> ModelResponse:
+    def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
         request = self._request_for(messages, kwargs)
         decision = self._router.route(request)
         self._observe(decision)
@@ -451,9 +446,7 @@ class RoutedModelAdapter:
             return response
         raise RuntimeError("All routed model candidates failed: " + "; ".join(errors))
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]:
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]:
         request = self._request_for(messages, kwargs)
         decision = self._router.route(request)
         self._observe(decision)
@@ -565,9 +558,7 @@ class RoutedModelAdapter:
 
         pref_candidates_raw = kwargs.pop("_route_preferred_candidates", ())
         pref_candidates: tuple[str, ...] = (
-            tuple(pref_candidates_raw)
-            if isinstance(pref_candidates_raw, (list, tuple))
-            else ()
+            tuple(pref_candidates_raw) if isinstance(pref_candidates_raw, (list, tuple)) else ()
         )
 
         strict_preferred = bool(kwargs.pop("_route_strict_preferred", False))
@@ -576,8 +567,8 @@ class RoutedModelAdapter:
             required_capabilities=capabilities,
             required_input_modalities=modalities,
             required_output_formats=output_formats,
-            role=explicit_role,
-            task_kind=explicit_task,
+            role=str(explicit_role),
+            task_kind=str(explicit_task),
             estimated_input_tokens=max(1, text_size // 4),
             max_output_tokens=int(max_output) if isinstance(max_output, (int, float)) else 4000,
             preferred_candidates=pref_candidates,
@@ -587,13 +578,9 @@ class RoutedModelAdapter:
     def _observe(self, decision: ModelRouteDecision) -> None:
         if self._decision_observer is not None:
             self._decision_observer(decision)
-        self._observe_route(
-            ModelRouteEvent(type=ModelRouteEventType.decision, decision=decision)
-        )
+        self._observe_route(ModelRouteEvent(type=ModelRouteEventType.decision, decision=decision))
 
-    def set_route_observer(
-        self, observer: Callable[[ModelRouteEvent], None] | None
-    ) -> None:
+    def set_route_observer(self, observer: Callable[[ModelRouteEvent], None] | None) -> None:
         """Bind turn-scoped telemetry without coupling the router to storage."""
         self._route_observer = observer
 

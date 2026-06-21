@@ -26,16 +26,14 @@ CONSOLE_WORKSPACE_ID = "default"
 
 def _get_db() -> _Database:
     from cogito_agent.api.app import get_db as _get_shared_db
+
     return _get_shared_db()
 
 
 def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
-    db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+    from cogito_agent.application import WorkspaceApplicationService
+
+    WorkspaceApplicationService(_get_db()).ensure_workspace(workspace_id)
 
 
 def _redact_item(item: dict[str, object]) -> dict[str, object]:
@@ -72,9 +70,12 @@ async def autonomy_dashboard(request: Request) -> HTMLResponse:
     fb = FeedbackStore(db, audit_logger=AuditLogger(db))
 
     action_counts = dstore.count_by_action(CONSOLE_WORKSPACE_ID)
-    dec_24h = len(dstore.list_decisions_filtered(
-        workspace_id=CONSOLE_WORKSPACE_ID, time_range="24h",
-    ))
+    dec_24h = len(
+        dstore.list_decisions_filtered(
+            workspace_id=CONSOLE_WORKSPACE_ID,
+            time_range="24h",
+        )
+    )
 
     status_counts = obox.count_by_status(CONSOLE_WORKSPACE_ID)
     fb_counts = fb.count_by_value(CONSOLE_WORKSPACE_ID)
@@ -120,12 +121,17 @@ async def decisions_page(
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
     from cogito_agent.autonomy import DecisionStore
+
     dstore = DecisionStore(db)
 
     ws = workspace_id or CONSOLE_WORKSPACE_ID
     items = dstore.list_decisions_filtered(
-        workspace_id=ws, action=action, reason_code=reason_code,
-        q=q, time_range=time_range, limit=200,
+        workspace_id=ws,
+        action=action,
+        reason_code=reason_code,
+        q=q,
+        time_range=time_range,
+        limit=200,
     )
     items = [_redact_item(i) for i in items]
 
@@ -184,7 +190,9 @@ async def decision_detail(request: Request, decision_id: str) -> HTMLResponse:
 
     obox = Outbox(db)
     outbox_msgs = obox.list_messages_filtered(
-        workspace_id=ws_id, q=decision_id, limit=10,
+        workspace_id=ws_id,
+        q=decision_id,
+        limit=10,
     )
     outbox_msgs = [_redact_item(m) for m in outbox_msgs]
 
@@ -231,12 +239,15 @@ async def decision_feedback(
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
 
+    from cogito_agent.application import AutonomyApplicationService
     from cogito_agent.autonomy import DecisionStore, FeedbackStore, FeedbackValue
     from cogito_agent.governance import AuditLogger
 
-    dstore = DecisionStore(db)
-    decision = dstore.get_decision(decision_id)
-    if decision is None:
+    service = AutonomyApplicationService(
+        DecisionStore(db),
+        FeedbackStore(db, audit_logger=AuditLogger(db)),
+    )
+    if DecisionStore(db).get_decision(decision_id) is None:
         error_ctx: dict[str, object] = {
             "request": request,
             "title": "Not Found",
@@ -258,15 +269,10 @@ async def decision_feedback(
         return templates.TemplateResponse(request, "console/error.html", err_ctx, status_code=422)
 
     try:
-        ws_id = str(decision.get("workspace_id", "*") or "*")
-        fb = FeedbackStore(db, audit_logger=AuditLogger(db))
-        fb.record_feedback(
-            decision_id=decision_id,
-            event_id=str(decision.get("event_id", "")),
+        service.record_feedback(
+            decision_id,
             value=value,
             comment=comment,
-            workspace_id=ws_id,
-            trace_id=str(decision.get("trace_id", "")),
         )
     except Exception as exc:
         logger.exception("feedback record error")
@@ -303,7 +309,11 @@ async def outbox_page(
     obox = Outbox(db)
     ws = workspace_id or CONSOLE_WORKSPACE_ID
     items = obox.list_messages_filtered(
-        workspace_id=ws, status=status, q=q, time_range=time_range, limit=200,
+        workspace_id=ws,
+        status=status,
+        q=q,
+        time_range=time_range,
+        limit=200,
     )
     items = [_redact_item(i) for i in items]
 
@@ -381,7 +391,10 @@ async def feedback_page(
     fb = FeedbackStore(db)
     items = fb.list_feedback(
         workspace_id=CONSOLE_WORKSPACE_ID,
-        value=value, decision_id=decision_id, time_range=time_range, limit=200,
+        value=value,
+        decision_id=decision_id,
+        time_range=time_range,
+        limit=200,
     )
     items = [_redact_item(i) for i in items]
 

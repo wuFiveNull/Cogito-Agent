@@ -21,14 +21,20 @@ def test_approval_step_returns_pending_approval(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="condition-true", kind=StepKind.condition,
+                id="c1",
+                name="condition-true",
+                kind=StepKind.condition,
                 condition_expression="1 == 1",
             ),
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
             SkillStep(
-                id="t1", name="transform-after", kind=StepKind.transform,
+                id="t1",
+                name="transform-after",
+                kind=StepKind.transform,
                 input_mapping={"out": "should-not-run"},
             ),
         ],
@@ -49,14 +55,20 @@ def test_approval_step_blocks_remaining_steps(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="condition-true", kind=StepKind.condition,
+                id="c1",
+                name="condition-true",
+                kind=StepKind.condition,
                 condition_expression="1 == 1",
             ),
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
             SkillStep(
-                id="t1", name="transform-after", kind=StepKind.transform,
+                id="t1",
+                name="transform-after",
+                kind=StepKind.transform,
                 input_mapping={"out": "should-not-run"},
             ),
         ],
@@ -81,7 +93,9 @@ def test_approval_step_creates_pending_approval_record(db_runner: SkillRunner) -
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],
@@ -111,7 +125,9 @@ def test_approval_step_logs_audit_entry(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="audit-me", kind=StepKind.approval,
+                id="a1",
+                name="audit-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],
@@ -140,7 +156,9 @@ def test_approval_step_stores_resume_data(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="resume-data", kind=StepKind.approval,
+                id="a1",
+                name="resume-data",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],

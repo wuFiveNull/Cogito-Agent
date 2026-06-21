@@ -3,12 +3,10 @@ from __future__ import annotations
 import json as _json
 import os
 import sys as _sys
-import time
 from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
-import cogito_agent.api.app as _  # Ensure module is loaded into sys.modules
 _app_module = _sys.modules["cogito_agent.api.app"]
 
 
@@ -63,8 +61,11 @@ def test_check_rate_limit_window_expiry() -> None:
 
 def test_rate_limited_error_schema() -> None:
     resp = _app_module._error_response(
-        "RATE_LIMITED", "Rate limit exceeded", "req-123",
-        retryable=True, status_code=429,
+        "RATE_LIMITED",
+        "Rate limit exceeded",
+        "req-123",
+        retryable=True,
+        status_code=429,
     )
     assert resp.status_code == 429
     data = _json.loads(resp.body)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 from fastapi.testclient import TestClient
+
 from cogito_agent.api.app import app
 
 client = TestClient(app)

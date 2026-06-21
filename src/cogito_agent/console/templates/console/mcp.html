@@ -1,0 +1,69 @@
+{% extends "console/base.html" %}
+{% block content %}
+<p>MCP servers are denied by default. Trust the exact server configuration, then grant each discovered tool against its current schema hash.</p>
+<form method="post" action="/console/mcp/sync" class="filter-bar">
+  <button class="btn-action btn-view" type="submit">Sync configured servers</button>
+</form>
+
+{% for server in servers %}
+<section class="trc-card">
+  <div class="trc-card-top">
+    <strong>{{ server.name | e }}</strong>
+    <span class="trc-badge">{{ server.trust_status | default("unmanaged") | e }}</span>
+    <span>{{ "connected" if server.connected else "disconnected" }}</span>
+  </div>
+  <div class="filter-bar">
+    {% if server.trust_status != "trusted" %}
+    <form method="post" action="/console/mcp/{{ server.name | e }}/trust">
+      <button class="btn-action btn-accept" type="submit">Trust exact config</button>
+    </form>
+    {% endif %}
+    {% if server.trust_status != "blocked" %}
+    <form method="post" action="/console/mcp/{{ server.name | e }}/block">
+      <button class="btn-action btn-reject" type="submit">Block and disconnect</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <table class="info-table">
+    <tr><th>Tool</th><th>Schema hash</th><th>Sources</th><th>Approval</th><th>Status</th><th>Action</th></tr>
+    {% for grant in server.tool_grants %}
+    <tr>
+      <td>{{ grant.tool_name | e }}</td>
+      <td><code>{{ grant.schema_hash | e }}</code></td>
+      <td>{{ grant.allowed_sources | e }}</td>
+      <td>{{ "required" if grant.requires_approval else "not required" }}</td>
+      <td>{{ "granted" if grant.active else "not granted" }}</td>
+      <td>
+        {% if grant.active %}
+        <form method="post" action="/console/mcp/{{ server.name | e }}/tools/{{ grant.tool_name | e }}/revoke">
+          <button class="btn-action btn-reject" type="submit">Revoke</button>
+        </form>
+        {% else %}
+        <form method="post" action="/console/mcp/{{ server.name | e }}/tools/{{ grant.tool_name | e }}/grant">
+          <input type="hidden" name="schema_hash" value="{{ grant.schema_hash | e }}">
+          <input name="allowed_sources" value="interactive" aria-label="Allowed sources">
+          <label><input type="checkbox" name="requires_approval" value="true" checked> Require approval</label>
+          <button class="btn-action btn-accept" type="submit">Grant</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty-state">No tools staged. Trust and connect the server to discover tools.</td></tr>
+    {% endfor %}
+  </table>
+  <details>
+    <summary>Recent governed calls</summary>
+    <table class="info-table">
+      <tr><th>Capability</th><th>Decision</th><th>Status</th><th>Latency</th><th>Error</th></tr>
+      {% for call in server.recent_calls %}
+      <tr><td>{{ call.capability_name | e }}</td><td>{{ call.decision | e }}</td><td>{{ call.status | e }}</td><td>{{ call.latency_ms }}ms</td><td>{{ call.error | e }}</td></tr>
+      {% else %}<tr><td colspan="5" class="empty-state">No calls recorded.</td></tr>{% endfor %}
+    </table>
+  </details>
+</section>
+{% else %}
+<div class="empty-state">No MCP servers configured.</div>
+{% endfor %}
+{% endblock %}

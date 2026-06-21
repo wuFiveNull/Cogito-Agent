@@ -1,0 +1,52 @@
+{% extends "console/base.html" %}
+{% block content %}
+<p><a href="/console/runs">&larr; Back to Runs</a></p>
+<table class="info-table">
+  <tr><td>Run ID</td><td><code>{{ run.id | e }}</code></td></tr>
+  <tr><td>Type</td><td>{{ run.run_type | e }}</td></tr>
+  <tr><td>Definition</td><td>{{ run.definition_id | e }}</td></tr>
+  <tr><td>Status</td><td><span class="trc-badge trc-badge-{{ run.status | e }}">{{ run.status | e }}</span></td></tr>
+  <tr><td>Attempts</td><td>{{ run.attempt_count }}/{{ run.max_attempts }}</td></tr>
+  <tr><td>Claimed by</td><td>{{ run.claimed_by | default("") | e }}</td></tr>
+  <tr><td>Created</td><td>{{ run.created_at | e }}</td></tr>
+  <tr><td>Started</td><td>{{ run.started_at | default("") | e }}</td></tr>
+  <tr><td>Finished</td><td>{{ run.finished_at | default("") | e }}</td></tr>
+  <tr><td>Trace</td><td>{% if run.trace_id %}<a href="/console/traces/{{ run.trace_id | e }}">{{ run.trace_id | e }}</a>{% endif %}</td></tr>
+  {% if run.error_message %}<tr><td>Error</td><td class="trc-error">{{ run.error_message | e }}</td></tr>{% endif %}
+</table>
+
+<div class="filter-bar">
+  {% if run.status in ["pending", "running", "waiting_approval", "abandoned"] %}
+  <form method="post" action="/console/runs/{{ run.id | e }}/cancel">
+    <input name="reason" value="cancelled from console" aria-label="Cancellation reason">
+    <button class="btn-action btn-reject" type="submit">Cancel</button>
+  </form>
+  {% endif %}
+  {% if run.status in ["failed", "cancelled", "abandoned"] %}
+  <form method="post" action="/console/runs/{{ run.id | e }}/retry">
+    <button class="btn-action btn-accept" type="submit">Queue retry</button>
+  </form>
+  {% endif %}
+</div>
+
+<h3>Outputs</h3>
+<table class="info-table">
+  <tr><th>Type</th><th>Reference</th></tr>
+  {% for output in run.outputs %}
+  <tr><td>{{ output.output_type | e }}</td><td><code>{{ output.reference_id | e }}</code></td></tr>
+  {% else %}<tr><td colspan="2" class="empty-state">No outputs.</td></tr>{% endfor %}
+</table>
+
+<h3>Lifecycle events</h3>
+<table class="info-table">
+  <tr><th>#</th><th>Event</th><th>Payload</th><th>Time</th></tr>
+  {% for event in run.events %}
+  <tr><td>{{ event.sequence }}</td><td>{{ event.event_type | e }}</td><td><code>{{ event.payload_json | e }}</code></td><td>{{ event.created_at | e }}</td></tr>
+  {% else %}<tr><td colspan="4" class="empty-state">No lifecycle events.</td></tr>{% endfor %}
+</table>
+
+<details><summary>Input and result (redacted)</summary>
+  <pre class="trc-raw">input={{ run.input | tojson }}
+result={{ run.result | tojson }}</pre>
+</details>
+{% endblock %}

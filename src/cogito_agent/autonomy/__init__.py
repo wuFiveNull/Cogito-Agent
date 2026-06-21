@@ -1,5 +1,5 @@
 from .decision import DecisionAction, NotificationDecision
-from .events import AutonomyEvent, AutonomySourceType, PriorityLevel
+from .events import AutonomyChannel, AutonomyEvent, AutonomySourceType, PriorityLevel
 from .feedback import FeedbackStore, FeedbackValue
 from .gate import NotificationGate
 from .normalizer import normalize_from_dict, normalize_manual
@@ -17,6 +17,7 @@ __all__ = [
     "ProactiveLoop",
     "ProactiveEngine",
     "AutonomyEvent",
+    "AutonomyChannel",
     "AutonomySourceType",
     "PriorityLevel",
     "NotificationDecision",

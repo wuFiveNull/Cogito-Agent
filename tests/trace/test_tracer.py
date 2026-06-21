@@ -48,9 +48,7 @@ def test_log_tool_call(tracer: Tracer, db: Database) -> None:
         decision="allow",
         status="ok",
     )
-    cur = db.connection.execute(
-        "SELECT * FROM tool_calls WHERE trace_id = ?", (trace.id,)
-    )
+    cur = db.connection.execute("SELECT * FROM tool_calls WHERE trace_id = ?", (trace.id,))
     row = cur.fetchone()
     assert row is not None
     assert row["capability_name"] == "file.read"
@@ -67,9 +65,7 @@ def test_log_model_call(tracer: Tracer, db: Database) -> None:
         input_token_count=100,
         output_token_count=50,
     )
-    cur = db.connection.execute(
-        "SELECT * FROM model_calls WHERE trace_id = ?", (trace.id,)
-    )
+    cur = db.connection.execute("SELECT * FROM model_calls WHERE trace_id = ?", (trace.id,))
     row = cur.fetchone()
     assert row is not None
     assert row["provider"] == "openai"

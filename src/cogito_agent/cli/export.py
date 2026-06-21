@@ -43,22 +43,28 @@ def export_workspace(
     data["sessions"] = [dict(r) for r in cur.fetchall()]
 
     if include_memories:
-        cur = db.connection.execute(
-            "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
-            (workspace_id,),
-        )
-        data["memories"] = [dict(r) for r in cur.fetchall()]
+        try:
+            cur = db.connection.execute(
+                "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
+                (workspace_id,),
+            )
+            data["memories"] = [dict(r) for r in cur.fetchall()]
+        except Exception:
+            data["memories"] = []
 
-        cur = db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE workspace_id = ?",
-            (workspace_id,),
-        )
-        data["memory_candidates"] = [dict(r) for r in cur.fetchall()]
+        try:
+            rows = db.connection.execute(
+                "SELECT id, summary, memory_type, reinforcement FROM memory_items"
+                " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
+                " ORDER BY updated_at DESC LIMIT 50",
+                (workspace_id,),
+            ).fetchall()
+            data["memory_candidates"] = [dict(r) for r in rows]
+        except Exception:
+            data["memory_candidates"] = []
 
     if include_traces:
-        cur = db.connection.execute(
-            "SELECT * FROM traces WHERE workspace_id = ?", (workspace_id,)
-        )
+        cur = db.connection.execute("SELECT * FROM traces WHERE workspace_id = ?", (workspace_id,))
         data["traces"] = [dict(r) for r in cur.fetchall()]
 
         cur = db.connection.execute(
@@ -78,9 +84,7 @@ def export_workspace(
         data["tool_calls"] = [dict(r) for r in cur.fetchall()]
 
         cur = db.connection.execute(
-            "SELECT * FROM spans sp"
-            " JOIN traces t ON sp.trace_id = t.id"
-            " WHERE t.workspace_id = ?",
+            "SELECT * FROM spans sp JOIN traces t ON sp.trace_id = t.id WHERE t.workspace_id = ?",
             (workspace_id,),
         )
         data["spans"] = [dict(r) for r in cur.fetchall()]

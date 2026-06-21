@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 
 from cogito_agent.storage import Database
@@ -11,9 +10,9 @@ logger = logging.getLogger(__name__)
 
 def _sanitize_fts_query(query: str) -> str:
     """Escape special FTS5 characters to prevent syntax errors."""
-    sanitized = re.sub(r'[\'"]', ' ', query)
-    sanitized = re.sub(r'[\(\)\*\:\-\+]', ' ', sanitized)
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    sanitized = re.sub(r'[\'"]', " ", query)
+    sanitized = re.sub(r"[\(\)\*\:\-\+]", " ", sanitized)
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
     if not sanitized:
         sanitized = "NULL"
     return sanitized
@@ -53,7 +52,11 @@ class SparseMemoryRetriever:
         return results
 
     def _fts_search(
-        self, workspace_id: str, query: str, limit: int, include_archived: bool,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int,
+        include_archived: bool,
     ) -> list[dict[str, object]]:
         safe_query = _sanitize_fts_query(query)
         if safe_query == "NULL":
@@ -76,15 +79,17 @@ class SparseMemoryRetriever:
             return []
 
     def _like_search(
-        self, workspace_id: str, query: str, limit: int, include_archived: bool,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int,
+        include_archived: bool,
     ) -> list[dict[str, object]]:
         archived_clause = "" if include_archived else " AND archived_at IS NULL"
         try:
             cur = self._db.connection.execute(
                 "SELECT * FROM memories WHERE workspace_id = ?"
-                " AND deleted_at IS NULL"
-                + archived_clause
-                + " AND (text LIKE ? OR summary LIKE ?)"
+                " AND deleted_at IS NULL" + archived_clause + " AND (text LIKE ? OR summary LIKE ?)"
                 " ORDER BY confidence DESC, created_at DESC LIMIT ?",
                 (workspace_id, f"%{query}%", f"%{query}%", limit),
             )

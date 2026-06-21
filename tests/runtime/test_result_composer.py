@@ -17,12 +17,8 @@ def test_result_composer_builds_stable_structured_result() -> None:
             },
             {"source_type": "memory", "source_id": "m1", "text": "duplicate"},
         ],
-        tool_summaries=[
-            {"tool": "time.now", "status": "completed", "summary": "12:00"}
-        ],
-        artifacts=[
-            {"id": "a1", "title": "Report", "artifact_type": "markdown"}
-        ],
+        tool_summaries=[{"tool": "time.now", "status": "completed", "summary": "12:00"}],
+        artifacts=[{"id": "a1", "title": "Report", "artifact_type": "markdown"}],
         suggestions=[{"label": "Open report", "action": "artifact:a1"}],
     )
 

@@ -12,8 +12,7 @@ def _seed_workspace(db: Database) -> str:
     ws = repo.create("ws_export_test", "ExportTest")
     ws_id = str(ws["id"])
     db.connection.execute(
-        "INSERT INTO sessions (id, workspace_id, title)"
-        " VALUES ('sess_test', ?, 'Test Session')",
+        "INSERT INTO sessions (id, workspace_id, title) VALUES ('sess_test', ?, 'Test Session')",
         (ws_id,),
     )
     db.connection.execute(
@@ -44,7 +43,9 @@ def test_export_contains_traces() -> None:
     db = Database()
     db.initialize()
     ws_id = _seed_workspace(db)
-    data = export_workspace(db, ws_id, include_traces=True, include_memories=False, include_audit=False)
+    data = export_workspace(
+        db, ws_id, include_traces=True, include_memories=False, include_audit=False
+    )
     assert "workspace" in data
     assert "traces" in data
     assert len(data["traces"]) >= 1
@@ -55,7 +56,9 @@ def test_export_contains_memories() -> None:
     db = Database()
     db.initialize()
     ws_id = _seed_workspace(db)
-    data = export_workspace(db, ws_id, include_traces=False, include_memories=True, include_audit=False)
+    data = export_workspace(
+        db, ws_id, include_traces=False, include_memories=True, include_audit=False
+    )
     assert "memories" in data
     assert len(data["memories"]) >= 1
     assert "traces" not in data
@@ -65,7 +68,9 @@ def test_export_contains_audit() -> None:
     db = Database()
     db.initialize()
     ws_id = _seed_workspace(db)
-    data = export_workspace(db, ws_id, include_traces=False, include_memories=False, include_audit=True)
+    data = export_workspace(
+        db, ws_id, include_traces=False, include_memories=False, include_audit=True
+    )
     assert "audit_logs" in data
     assert len(data["audit_logs"]) >= 1
 
@@ -74,7 +79,9 @@ def test_export_all() -> None:
     db = Database()
     db.initialize()
     ws_id = _seed_workspace(db)
-    data = export_workspace(db, ws_id, include_traces=True, include_memories=True, include_audit=True)
+    data = export_workspace(
+        db, ws_id, include_traces=True, include_memories=True, include_audit=True
+    )
     assert "workspace" in data
     assert "sessions" in data
     assert "traces" in data
@@ -96,6 +103,7 @@ def test_export_unknown_workspace() -> None:
     db = Database()
     db.initialize()
     import pytest
+
     with pytest.raises(ValueError, match="not found"):
         export_workspace(db, "nonexistent")
 
@@ -124,5 +132,7 @@ def test_export_no_workspace_settings_does_not_crash() -> None:
     repo = WorkspaceRepository(db)
     ws = repo.create("ws_no_settings", "NoSettings")
     ws_id = str(ws["id"])
-    data = export_workspace(db, ws_id, include_traces=False, include_memories=False, include_audit=False)
+    data = export_workspace(
+        db, ws_id, include_traces=False, include_memories=False, include_audit=False
+    )
     assert "settings" in data or True

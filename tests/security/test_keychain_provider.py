@@ -1,4 +1,5 @@
 """Tests for KeychainSecretProvider."""
+
 from __future__ import annotations
 
 from cogito_agent.security import KeychainSecretProvider, SecretValue

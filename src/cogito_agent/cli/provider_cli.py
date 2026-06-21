@@ -1,4 +1,5 @@
 """cogito provider CLI: list, show, doctor, test."""
+
 from __future__ import annotations
 
 from typing import Any, cast

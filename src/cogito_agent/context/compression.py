@@ -11,9 +11,7 @@ from cogito_agent.storage import Database
 class SummaryStrategy(Protocol):
     name: str
 
-    def summarize(
-        self, previous_summary: str, messages: list[dict[str, object]]
-    ) -> str: ...
+    def summarize(self, previous_summary: str, messages: list[dict[str, object]]) -> str: ...
 
 
 class DeterministicSummaryStrategy:
@@ -22,9 +20,7 @@ class DeterministicSummaryStrategy:
     def __init__(self, max_chars: int = 2000) -> None:
         self._max_chars = max(100, max_chars)
 
-    def summarize(
-        self, previous_summary: str, messages: list[dict[str, object]]
-    ) -> str:
+    def summarize(self, previous_summary: str, messages: list[dict[str, object]]) -> str:
         parts = [previous_summary.strip()] if previous_summary.strip() else []
         for message in messages:
             role = str(message.get("role", "unknown"))
@@ -34,7 +30,7 @@ class DeterministicSummaryStrategy:
         combined = "\n".join(parts)
         if len(combined) <= self._max_chars:
             return combined
-        return "…" + combined[-(self._max_chars - 1):]
+        return "…" + combined[-(self._max_chars - 1) :]
 
 
 @dataclass(frozen=True)
@@ -95,9 +91,7 @@ class SessionCompressionService:
         self._db.connection.commit()
         return self.get_by_id(summary_id)
 
-    def get_latest(
-        self, workspace_id: str, session_id: str
-    ) -> dict[str, object] | None:
+    def get_latest(self, workspace_id: str, session_id: str) -> dict[str, object] | None:
         try:
             row = self._db.connection.execute(
                 "SELECT * FROM session_summaries"
@@ -124,8 +118,7 @@ class SessionCompressionService:
         after_rowid = 0
         if through_message_id:
             row = self._db.connection.execute(
-                "SELECT rowid FROM messages WHERE id = ? AND workspace_id = ?"
-                " AND session_id = ?",
+                "SELECT rowid FROM messages WHERE id = ? AND workspace_id = ? AND session_id = ?",
                 (through_message_id, workspace_id, session_id),
             ).fetchone()
             after_rowid = int(row[0]) if row else 0

@@ -31,9 +31,7 @@ class FileIngestionService:
         self._audit = AuditLogger(db)
         self._redactor = RedactionHelper()
 
-    def scan_root(
-        self, root_id: str, workspace_id: str, trace_id: str = ""
-    ) -> dict[str, int]:
+    def scan_root(self, root_id: str, workspace_id: str, trace_id: str = "") -> dict[str, int]:
         root_row = self._registry.get_root_by_id(root_id)
         if root_row is None:
             return {"scanned": 0, "errors": 0, "ignored": 0}
@@ -91,9 +89,7 @@ class FileIngestionService:
                 existing = existing_files.get(rel)
                 mime_type, _ = mimetypes.guess_type(str(file_path))
                 mime_type = mime_type or "text/plain"
-                mod_time = datetime.fromtimestamp(
-                    file_path.stat().st_mtime, tz=UTC
-                ).isoformat()
+                mod_time = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC).isoformat()
                 sha256 = WorkspaceFileRegistry.compute_sha256(file_path)
                 size = file_path.stat().st_size
 
@@ -145,16 +141,12 @@ class FileIngestionService:
 
         return counts
 
-    def _ingest_file(
-        self, file_path: Path, fid: str, workspace_id: str
-    ) -> None:
+    def _ingest_file(self, file_path: Path, fid: str, workspace_id: str) -> None:
         ext = file_path.suffix.lower()
         text = self._extract_text(file_path, ext)
         redacted = self._redactor.redact(text)
 
-        self._db.connection.execute(
-            "DELETE FROM file_chunks WHERE workspace_file_id = ?", (fid,)
-        )
+        self._db.connection.execute("DELETE FROM file_chunks WHERE workspace_file_id = ?", (fid,))
         fts_rows = self._db.connection.execute(
             "SELECT rowid FROM file_chunks WHERE workspace_file_id = ?", (fid,)
         )
@@ -183,22 +175,26 @@ class FileIngestionService:
             char_count += len(line) + 1
             if char_count >= chunk_size:
                 chunk_text = "\n".join(current_chars)
-                chunks.append({
-                    "text": chunk_text,
-                    "start_line": start_line,
-                    "end_line": current_line,
-                })
+                chunks.append(
+                    {
+                        "text": chunk_text,
+                        "start_line": start_line,
+                        "end_line": current_line,
+                    }
+                )
                 current_chars = []
                 char_count = 0
                 start_line = current_line + 1
 
         if current_chars:
             chunk_text = "\n".join(current_chars)
-            chunks.append({
-                "text": chunk_text,
-                "start_line": start_line,
-                "end_line": current_line,
-            })
+            chunks.append(
+                {
+                    "text": chunk_text,
+                    "start_line": start_line,
+                    "end_line": current_line,
+                }
+            )
 
         for idx, chunk_data in enumerate(chunks):
             cid = str(uuid.uuid4())
@@ -210,9 +206,18 @@ class FileIngestionService:
                 " (id, workspace_file_id, workspace_id, chunk_index, text,"
                 " token_count, start_line, end_line, sha256, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (cid, fid, workspace_id, idx, chunk_text,
-                 token_count, chunk_data["start_line"], chunk_data["end_line"],
-                 chunk_sha, datetime.now(UTC).isoformat()),
+                (
+                    cid,
+                    fid,
+                    workspace_id,
+                    idx,
+                    chunk_text,
+                    token_count,
+                    chunk_data["start_line"],
+                    chunk_data["end_line"],
+                    chunk_sha,
+                    datetime.now(UTC).isoformat(),
+                ),
             )
             rowid_cur = self._db.connection.execute(
                 "SELECT rowid FROM file_chunks WHERE id = ?", (cid,)
@@ -257,19 +262,18 @@ class FileIngestionService:
     def _estimate_tokens(text: str) -> int:
         try:
             from cogito_agent.models import token_count
+
             return token_count(text)
         except Exception:
             return max(1, len(text) // 4)
 
-    def _try_create_chunk_embeddings(
-        self, fid: str, workspace_id: str
-    ) -> None:
+    def _try_create_chunk_embeddings(self, fid: str, workspace_id: str) -> None:
         try:
             from cogito_agent.memory.vector import EmbeddingService, _pack_embedding
+
             svc = EmbeddingService()
             chunks = self._db.connection.execute(
-                "SELECT id, text FROM file_chunks"
-                " WHERE workspace_file_id = ? ORDER BY chunk_index",
+                "SELECT id, text FROM file_chunks WHERE workspace_file_id = ? ORDER BY chunk_index",
                 (fid,),
             ).fetchall()
             for chunk in chunks:
@@ -286,8 +290,8 @@ class FileIngestionService:
         except Exception:
             pass
 
-    def reindex_file(self, fid: str) -> bool:
-        row = self._registry.get_file_by_id(fid)
+    def reindex_file(self, fid: str, workspace_id: str = "") -> bool:
+        row = self._registry.get_file_by_id(fid, workspace_id)
         if row is None:
             return False
         root_id = str(row["root_id"])
@@ -316,17 +320,21 @@ class FileIngestionService:
             self._registry.mark_file_error(fid, str(exc))
             return False
 
-    def get_file_chunks(self, fid: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM file_chunks WHERE workspace_file_id = ?"
-            " ORDER BY chunk_index",
-            (fid,),
-        )
+    def get_file_chunks(
+        self,
+        fid: str,
+        workspace_id: str = "",
+    ) -> list[dict[str, object]]:
+        sql = "SELECT * FROM file_chunks WHERE workspace_file_id = ?"
+        params: list[object] = [fid]
+        if workspace_id:
+            sql += " AND workspace_id = ?"
+            params.append(workspace_id)
+        sql += " ORDER BY chunk_index"
+        cur = self._db.connection.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
 
-    def get_chunks_for_context(
-        self, workspace_id: str, limit: int = 5
-    ) -> list[dict[str, object]]:
+    def get_chunks_for_context(self, workspace_id: str, limit: int = 5) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
             "SELECT fc.*, wf.file_name, wf.relative_path"
             " FROM file_chunks fc"

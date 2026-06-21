@@ -27,7 +27,8 @@ class ToolResult:
 
 
 def _validate_json_schema(
-    schema: dict[str, object], data: dict[str, object],
+    schema: dict[str, object],
+    data: dict[str, object],
 ) -> str | None:
     """Validate *data* against a JSON Schema (subset).
     Returns an error message or None on success.
@@ -61,7 +62,9 @@ def _validate_json_schema(
 
 
 def _validate_value(
-    schema: dict[str, object], value: object, path: str,
+    schema: dict[str, object],
+    value: object,
+    path: str,
 ) -> str | None:
     expected_type = schema.get("type")
 
@@ -106,7 +109,9 @@ class CapabilityRegistry:
         self._tools: dict[str, tuple[CapabilityManifest, Callable[..., ToolResult]]] = {}
 
     def register(
-        self, name: str, manifest: CapabilityManifest,
+        self,
+        name: str,
+        manifest: CapabilityManifest,
         invoke_fn: Callable[..., ToolResult],
     ) -> None:
         self._tools[name] = (manifest, invoke_fn)
@@ -116,6 +121,9 @@ class CapabilityRegistry:
         if entry is None:
             return None
         return entry[0]
+
+    def unregister(self, name: str) -> bool:
+        return self._tools.pop(name, None) is not None
 
     def invoke(self, cap_name: str, **kwargs: Any) -> ToolResult | None:
         entry = self._tools.get(cap_name)
@@ -127,7 +135,8 @@ class CapabilityRegistry:
             err = _validate_json_schema(manifest.input_schema, kwargs)
             if err:
                 return ToolResult(
-                    status="error", summary="Input validation failed",
+                    status="error",
+                    summary="Input validation failed",
                     error=f"Validation error for {cap_name}: {err}",
                 )
         return invoke_fn(**kwargs)

@@ -54,14 +54,16 @@ def run_trace_review(
         ).fetchall()
         for t_raw in failed_traces:
             t = dict(t_raw)
-            issues.append({
-                "type": "failed_trace",
-                "trace_id": str(t["id"]),
-                "status": str(t.get("status", "")),
-                "started_at": str(t.get("started_at", "")),
-                "risk_level": "high" if str(t.get("status", "")) == "failed" else "medium",
-                "recommended_fix": "Check model provider or tool availability",
-            })
+            issues.append(
+                {
+                    "type": "failed_trace",
+                    "trace_id": str(t["id"]),
+                    "status": str(t.get("status", "")),
+                    "started_at": str(t.get("started_at", "")),
+                    "risk_level": "high" if str(t.get("status", "")) == "failed" else "medium",
+                    "recommended_fix": "Check model provider or tool availability",
+                }
+            )
 
         denied_calls = db.connection.execute(
             "SELECT * FROM tool_calls tc"
@@ -72,13 +74,15 @@ def run_trace_review(
         ).fetchall()
         for dc_raw in denied_calls:
             dc = dict(dc_raw)
-            issues.append({
-                "type": "denied_tool_call",
-                "trace_id": str(dc.get("trace_id", "")),
-                "capability": str(dc.get("capability_name", "")),
-                "risk_level": "low",
-                "recommended_fix": "Review policy rules for denied capability",
-            })
+            issues.append(
+                {
+                    "type": "denied_tool_call",
+                    "trace_id": str(dc.get("trace_id", "")),
+                    "capability": str(dc.get("capability_name", "")),
+                    "risk_level": "low",
+                    "recommended_fix": "Review policy rules for denied capability",
+                }
+            )
 
         unresolved_approvals = db.connection.execute(
             "SELECT * FROM approval_records WHERE workspace_id = ?"
@@ -87,13 +91,15 @@ def run_trace_review(
         ).fetchall()
         for ap_raw in unresolved_approvals:
             ap = dict(ap_raw)
-            issues.append({
-                "type": "unresolved_approval",
-                "approval_id": str(ap["id"]),
-                "capability": str(ap.get("capability_name", "")),
-                "risk_level": "medium",
-                "recommended_fix": "Review and resolve pending approval",
-            })
+            issues.append(
+                {
+                    "type": "unresolved_approval",
+                    "approval_id": str(ap["id"]),
+                    "capability": str(ap.get("capability_name", "")),
+                    "risk_level": "medium",
+                    "recommended_fix": "Review and resolve pending approval",
+                }
+            )
 
         slow_calls = db.connection.execute(
             "SELECT * FROM tool_calls tc"
@@ -104,14 +110,16 @@ def run_trace_review(
         ).fetchall()
         for sc_raw in slow_calls:
             sc = dict(sc_raw)
-            issues.append({
-                "type": "slow_tool_call",
-                "trace_id": str(sc.get("trace_id", "")),
-                "capability": str(sc.get("capability_name", "")),
-                "latency_ms": int(str(sc.get("latency_ms", 0))),
-                "risk_level": "low",
-                "recommended_fix": "Check tool response time or reduce timeout",
-            })
+            issues.append(
+                {
+                    "type": "slow_tool_call",
+                    "trace_id": str(sc.get("trace_id", "")),
+                    "capability": str(sc.get("capability_name", "")),
+                    "latency_ms": int(str(sc.get("latency_ms", 0))),
+                    "risk_level": "low",
+                    "recommended_fix": "Check tool response time or reduce timeout",
+                }
+            )
 
         high_cost_model_calls = db.connection.execute(
             "SELECT * FROM model_calls mc"
@@ -122,16 +130,18 @@ def run_trace_review(
         ).fetchall()
         for hc_raw in high_cost_model_calls:
             hc = dict(hc_raw)
-            issues.append({
-                "type": "high_cost_model_call",
-                "trace_id": str(hc.get("trace_id", "")),
-                "provider": str(hc.get("provider", "")),
-                "input_tokens": int(str(hc.get("input_token_count", 0))),
-                "output_tokens": int(str(hc.get("output_token_count", 0))),
-                "latency_ms": int(str(hc.get("latency_ms", 0))),
-                "risk_level": "medium",
-                "recommended_fix": "Reduce prompt length or switch model",
-            })
+            issues.append(
+                {
+                    "type": "high_cost_model_call",
+                    "trace_id": str(hc.get("trace_id", "")),
+                    "provider": str(hc.get("provider", "")),
+                    "input_tokens": int(str(hc.get("input_token_count", 0))),
+                    "output_tokens": int(str(hc.get("output_token_count", 0))),
+                    "latency_ms": int(str(hc.get("latency_ms", 0))),
+                    "risk_level": "medium",
+                    "recommended_fix": "Reduce prompt length or switch model",
+                }
+            )
 
         dead_letters = db.connection.execute(
             "SELECT * FROM outbox_messages WHERE workspace_id = ?"
@@ -140,13 +150,15 @@ def run_trace_review(
         ).fetchall()
         for dl_raw in dead_letters:
             dl = dict(dl_raw)
-            issues.append({
-                "type": "dead_letter",
-                "message_id": str(dl["id"]),
-                "last_error": str(dl.get("last_error", "")),
-                "risk_level": "high",
-                "recommended_fix": "Retry dead-letter messages or investigate delivery adapter",
-            })
+            issues.append(
+                {
+                    "type": "dead_letter",
+                    "message_id": str(dl["id"]),
+                    "last_error": str(dl.get("last_error", "")),
+                    "risk_level": "high",
+                    "recommended_fix": "Retry dead-letter messages or investigate delivery adapter",
+                }
+            )
 
         file_errors = db.connection.execute(
             "SELECT * FROM workspace_files WHERE workspace_id = ?"
@@ -155,13 +167,15 @@ def run_trace_review(
         ).fetchall()
         for fe_raw in file_errors:
             fe = dict(fe_raw)
-            issues.append({
-                "type": "file_ingestion_error",
-                "file_name": str(fe.get("file_name", "")),
-                "error_message": str(fe.get("error_message", "")),
-                "risk_level": "low",
-                "recommended_fix": "Re-scan the workspace root",
-            })
+            issues.append(
+                {
+                    "type": "file_ingestion_error",
+                    "file_name": str(fe.get("file_name", "")),
+                    "error_message": str(fe.get("error_message", "")),
+                    "risk_level": "low",
+                    "recommended_fix": "Re-scan the workspace root",
+                }
+            )
 
         skill_failures = db.connection.execute(
             "SELECT * FROM skill_run_logs WHERE workspace_id = ?"
@@ -171,13 +185,15 @@ def run_trace_review(
         ).fetchall()
         for sf_raw in skill_failures:
             sf = dict(sf_raw)
-            issues.append({
-                "type": "skill_failure",
-                "skill_name": str(sf.get("skill_name", "")),
-                "trace_id": str(sf.get("trace_id", "")),
-                "risk_level": "medium",
-                "recommended_fix": f"Check skill '{sf.get('skill_name', '')}' logs",
-            })
+            issues.append(
+                {
+                    "type": "skill_failure",
+                    "skill_name": str(sf.get("skill_name", "")),
+                    "trace_id": str(sf.get("trace_id", "")),
+                    "risk_level": "medium",
+                    "recommended_fix": f"Check skill '{sf.get('skill_name', '')}' logs",
+                }
+            )
 
         tracer.log_tool_call(
             span_id=span.id,
@@ -204,6 +220,7 @@ def run_trace_review(
     tracer.end_span(span)
 
     from cogito_agent.workspace import ArtifactService
+
     art_svc = ArtifactService(db)
     report_body = _build_health_report(issues)
     artifact = art_svc.create_artifact(
@@ -292,6 +309,7 @@ def _inbox_notify(
 ) -> None:
     try:
         import uuid
+
         nid = str(uuid.uuid4())
         title = f"Trace Health Report: {issue_count} issues"
         body = (

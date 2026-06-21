@@ -49,10 +49,13 @@ class TestConsoleDashboard:
 
 
 class TestConsolePages:
-    @pytest.mark.parametrize("page,expected", [
-        ("config", "Configuration"),
-        ("doctor", "Doctor"),
-    ])
+    @pytest.mark.parametrize(
+        "page,expected",
+        [
+            ("config", "Configuration"),
+            ("doctor", "Doctor"),
+        ],
+    )
     def test_real_pages(self, page: str, expected: str) -> None:
         resp = client.get(f"/console/{page}")
         assert resp.status_code == 200

@@ -135,10 +135,25 @@ v0.11.0-dev (Autonomy Delivery & Local Production Hardening, current):
 
 ## Verification Status
 
+Last fully verified pre-v0.17 baseline:
+
 - **1433 tests passing, 4 skipped** (`pytest` clean; Python 3.11 audit environment)
 - **ruff clean** (`ruff check src/` clean)
 - **mypy clean** (`mypy src/` clean, 124 source files)
 - Python 3.12/3.13 and cross-platform release verification remains pending.
+
+Current v0.17 working-tree verification (2026-06-21):
+
+- **1705 tests passed, 4 skipped** across complete partitioned execution of all 1709
+  collected tests; one uninterrupted run exceeds the host's approximately 25-second limit.
+- **ruff clean** (`ruff check src tests scripts`).
+- **mypy clean** (`mypy src`, 189 source files).
+- Daemon subprocess tests pass (4/4).
+- Python 3.13.13 wheel construction and content contracts pass. The requested Conda
+  environment is Python 3.11.15, below the project's Python 3.12+ requirement, so it is
+  used for pytest/Ruff/mypy but not as the wheel build interpreter.
+- Playwright browser smoke is conditionally skipped because Playwright is not installed;
+  Console route/security integration and Backup/Restore workflow tests pass.
 
 - ✅ Phase 1 (Epics A–B): Runtime full turn pipeline, context engine with budget shares
 - ✅ Phase 2 (Epics C–E): Tool dispatch, approval flow, budget enforcement
@@ -211,13 +226,32 @@ v0.15.0-dev (Production Foundation):
 - Version sync across pyproject.toml, README, AGENTS, CHANGELOG
 - 1222+ tests passing, ruff clean, mypy clean (113 source files)
 
-v0.16.0-dev (Console Architecture Foundation, current):
+v0.16.0-dev (Console Architecture Foundation):
 - **Phase 0 (Foundation)**: ConsolePageContext TypedDict, BaseConsoleService abstract boundary, DashboardService, static resource versioning, 22 new tests
 - **Phase 1 (Design System)**: 85-token design-tokens.css, 7 component macros (_macros.html), 14-item SVG icon sprite in components/icons.html, responsive base shell with sidebar, 5 status/error components, 33 new tests
 - **Phase 2 (Overview)**: ConsoleOverviewService with 7 data aggregation methods (attention queue, runtime health, activity stream, usage snapshot, quick actions), overview.html template with 5 sections and empty states, GET /console/overview route with nav link, fixed drift.html {% empty %} → {% else %} and truncatechars → truncate bugs, 50 new tests
 - 105 new tests across phases 0–2; production closure work adds config initialization,
   wheel contracts, daemon PID locking, and service definitions; stabilized baseline:
   1433 tests passing, 4 skipped, ruff clean, mypy clean (134 source files)
+
+v0.17.0-dev (Personal Local Architecture Refactor, current):
+- RuntimeKernel depends on Runtime Ports; concrete SQLite, policy, capability registry,
+  trace, audit and executor composition lives outside runtime
+- Shared Application Services for Chat, Sessions, Memory, Approval, Autonomy, Inbox,
+  Workspaces, Runs, MCP and Backup/Restore mutations
+- GovernedCapabilityExecutor is the single capability invocation path with Guardians,
+  Approval, Audit, Trace, idempotent retry and large-result Artifact offload
+- MCP servers require explicit trust; tools require schema-hash grants and use minimal
+  subprocess environments with persisted secret values redacted
+- Scheduler, Drift and Skill use durable runs with atomic claim, lease recovery,
+  approval resume, output linkage, cancellation and retry
+- Autonomy Decision, Notification and Outbox writes are transactional; ACK token hashes
+  and outcomes are durable and errors are redacted
+- Console pages for unified Runs, MCP authorization and restricted Backup/Restore;
+  `cogito-console` starts the local persistent SQLite workflow
+- Mandatory personal-local architecture implementation and verification are complete;
+  optional Plugin/Task work, Playwright automation and cross-platform release matrices
+  remain outside the completion scope
 
 v0.14.0-dev (Real Skills + Drift Runtime):
 - 5 built-in skills upgraded from stubs to real implementations:

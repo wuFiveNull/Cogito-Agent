@@ -60,7 +60,9 @@ class OutboxDispatcher:
     # ─── Status helpers ──────────────────────────────────────────────────────
 
     def _set_status(
-        self, message_id: str, status: str,
+        self,
+        message_id: str,
+        status: str,
         error: str = "",
         delivery_attempts: int = 0,
         next_retry_at: str = "",
@@ -248,10 +250,12 @@ class OutboxDispatcher:
 
         backoff = _compute_backoff(attempts)
         next_retry = (datetime.now(UTC) + timedelta(seconds=backoff)).isoformat()
-        self._set_status(mid, "retrying", error=error,
-                         delivery_attempts=attempts, next_retry_at=next_retry)
-        logger.info("Outbox %s will retry in %ds (attempt %d/%d)",
-                     mid[:8], backoff, attempts, MAX_RETRIES)
+        self._set_status(
+            mid, "retrying", error=error, delivery_attempts=attempts, next_retry_at=next_retry
+        )
+        logger.info(
+            "Outbox %s will retry in %ds (attempt %d/%d)", mid[:8], backoff, attempts, MAX_RETRIES
+        )
 
     # ─── Public API ───────────────────────────────────────────────────────────
 

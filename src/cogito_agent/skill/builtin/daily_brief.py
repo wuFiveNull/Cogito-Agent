@@ -163,12 +163,12 @@ def run_daily_brief(
     tracer.end_span(span)
 
     from cogito_agent.context import ContextEngine
+
     ctx_engine = ContextEngine()
     ctx_items = ctx_engine.build(
         recent_messages=collected["memories"][:5],
         memories=collected["memories"],
         current_message=f"Generate daily brief for {target_date}",
-        db=db,
         trace_id=trace_id,
         workspace_id=workspace_id,
     )
@@ -179,10 +179,15 @@ def run_daily_brief(
     recommended_actions = _generate_recommendations(collected, ctx_items)
 
     from cogito_agent.workspace import ArtifactService
+
     art_svc = ArtifactService(db)
     report_body = _format_brief_report(
-        target_date, summary, important_items, open_tasks,
-        recommended_actions, collected,
+        target_date,
+        summary,
+        important_items,
+        open_tasks,
+        recommended_actions,
+        collected,
     )
     artifact = art_svc.create_artifact(
         workspace_id=workspace_id,
@@ -330,6 +335,7 @@ def _inbox_notify(
 ) -> None:
     try:
         import uuid
+
         nid = str(uuid.uuid4())
         title = f"Daily Brief - {target_date}"
         body = (

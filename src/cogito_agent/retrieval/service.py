@@ -20,20 +20,15 @@ from .sparse import SparseMemoryRetriever
 logger = logging.getLogger(__name__)
 
 
-class HealthState(str, enum.Enum):
+class HealthState(enum.StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     DISABLED = "disabled"
 
 
-class RetrievalMode(str, enum.Enum):
+class RetrievalMode(enum.StrEnum):
     HYBRID = "hybrid"
-    SPARSE_ONLY = "sparse_only"
-    DENSE_ONLY = "dense_only"
-    RESIDENT_ONLY = "resident_only"
-    NO_RECALL = "no_recall"
-    PROFILE_ONLY = "profile_only"
-    TIMELINE = "timeline"
+    SKIP = "skip"
     DEGRADED = "degraded"
 
 
@@ -122,7 +117,10 @@ class MemoryRetrievalService:
         self._dense.provider = p
 
     def _finalize(
-        self, result: MemoryRecallResult, ctx: MemoryQueryContext, t0: float,
+        self,
+        result: MemoryRecallResult,
+        ctx: MemoryQueryContext,
+        t0: float,
     ) -> MemoryRecallResult:
         result.latencies["total"] = (time.time() - t0) * 1000
         result.excluded_count = len(result.excluded)
@@ -144,12 +142,8 @@ class MemoryRetrievalService:
         result.embedding_provider = (
             self._dense.provider.provider_name if self._dense.provider else ""
         )
-        result.embedding_model = (
-            self._dense.provider.model_name if self._dense.provider else ""
-        )
-        result.embedding_dimension = (
-            self._dense.provider.dimension if self._dense.provider else 0
-        )
+        result.embedding_model = self._dense.provider.model_name if self._dense.provider else ""
+        result.embedding_dimension = self._dense.provider.dimension if self._dense.provider else 0
 
         if force_mode:
             result.mode = force_mode
@@ -164,6 +158,10 @@ class MemoryRetrievalService:
             result.mode = gate_result.mode
             result.gate_mode = gate_result.mode
 
+        # ── skip: degenerate case (empty message) ──
+        if gate_result.mode == "skip":
+            return self._finalize(result, query_context, time.time())
+
         config = self._get_config()
         type_policy = config.get("type_policy", {})
         dense_candidate_limit = config.get("dense_candidate_limit", 40)
@@ -172,90 +170,80 @@ class MemoryRetrievalService:
         dynamic_budget = config.get("dynamic_token_budget", 1000)
         min_score = config.get("min_final_score", 0.20)
 
-        query = query_context.context_enriched_query or query_context.current_message
+        query = gate_result.enriched_query or query_context.current_message
         t0 = time.time()
 
-        # ── no_recall: absolutely nothing ──
-        if gate_result.mode == "no_recall":
-            return self._finalize(result, query_context, t0)
-
-        # ── profile_only: only profile/preference resident ──
-        if gate_result.mode == "profile_only":
-            profile_policy = {
-                k: v for k, v in type_policy.items()
-                if k in ("profile", "preference")
-            }
-            result.resident_memories = self._resident.select(
-                query_context.workspace_id, resident_budget, profile_policy,
-            )
-            result.resident_count = len(result.resident_memories)
-            return self._finalize(result, query_context, t0)
-
-        # ── resident_only: only resident memories ──
-        if gate_result.mode == "resident_only":
-            result.resident_memories = self._resident.select(
-                query_context.workspace_id, resident_budget, type_policy,
-            )
-            result.resident_count = len(result.resident_memories)
-            return self._finalize(result, query_context, t0)
-
-        # ── dynamic retrieval (sparse, hybrid, timeline) ──
+        # ── unified hybrid retrieval ──
         result.health_state = "healthy"
-        use_sparse = gate_result.mode in ("sparse", "hybrid", "timeline")
-        use_dense = gate_result.mode in ("hybrid", "timeline")
 
         sparse_candidates: list[dict[str, object]] = []
         dense_candidates: list[dict[str, object]] = []
 
-        if use_sparse:
-            try:
-                t1 = time.time()
-                sparse_candidates = self._sparse.search(
-                    query_context.workspace_id, query,
-                    limit=sparse_candidate_limit,
-                    include_archived=include_archived,
-                )
-                result.latencies["sparse"] = (time.time() - t1) * 1000
-            except Exception as e:
-                logger.warning("Sparse retrieval failed: %s", e)
-                sparse_candidates = []
+        try:
+            t1 = time.time()
+            sparse_candidates = self._sparse.search(
+                query_context.workspace_id,
+                query,
+                limit=sparse_candidate_limit,
+                include_archived=include_archived,
+            )
+            result.latencies["sparse"] = (time.time() - t1) * 1000
+        except Exception as e:
+            logger.warning("Sparse retrieval failed: %s", e)
 
-        if use_dense:
-            if self._dense.provider is None:
-                result.health_state = "disabled"
-                result.mode = "sparse_only"
-                result.degraded_code = "dense_provider_not_configured"
-                result.degraded_reason = _code_to_reason("dense_provider_not_configured")
-            elif not self._dense.provider.is_semantic:
-                result.health_state = "disabled"
-                result.mode = "sparse_only"
+        dense_available = (
+            self._dense.provider is not None
+            and self._dense.provider.is_semantic
+        )
+        if dense_available:
+            t1 = time.time()
+            dense_result = self._dense.search(
+                query_context.workspace_id,
+                query,
+                limit=dense_candidate_limit,
+                include_archived=include_archived,
+            )
+            result.latencies["dense"] = dense_result.latency_ms
+            if dense_result.health_state == DenseHealthState.HEALTHY:
+                dense_candidates = dense_result.candidates
             else:
-                t1 = time.time()
-                dense_result = self._dense.search(
-                    query_context.workspace_id, query,
-                    limit=dense_candidate_limit,
-                    include_archived=include_archived,
-                )
-                result.latencies["dense"] = dense_result.latency_ms
-                if dense_result.health_state == DenseHealthState.HEALTHY:
-                    dense_candidates = dense_result.candidates
-                else:
-                    result.health_state = "degraded"
-                    result.degraded_code = dense_result.error_code
-                    result.degraded_reason = _code_to_reason(dense_result.error_code)
-                    dense_candidates = []
+                result.health_state = "degraded"
+                result.degraded_code = dense_result.error_code
+                result.degraded_reason = _code_to_reason(dense_result.error_code)
 
         result.sparse_candidate_count = len(sparse_candidates)
         result.dense_candidate_count = len(dense_candidates)
 
-        if result.health_state == "healthy" and result.mode in ("degraded",):
-            result.mode = "sparse_only"
-        elif result.health_state == "healthy" and len(dense_candidates) == 0 and use_dense:
-            result.mode = "sparse_only"
-        elif result.health_state == "healthy" and len(sparse_candidates) == 0 and dense_candidates:
-            result.mode = "dense_only"
+        # ── Memory v2: always search memory_items table ────────────────
+        v2_selected: list[dict[str, object]] = []
+        try:
+            words = [w for w in query.split() if len(w) > 1] if query else []
+            like_clauses = " OR ".join(["summary LIKE ?" for _ in words]) if words else "1=1"
+            params: list[object] = [query_context.workspace_id]
+            if words:
+                for w in words:
+                    params.append(f"%{w}%")
+            params.append(max(1, limit))
+            rows = self._db.connection.execute(
+                f"SELECT id, summary as text, memory_type as type,"
+                f" reinforcement, emotional_weight, created_at, updated_at"
+                f" FROM memory_items"
+                f" WHERE workspace_id = ? AND status = 'active'"
+                f" AND ({like_clauses})"
+                f" ORDER BY reinforcement DESC, updated_at DESC"
+                f" LIMIT ?",
+                params,
+            ).fetchall()
+            for row in rows:
+                entry = dict(row)
+                entry["retrieval_source"] = "memory_v2"
+                entry["id"] = str(entry["id"])
+                entry["_score"] = float(entry.get("reinforcement", 1) or 1) * 0.1
+                v2_selected.append(entry)
+        except Exception as e:
+            logger.warning("Memory v2 search failed: %s", e)
 
-        if not sparse_candidates and not dense_candidates:
+        if not sparse_candidates and not dense_candidates and not v2_selected:
             return self._finalize(result, query_context, t0)
 
         fused = self._fusion.fuse(sparse_candidates, dense_candidates, query)
@@ -279,7 +267,7 @@ class MemoryRetrievalService:
                 threshold = getattr(policy, "threshold", min_score)
                 max_items = getattr(policy, "max_items", 99)
 
-            if breakdown.final_score < threshold:
+            if breakdown.semantic_score < threshold:
                 excluded.append({"memory_id": mid, "reason": "below_threshold"})
                 continue
 
@@ -299,6 +287,7 @@ class MemoryRetrievalService:
                 "confidence_score": breakdown.confidence_score,
                 "task_relevance_score": breakdown.task_relevance_score,
                 "type_priority_score": breakdown.type_priority_score,
+                "semantic_score": breakdown.semantic_score,
                 "final_score": breakdown.final_score,
             }
 
@@ -320,7 +309,9 @@ class MemoryRetrievalService:
         # Resident selection (adds to result, does not replace)
         try:
             resident = self._resident.select(
-                query_context.workspace_id, resident_budget, type_policy,
+                query_context.workspace_id,
+                resident_budget,
+                type_policy,
             )
             existing_ids = {str(m.get("id", "")) for m in selected}
             for mem in resident:
@@ -331,10 +322,23 @@ class MemoryRetrievalService:
         except Exception as e:
             logger.warning("Resident selection failed: %s", e)
 
+        # ── Merge Memory v2 results ────────────────────────────────────
+        existing_ids = {str(m.get("id", "")) for m in selected}
+        existing_ids.update(str(m.get("id", "")) for m in result.resident_memories)
+        for mem in v2_selected:
+            mid = str(mem.get("id", ""))
+            if mid not in existing_ids:
+                existing_ids.add(mid)
+                selected.append(mem)
+        result.dynamic_memories = selected
+        result.selected_count = len(selected)
+
         return self._finalize(result, query_context, t0)
 
     def _persist_trace(
-        self, result: MemoryRecallResult, ctx: MemoryQueryContext,
+        self,
+        result: MemoryRecallResult,
+        ctx: MemoryQueryContext,
     ) -> None:
         rt_id = result.trace_id or str(uuid.uuid4())
         try:
@@ -349,15 +353,23 @@ class MemoryRetrievalService:
                 "  total_latency_ms)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    rt_id, ctx.workspace_id, ctx.session_id,
-                    result.gate_mode, ctx.original_query,
-                    ctx.context_enriched_query, result.mode,
+                    rt_id,
+                    ctx.workspace_id,
+                    ctx.session_id,
+                    result.gate_mode,
+                    ctx.original_query,
+                    ctx.context_enriched_query,
+                    result.mode,
                     result.degraded_reason,
-                    result.sparse_candidate_count, result.dense_candidate_count,
-                    result.union_candidate_count, result.selected_count,
+                    result.sparse_candidate_count,
+                    result.dense_candidate_count,
+                    result.union_candidate_count,
+                    result.selected_count,
                     result.resident_count,
-                    result.embedding_provider, result.embedding_model,
-                    result.embedding_dimension, result.embedding_version,
+                    result.embedding_provider,
+                    result.embedding_model,
+                    result.embedding_dimension,
+                    result.embedding_version,
                     result.latencies.get("sparse", 0.0),
                     result.latencies.get("dense", 0.0),
                     result.latencies.get("total", 0.0),
@@ -374,12 +386,17 @@ class MemoryRetrievalService:
                     "  type_priority_score, final_score, inclusion_reason)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        str(uuid.uuid4()), rt_id, mid,
-                        bd.get("sparse_score", 0.0), bd.get("dense_score", 0.0),
-                        bd.get("recency_score", 0.0), bd.get("confidence_score", 0.0),
+                        str(uuid.uuid4()),
+                        rt_id,
+                        mid,
+                        bd.get("sparse_score", 0.0),
+                        bd.get("dense_score", 0.0),
+                        bd.get("recency_score", 0.0),
+                        bd.get("confidence_score", 0.0),
                         bd.get("task_relevance_score", 0.0),
                         bd.get("type_priority_score", 0.0),
-                        bd.get("final_score", 0.0), "dynamic",
+                        bd.get("final_score", 0.0),
+                        "dynamic",
                     ),
                 )
 
@@ -391,7 +408,9 @@ class MemoryRetrievalService:
                         " (id, trace_id, memory_id, final_score, excluded_reason)"
                         " VALUES (?, ?, ?, ?, ?)",
                         (
-                            str(uuid.uuid4()), rt_id, eid,
+                            str(uuid.uuid4()),
+                            rt_id,
+                            eid,
                             float(entry.get("score", 0.0)),
                             entry.get("reason", ""),
                         ),
@@ -416,7 +435,9 @@ class MemoryRetrievalService:
             workspace_id=workspace_id,
         )
         recall_result = self.recall(
-            ctx, limit=limit, include_archived=include_archived,
+            ctx,
+            limit=limit,
+            include_archived=include_archived,
             force_mode=force_mode or "",
         )
         results = recall_result.to_legacy_result()
@@ -494,7 +515,9 @@ def create_retrieval_service(
     Every caller (CLI, API, RuntimeKernel) must use this factory so that
     the HTTP client, secrets, and config are wired exactly once.
     """
-    from cogito_agent.embedding.service import create_embedding_provider_from_config as _make_provider
+    from cogito_agent.embedding.service import (
+        create_embedding_provider_from_config as _make_provider,
+    )
     from cogito_agent.retrieval.dense import DenseMemoryRetriever
     from cogito_agent.retrieval.sparse import SparseMemoryRetriever
 
@@ -508,15 +531,12 @@ def create_retrieval_service(
         retrieval_cfg = getattr(config, "retrieval", None)
         if retrieval_cfg is not None:
             cfg = retrieval_cfg
-            w = retrieval_cfg.weights
+            rrf_cfg = retrieval_cfg.rrf
             fusion = CandidateFusion(
-                dense_weight=w.dense,
-                sparse_weight=w.sparse,
-                recency_weight=w.recency,
-                confidence_weight=w.confidence,
-                task_relevance_weight=w.task_relevance,
-                type_priority_weight=w.type_priority,
+                rrf_k=rrf_cfg.k,
+                keyword_weight=rrf_cfg.keyword_weight,
                 recency_half_life_days=retrieval_cfg.recency_half_life_days,
+                hotness_alpha=rrf_cfg.hotness_alpha,
             )
 
     return MemoryRetrievalService(

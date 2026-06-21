@@ -96,6 +96,7 @@ def test_stop() -> None:
     t.start()
 
     import time
+
     time.sleep(0.3)
     engine.stop()
     t.join(timeout=2.0)

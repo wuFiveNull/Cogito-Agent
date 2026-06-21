@@ -25,16 +25,13 @@ class UnsupportedModalityError(ProviderError):
 
 @runtime_checkable
 class ProviderMessageCodec(Protocol):
-    def validate_request(self, messages: list[ChatMessage], **kwargs: object) -> None:
-        ...
+    def validate_request(self, messages: list[ChatMessage], **kwargs: object) -> None: ...
 
     def encode_messages(
         self, messages: list[ChatMessage], **kwargs: object
-    ) -> list[dict[str, object]]:
-        ...
+    ) -> list[dict[str, object]]: ...
 
-    def encode(self, message: ChatMessage) -> dict[str, object]:
-        ...
+    def encode(self, message: ChatMessage) -> dict[str, object]: ...
 
 
 class TextOnlyCodec:
@@ -54,7 +51,7 @@ class TextOnlyCodec:
                         modality=part.type,
                         provider=self._provider,
                         message=f"Provider '{self._provider}' only supports text, "
-                                f"but received '{part.type}' content",
+                        f"but received '{part.type}' content",
                     )
 
     def encode_messages(
@@ -109,7 +106,7 @@ class OpenAICompatibleCodec:
 
     def encode(self, message: ChatMessage) -> dict[str, object]:
         d: dict[str, object] = {"role": message.role.value}
-        parts = []
+        parts: list[dict[str, object]] = []
         for part in message.content:
             if isinstance(part, TextPart):
                 parts.append({"type": "text", "text": part.text})
@@ -121,15 +118,19 @@ class OpenAICompatibleCodec:
                     image_url: dict[str, object] = {"url": uri}
                     if part.mime_type:
                         image_url["detail"] = "auto"
-                    parts.append({
-                        "type": "image_url",
-                        "image_url": image_url,
-                    })
+                    parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": image_url,
+                        }
+                    )
             elif isinstance(part, type(FilePart)) or type(part).__name__ == "FilePart":
-                parts.append({
-                    "type": "text",
-                    "text": f"[File: {part.filename}] ({part.uri})",
-                })
+                parts.append(
+                    {
+                        "type": "text",
+                        "text": f"[File: {part.filename}] ({part.uri})",
+                    }
+                )
         if parts:
             d["content"] = parts
         else:
@@ -165,14 +166,21 @@ class GeminiCodec:
             "assistant": "model",
             "tool": "function",
         }
-        parts = []
+        parts: list[dict[str, object]] = []
         for part in message.content:
             if isinstance(part, TextPart):
                 parts.append({"text": part.text})
             elif isinstance(part, ImagePart):
                 uri = part.uri
                 if uri.startswith("data:"):
-                    parts.append({"inline_data": {"mime_type": part.mime_type, "data": uri.split(",", 1)[-1]}})
+                    parts.append(
+                        {
+                            "inline_data": {
+                                "mime_type": part.mime_type,
+                                "data": uri.split(",", 1)[-1],
+                            }
+                        }
+                    )
                 else:
                     parts.append({"file_data": {"file_uri": uri, "mime_type": part.mime_type}})
             elif isinstance(part, type(FilePart)) or type(part).__name__ == "FilePart":

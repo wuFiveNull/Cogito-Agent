@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,14 +10,11 @@ from cogito_agent.embedding.exceptions import (
     EmbeddingAPIError,
     EmbeddingAuthenticationError,
     EmbeddingDimensionMismatchError,
-    EmbeddingRateLimitError,
     EmbeddingResponseError,
-    EmbeddingTimeoutError,
 )
-from cogito_agent.embedding.interface import EmbeddingHealth, EmbeddingProvider
 from cogito_agent.embedding.mock import MockEmbeddingProvider
 from cogito_agent.embedding.openai_compatible import OpenAICompatibleEmbeddingProvider
-from cogito_agent.embedding.registry import MODEL_REGISTRY, get_model_info
+from cogito_agent.embedding.registry import get_model_info
 
 
 class TestMockEmbeddingProvider:
@@ -64,10 +61,7 @@ class TestOpenAICompatibleEmbeddingProvider:
         resp = MagicMock()
         resp.status_code = status
         resp_data = {
-            "data": [
-                {"index": i, "embedding": vec}
-                for i, vec in enumerate(data)
-            ],
+            "data": [{"index": i, "embedding": vec} for i, vec in enumerate(data)],
         }
         resp.json.return_value = resp_data
         resp.text = json.dumps(resp_data)
@@ -76,9 +70,7 @@ class TestOpenAICompatibleEmbeddingProvider:
     def test_single_input(self, config):
         provider = OpenAICompatibleEmbeddingProvider(**config)
         mock_client = MagicMock()
-        mock_client.post.return_value = self._make_mock_response(
-            [[0.1] * 1536]
-        )
+        mock_client.post.return_value = self._make_mock_response([[0.1] * 1536])
         provider._http_client = mock_client
 
         vec = provider.embed_text("hello")
@@ -161,9 +153,7 @@ class TestOpenAICompatibleEmbeddingProvider:
     def test_nan_in_embedding(self, config):
         provider = OpenAICompatibleEmbeddingProvider(**config)
         mock_client = MagicMock()
-        mock_client.post.return_value = self._make_mock_response(
-            [[float("nan")] * 1536]
-        )
+        mock_client.post.return_value = self._make_mock_response([[float("nan")] * 1536])
         provider._http_client = mock_client
 
         with pytest.raises(EmbeddingResponseError, match="NaN"):
@@ -260,9 +250,7 @@ class TestOpenAICompatibleEmbeddingProvider:
             max_retries=0,
         )
         mock_client = MagicMock()
-        mock_client.post.return_value = self._make_mock_response(
-            [[0.1] * 1024]
-        )
+        mock_client.post.return_value = self._make_mock_response([[0.1] * 1024])
         provider._http_client = mock_client
 
         provider.embed_text("test")
@@ -314,13 +302,12 @@ class TestOpenAICompatibleEmbeddingProvider:
             normalize=True,
         )
         mock_client = MagicMock()
-        mock_client.post.return_value = self._make_mock_response(
-            [[3.0, 0.0, 0.0, 0.0]]
-        )
+        mock_client.post.return_value = self._make_mock_response([[3.0, 0.0, 0.0, 0.0]])
         provider._http_client = mock_client
 
         vec = provider.embed_text("test")
         import math
+
         norm = math.sqrt(sum(x * x for x in vec))
         assert abs(norm - 1.0) < 0.001
 

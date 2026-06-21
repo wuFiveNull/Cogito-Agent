@@ -4,6 +4,7 @@ import json
 
 from cogito_agent.context import ContextEngine
 from cogito_agent.storage import Database
+from cogito_agent.storage.context_sink import SqliteContextTraceSink
 from cogito_agent.trace import Tracer
 
 
@@ -22,7 +23,11 @@ def test_context_items_include_quality_evidence_and_stable_refs() -> None:
         current_message="Question",
     )
 
-    memory = next(item for item in items if item.source_type in ("memory", "memory_retrieved", "memory_resident"))
+    memory = next(
+        item
+        for item in items
+        if item.source_type in ("memory", "memory_retrieved", "memory_resident")
+    )
     assert memory.stable_ref == "memory_retrieved:memory-1"
     assert memory.trust_score == 0.9
     assert memory.freshness_score == 0.8
@@ -48,7 +53,7 @@ def test_context_evidence_fields_are_persisted() -> None:
     db.migrate()
     trace = Tracer(db).create_trace("workspace", "event")
 
-    ContextEngine().build(
+    ContextEngine(trace_sink=SqliteContextTraceSink(db)).build(
         recent_messages=[],
         memories=[
             {
@@ -59,7 +64,6 @@ def test_context_evidence_fields_are_persisted() -> None:
             }
         ],
         current_message="Question",
-        db=db,
         trace_id=trace.id,
         workspace_id="workspace",
     )

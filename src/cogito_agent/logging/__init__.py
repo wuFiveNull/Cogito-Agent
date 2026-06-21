@@ -10,6 +10,25 @@ from typing import Any
 from pythonjsonlogger import json as _json_logger
 
 from cogito_agent.config.loader import LoggingSettings
+from cogito_agent.trace.redaction import RedactionHelper
+
+
+class _RedactingJsonFormatter(_json_logger.JsonFormatter):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._redactor = RedactionHelper()
+
+    def format(self, record: logging.LogRecord) -> str:
+        return self._redactor.redact(super().format(record))
+
+
+class _RedactingTextFormatter(logging.Formatter):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._redactor = RedactionHelper()
+
+    def format(self, record: logging.LogRecord) -> str:
+        return self._redactor.redact(super().format(record))
 
 
 def setup_logging(
@@ -31,7 +50,7 @@ def setup_logging(
         root_logger.removeHandler(h)
 
     if log_format == "json":
-        formatter: Any = _json_logger.JsonFormatter(
+        formatter: Any = _RedactingJsonFormatter(
             fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
             timestamp="iso",
         )
@@ -57,7 +76,7 @@ def setup_logging(
             file_handler.setFormatter(formatter)
             root_logger.addHandler(file_handler)
     else:
-        formatter = logging.Formatter(
+        formatter = _RedactingTextFormatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S",
         )

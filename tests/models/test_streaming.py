@@ -24,7 +24,7 @@ class _MockStream:
     def read(self, size: int = -1) -> bytes:
         if self._pos >= len(self._data):
             return b""
-        chunk = self._data[self._pos:self._pos + (size if size > 0 else len(self._data))]
+        chunk = self._data[self._pos : self._pos + (size if size > 0 else len(self._data))]
         self._pos += len(chunk)
         return chunk
 
@@ -74,8 +74,11 @@ def test_stream_chat_http_error() -> None:
 
     def _raise_error(*args: object, **kwargs: object) -> object:
         raise HTTPError(
-            "http://fake.example/v1/chat/completions", 500,
-            "Internal Server Error", {}, None,
+            "http://fake.example/v1/chat/completions",
+            500,
+            "Internal Server Error",
+            {},
+            None,
         )
 
     with unittest.mock.patch("urllib.request.urlopen", side_effect=_raise_error):

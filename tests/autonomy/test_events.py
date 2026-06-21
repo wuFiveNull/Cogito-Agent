@@ -1,7 +1,7 @@
 """Tests for AutonomyEvent model and normalizer."""
 
-from cogito_agent.autonomy import AutonomyEvent, AutonomySourceType, PriorityLevel
-from cogito_agent.autonomy.events import AutonomyEvent as AE
+from cogito_agent.autonomy import AutonomySourceType, PriorityLevel
+from cogito_agent.autonomy.events import AutonomyEvent as AE  # noqa: N817
 from cogito_agent.autonomy.normalizer import normalize_from_dict, normalize_manual
 
 

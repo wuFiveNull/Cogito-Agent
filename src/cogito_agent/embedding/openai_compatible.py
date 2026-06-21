@@ -6,7 +6,7 @@ import math
 import random
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urljoin
 
 import httpx
@@ -20,8 +20,8 @@ from .exceptions import (
     EmbeddingResponseError,
     EmbeddingTimeoutError,
 )
-from .interface import EmbeddingHealth, EmbeddingProvider
-from .registry import MODEL_REGISTRY, get_model_info
+from .interface import EmbeddingHealth
+from .registry import get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +73,11 @@ class OpenAICompatibleEmbeddingProvider:
                     self._max_input_tokens = info.max_input_tokens
             else:
                 raise EmbeddingConfigurationError(
-                    f"Model '{model}' not in registry; "
-                    "please set expected_dimension explicitly"
+                    f"Model '{model}' not in registry; please set expected_dimension explicitly"
                 )
 
         if self._expected_dimension <= 0:
-            raise EmbeddingConfigurationError(
-                "expected_dimension must be a positive integer"
-            )
+            raise EmbeddingConfigurationError("expected_dimension must be a positive integer")
 
     @property
     def provider_name(self) -> str:
@@ -142,7 +139,9 @@ class OpenAICompatibleEmbeddingProvider:
                 delay = self._backoff_delay(attempt, retry_after)
                 logger.warning(
                     "Rate limited, retrying in %.1fs (attempt %d/%d)",
-                    delay, attempt + 1, self._max_retries,
+                    delay,
+                    attempt + 1,
+                    self._max_retries,
                 )
                 time.sleep(delay)
             except EmbeddingTimeoutError:
@@ -170,7 +169,7 @@ class OpenAICompatibleEmbeddingProvider:
 
     def _get_client(self) -> httpx.Client:
         if self._http_client is not None:
-            return self._http_client
+            return cast(httpx.Client, self._http_client)
         if self._own_client is None:
             self._own_client = httpx.Client(
                 timeout=httpx.Timeout(
@@ -178,6 +177,7 @@ class OpenAICompatibleEmbeddingProvider:
                     connect=self._connect_timeout_seconds,
                 ),
             )
+        assert self._own_client is not None
         return self._own_client
 
     def close(self) -> None:
@@ -186,13 +186,18 @@ class OpenAICompatibleEmbeddingProvider:
             self._own_client = None
 
     def _do_request(
-        self, url: str, headers: dict[str, str],
-        body: dict[str, object], attempt: int,
+        self,
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, object],
+        attempt: int,
     ) -> Any:
         client = self._get_client()
         try:
             resp = client.post(
-                url, headers=headers, json=body,
+                url,
+                headers=headers,
+                json=body,
             )
         except httpx.TimeoutException as e:
             raise EmbeddingTimeoutError(str(e)) from e
@@ -220,15 +225,18 @@ class OpenAICompatibleEmbeddingProvider:
             raise EmbeddingAPIError("Endpoint not found (404)", status_code=404)
         if resp.status_code == 400:
             raise EmbeddingAPIError(
-                _safe_error_message(resp.text), status_code=400,
+                _safe_error_message(resp.text),
+                status_code=400,
             )
         if resp.status_code >= 500:
             raise EmbeddingAPIError(
-                f"Server error ({resp.status_code})", status_code=resp.status_code,
+                f"Server error ({resp.status_code})",
+                status_code=resp.status_code,
             )
         if resp.status_code != 200:
             raise EmbeddingAPIError(
-                f"Unexpected status {resp.status_code}", status_code=resp.status_code,
+                f"Unexpected status {resp.status_code}",
+                status_code=resp.status_code,
             )
 
         try:
@@ -237,7 +245,9 @@ class OpenAICompatibleEmbeddingProvider:
             raise EmbeddingResponseError(f"Invalid JSON response: {e}") from e
 
     def _parse_response(
-        self, resp_data: Any, texts: list[str],
+        self,
+        resp_data: Any,
+        texts: list[str],
     ) -> list[list[float]]:
         if not isinstance(resp_data, dict):
             raise EmbeddingResponseError("Response is not a JSON object")
@@ -267,9 +277,7 @@ class OpenAICompatibleEmbeddingProvider:
         for i in range(len(texts)):
             vec = indexed.get(i)
             if vec is None:
-                raise EmbeddingResponseError(
-                    f"Response missing embedding for index {i}"
-                )
+                raise EmbeddingResponseError(f"Response missing embedding for index {i}")
             self._validate_vector(vec, i)
             result.append(vec)
 
@@ -284,15 +292,11 @@ class OpenAICompatibleEmbeddingProvider:
                     f"Non-float value at index {index}: {type(v).__name__}"
                 )
             if math.isnan(v) or math.isinf(v):
-                raise EmbeddingResponseError(
-                    f"Invalid value (NaN/Inf) at index {index}"
-                )
+                raise EmbeddingResponseError(f"Invalid value (NaN/Inf) at index {index}")
 
         norm = math.sqrt(sum(x * x for x in vec))
         if norm <= 1e-12:
-            raise EmbeddingResponseError(
-                f"Embedding vector at index {index} has zero norm"
-            )
+            raise EmbeddingResponseError(f"Embedding vector at index {index} has zero norm")
 
         if self._normalize:
             vec[:] = [x / norm for x in vec]
@@ -302,12 +306,14 @@ class OpenAICompatibleEmbeddingProvider:
             )
 
     def _backoff_delay(
-        self, attempt: int, retry_after: int | None = None,
+        self,
+        attempt: int,
+        retry_after: int | None = None,
     ) -> float:
         if retry_after and retry_after > 0:
             return float(retry_after) + random.uniform(0, 1)
         base = 1.0
-        delay = base * (2 ** attempt)
+        delay = base * (2**attempt)
         jitter = random.uniform(0, delay * 0.5)
         result = delay + jitter
         return min(result, 60.0)  # type: ignore[no-any-return]
@@ -335,14 +341,18 @@ class OpenAICompatibleEmbeddingProvider:
             )
         except EmbeddingAuthenticationError as e:
             return EmbeddingHealth(
-                healthy=False, error_message=str(e),
-                provider_name=self.provider_name, model_name=self._model,
+                healthy=False,
+                error_message=str(e),
+                provider_name=self.provider_name,
+                model_name=self._model,
                 dimension=self._expected_dimension,
             )
         except Exception as e:
             return EmbeddingHealth(
-                healthy=False, error_message=str(e),
-                provider_name=self.provider_name, model_name=self._model,
+                healthy=False,
+                error_message=str(e),
+                provider_name=self.provider_name,
+                model_name=self._model,
                 dimension=self._expected_dimension,
             )
 

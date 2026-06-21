@@ -25,16 +25,14 @@ CONSOLE_WORKSPACE_ID = "default"
 
 def _get_db() -> _Database:
     from cogito_agent.api.app import get_db as _get_shared_db
+
     return _get_shared_db()
 
 
 def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
-    db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+    from cogito_agent.application import WorkspaceApplicationService
+
+    WorkspaceApplicationService(_get_db()).ensure_workspace(workspace_id)
 
 
 def _redact_item(item: dict[str, object]) -> dict[str, object]:
@@ -52,6 +50,7 @@ async def drift_dashboard(request: Request) -> HTMLResponse:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
     from cogito_agent.runtime import DriftRuntime
+
     drift = DriftRuntime(db)
     drift._ensure_state()
 
@@ -77,9 +76,10 @@ async def drift_dashboard(request: Request) -> HTMLResponse:
 async def drift_pause(request: Request, reason: str = Form("")) -> Response:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
+    from cogito_agent.application import DriftApplicationService
     from cogito_agent.runtime import DriftRuntime
-    drift = DriftRuntime(db)
-    drift.pause(reason)
+
+    DriftApplicationService(DriftRuntime(db)).pause(reason)
     return RedirectResponse(url="/console/drift", status_code=303)
 
 
@@ -87,9 +87,10 @@ async def drift_pause(request: Request, reason: str = Form("")) -> Response:
 async def drift_resume(request: Request) -> Response:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
+    from cogito_agent.application import DriftApplicationService
     from cogito_agent.runtime import DriftRuntime
-    drift = DriftRuntime(db)
-    drift.resume()
+
+    DriftApplicationService(DriftRuntime(db)).resume()
     return RedirectResponse(url="/console/drift", status_code=303)
 
 
@@ -97,6 +98,7 @@ async def drift_resume(request: Request) -> Response:
 async def drift_run_detail(request: Request, run_id: str) -> HTMLResponse:
     db = _get_db()
     from cogito_agent.runtime import DriftRuntime
+
     drift = DriftRuntime(db)
     run = drift.get_run(run_id)
     if run is None:

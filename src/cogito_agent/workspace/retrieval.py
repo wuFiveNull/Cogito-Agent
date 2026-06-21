@@ -24,14 +24,12 @@ class FileRetriever:
         self, workspace_id: str, query: str, limit: int = 10
     ) -> list[dict[str, object]]:
         sanitized = " ".join(
-            word for word in query.split()
-            if word not in ("AND", "OR", "NOT", "NEAR")
+            word for word in query.split() if word not in ("AND", "OR", "NOT", "NEAR")
         )
         if not sanitized:
             return []
         fts_query = " OR ".join(
-            f'"{word}"' if " " not in word else word
-            for word in sanitized.split()
+            f'"{word}"' if " " not in word else word for word in sanitized.split()
         )
         try:
             cur = self._db.connection.execute(
@@ -72,6 +70,7 @@ class FileRetriever:
     ) -> list[dict[str, object]]:
         try:
             from cogito_agent.memory.vector import EmbeddingService, _unpack_embedding
+
             svc = EmbeddingService()
             query_vec = svc.encode(query)
             all_chunks = self._db.connection.execute(
@@ -89,6 +88,7 @@ class FileRetriever:
             if not all_chunks:
                 return []
             import numpy as np
+
             scored: list[tuple[float, dict[str, object]]] = []
             for row in all_chunks:
                 row_dict = dict(row)

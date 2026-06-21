@@ -21,7 +21,9 @@ def test_skill_run_creates_run_log_entry(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="transform", kind=StepKind.transform,
+                id="s1",
+                name="transform",
+                kind=StepKind.transform,
                 input_mapping={"out": "$ok"},
             ),
         ],
@@ -50,11 +52,15 @@ def test_skill_run_log_contains_step_logs(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="first", kind=StepKind.transform,
+                id="s1",
+                name="first",
+                kind=StepKind.transform,
                 input_mapping={"out": "$val"},
             ),
             SkillStep(
-                id="s2", name="second", kind=StepKind.transform,
+                id="s2",
+                name="second",
+                kind=StepKind.transform,
                 input_mapping={"out": "$step.s1._output"},
             ),
         ],
@@ -86,7 +92,9 @@ def test_skill_run_log_has_correct_status(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="failing", kind=StepKind.capability,
+                id="s1",
+                name="failing",
+                kind=StepKind.capability,
                 uses_capability="nonexistent.tool",
                 on_error=OnError.stop,
             ),
@@ -115,11 +123,15 @@ def test_skill_run_log_has_step_logs_with_correct_statuses(db_runner: SkillRunne
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="first", kind=StepKind.transform,
+                id="s1",
+                name="first",
+                kind=StepKind.transform,
                 input_mapping={"out": "$val"},
             ),
             SkillStep(
-                id="s2", name="second", kind=StepKind.transform,
+                id="s2",
+                name="second",
+                kind=StepKind.transform,
                 input_mapping={"out": "$step.s1._output"},
             ),
         ],
@@ -152,7 +164,9 @@ def test_replay_approval_interruption_status(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="interrupt-me", kind=StepKind.approval,
+                id="a1",
+                name="interrupt-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],
@@ -177,7 +191,6 @@ def test_replay_approval_interruption_status(db_runner: SkillRunner) -> None:
 
 def test_replay_resume_trace(db_runner: SkillRunner) -> None:
     """Replay shows resume trace after approval is resolved and resumed."""
-    import json
 
     from cogito_agent.storage.repositories import ApprovalRepository
 
@@ -189,10 +202,14 @@ def test_replay_resume_trace(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="resume-me", kind=StepKind.approval,
+                id="a1",
+                name="resume-me",
+                kind=StepKind.approval,
             ),
             SkillStep(
-                id="t1", name="after-approval", kind=StepKind.transform,
+                id="t1",
+                name="after-approval",
+                kind=StepKind.transform,
                 input_mapping={"out": "done"},
             ),
         ],

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,9 +45,7 @@ class TestApprovalActions:
         resp = client.post(f"/console/approval/{aid}/reject", data={"reason": "not needed"})
         assert resp.status_code == 200
         db = get_db()
-        cur = db.connection.execute(
-            "SELECT status FROM approval_records WHERE id=?", (aid,)
-        )
+        cur = db.connection.execute("SELECT status FROM approval_records WHERE id=?", (aid,))
         row = cur.fetchone()
         assert row is not None
         assert row["status"] == "rejected"

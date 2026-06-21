@@ -1,7 +1,8 @@
 """Tests: PromptBuilder correctly renders ContextItems into model messages."""
+
 from __future__ import annotations
 
-from cogito_agent.context import ContextItem, ContextEngine
+from cogito_agent.context import ContextEngine, ContextItem
 from cogito_agent.context.prompt_builder import PromptBuilder
 from cogito_agent.shared.safety import UNTRUSTED_CONTENT_BEGIN
 
@@ -26,8 +27,12 @@ def test_memory_appears_as_system_message() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="memory", source_id="mem1",
-            text="User likes Python", rank=1, token_estimate=10, included=True,
+            source_type="memory",
+            source_id="mem1",
+            text="User likes Python",
+            rank=1,
+            token_estimate=10,
+            included=True,
             reason="retrieved",
         ),
     ]
@@ -40,9 +45,13 @@ def test_excluded_items_not_in_messages() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="memory", source_id="mem1",
-            text="Should be excluded", rank=1, token_estimate=10,
-            included=False, reason="budget_exceeded",
+            source_type="memory",
+            source_id="mem1",
+            text="Should be excluded",
+            rank=1,
+            token_estimate=10,
+            included=False,
+            reason="budget_exceeded",
         ),
     ]
     msgs = pb.build(items, current_message="hello")
@@ -54,8 +63,12 @@ def test_no_current_message_duplicate() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="current_message", source_id="current",
-            text="hello world", rank=0, token_estimate=5, included=True,
+            source_type="current_message",
+            source_id="current",
+            text="hello world",
+            rank=0,
+            token_estimate=5,
+            included=True,
             reason="required",
         ),
     ]
@@ -69,8 +82,12 @@ def test_current_message_in_ctx_prevents_duplicate() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="current_message", source_id="current",
-            text="first", rank=0, token_estimate=5, included=True,
+            source_type="current_message",
+            source_id="current",
+            text="first",
+            rank=0,
+            token_estimate=5,
+            included=True,
             reason="required",
         ),
     ]
@@ -83,14 +100,23 @@ def test_file_chunks_marked_untrusted() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="file_chunk", source_id="file1",
-            text="secret content", rank=1, token_estimate=10, included=True,
+            source_type="file_chunk",
+            source_id="file1",
+            text="secret content",
+            rank=1,
+            token_estimate=10,
+            included=True,
             reason="retrieved",
         ),
     ]
     msgs = pb.build(items, current_message="hello")
-    system_msgs = [m for m in msgs if m["role"] == "system"]
-    combined = " ".join(str(m.get("content", "")) for m in system_msgs)
+    # File chunks now appear in the context frame (<system-reminder>) as a user message.
+    context_frame_msgs = [
+        m for m in msgs
+        if m["role"] == "user" and "<system-reminder" in str(m.get("content", ""))
+    ]
+    combined = " ".join(str(m.get("content", "")) for m in context_frame_msgs)
+    assert "secret content" in combined
     assert UNTRUSTED_CONTENT_BEGIN in combined
 
 
@@ -109,8 +135,12 @@ def test_history_deduplication() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="message", source_id="msg1",
-            text="previous message", rank=1, token_estimate=5, included=True,
+            source_type="message",
+            source_id="msg1",
+            text="previous message",
+            rank=1,
+            token_estimate=5,
+            included=True,
             reason="recent_history",
         ),
     ]
@@ -138,13 +168,21 @@ def test_multiple_memory_items() -> None:
     pb = PromptBuilder()
     items = [
         ContextItem(
-            source_type="memory", source_id="mem1",
-            text="Memory A", rank=1, token_estimate=5, included=True,
+            source_type="memory",
+            source_id="mem1",
+            text="Memory A",
+            rank=1,
+            token_estimate=5,
+            included=True,
             reason="retrieved",
         ),
         ContextItem(
-            source_type="memory", source_id="mem2",
-            text="Memory B", rank=2, token_estimate=5, included=True,
+            source_type="memory",
+            source_id="mem2",
+            text="Memory B",
+            rank=2,
+            token_estimate=5,
+            included=True,
             reason="retrieved",
         ),
     ]

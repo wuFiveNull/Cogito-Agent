@@ -48,6 +48,7 @@ class ModelResponse:
             args_raw = intent.get("arguments", {})
             if isinstance(args_raw, str):
                 import json
+
                 try:
                     args = json.loads(args_raw)
                 except (json.JSONDecodeError, TypeError):
@@ -56,11 +57,13 @@ class ModelResponse:
                 args = {str(k): v for k, v in args_raw.items()}
             else:
                 args = {}
-            results.append(ToolIntent(
-                tool_call_id=str(intent.get("id", intent.get("tool_call_id", ""))),
-                capability_name=name,
-                arguments=args,
-            ))
+            results.append(
+                ToolIntent(
+                    tool_call_id=str(intent.get("id", intent.get("tool_call_id", ""))),
+                    capability_name=name,
+                    arguments=args,
+                )
+            )
         return results
 
 
@@ -69,9 +72,7 @@ class ModelAdapter(Protocol):
 
     def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse: ...
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]: ...
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]: ...
 
 
 class StreamGenerator:

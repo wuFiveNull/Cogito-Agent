@@ -15,6 +15,7 @@ client = TestClient(app)
 def _reset_db(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the shared database singleton before each test."""
     import sys
+
     api_mod = sys.modules["cogito_agent.api.app"]
     api_mod._db = None
     api_mod._kernel = None
@@ -22,8 +23,13 @@ def _reset_db(monkeypatch: pytest.MonkeyPatch) -> None:
         "cogito_agent.cli.config_manager.build_model_adapter_from_config",
         lambda: None,
     )
+    monkeypatch.setattr(
+        "cogito_agent.config.loader.build_multimodel_adapter",
+        lambda _config: None,
+    )
     _ensure_default_workspace()
     yield
+
 
 CONSOLE_WORKSPACE_ID = "default"
 
@@ -34,6 +40,7 @@ def _shared_db():
 
 def _ensure_default_workspace() -> None:
     from cogito_agent.storage.repositories import WorkspaceRepository
+
     db = _shared_db()
     ws_repo = WorkspaceRepository(db)
     if ws_repo.get_by_id(CONSOLE_WORKSPACE_ID) is None:
@@ -247,6 +254,7 @@ class TestChatSessionSecurity:
 
     def test_auth_protects_session_routes(self) -> None:
         from cogito_agent.storage.repositories import WorkspaceRepository
+
         db = _shared_db()
         db.initialize()
         db.migrate()
@@ -258,6 +266,7 @@ class TestChatSessionSecurity:
         repo.create(sess_id, CONSOLE_WORKSPACE_ID, "Auth Test")
 
         import os
+
         os.environ["COGITO_API_KEY"] = "test-auth-key"
         try:
             resp_no_auth = client.get(f"/console/chat/sessions/{sess_id}")
@@ -422,6 +431,7 @@ class TestChatSessionMessages:
 class TestChatSessionsListAuth:
     def test_list_sessions_requires_auth(self) -> None:
         import os
+
         os.environ["COGITO_API_KEY"] = "test-list-auth"
         try:
             resp_no = client.get("/console/chat/sessions")
@@ -437,6 +447,7 @@ class TestChatSessionsListAuth:
 
     def test_create_session_requires_auth(self) -> None:
         import os
+
         os.environ["COGITO_API_KEY"] = "test-create-auth"
         try:
             resp_no = client.post("/console/chat/sessions")

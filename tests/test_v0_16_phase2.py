@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +19,15 @@ from cogito_agent.console.services import ConsoleOverviewService
 from cogito_agent.storage import Database
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _clear_pending() -> None:
+    from cogito_agent.application.runtime_factory import default_workspace_path as _dwp
+    from pathlib import Path
+
+    p = Path(_dwp("default")) / "memory" / "PENDING.md"
+    p.write_text("", encoding="utf-8")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -80,7 +88,7 @@ class TestOverviewEmptyState:
 class TestOverviewNavigation:
     def test_nav_has_overview_link(self) -> None:
         resp = client.get("/console/overview")
-        assert '/console/overview' in resp.text
+        assert "/console/overview" in resp.text
         assert "Overview" in resp.text
 
     def test_overview_has_check_icon(self) -> None:
@@ -232,51 +240,61 @@ class TestOverviewServiceData:
         db.migrate()
         conn = db.connection
 
+        conn.execute("INSERT OR IGNORE INTO workspaces (id, name) VALUES ('default', 'Default')")
+
         conn.execute(
-            "INSERT OR IGNORE INTO workspaces (id, name) VALUES ('default', 'Default')"
+            "INSERT INTO approval_records"
+            " (id, workspace_id, actor_id, capability_name, status)"
+            " VALUES ('ap1', 'default', 'user', 'test.cap', 'pending')"
         )
 
         conn.execute(
-            "INSERT INTO approval_records (id, workspace_id, actor_id, capability_name, status) VALUES ('ap1', 'default', 'user', 'test.cap', 'pending')"
+            "INSERT INTO outbox_messages"
+            " (id, event_id, decision_id, workspace_id, title, body, status, created_at)"
+            " VALUES ('ob1', 'ev1', 'dec1', 'default', 'failed msg', 'body',"
+            " 'failed', datetime('now'))"
         )
 
         conn.execute(
-            "INSERT INTO memory_candidates (id, workspace_id, text, status) VALUES ('mc1', 'default', 'candidate text', 'pending')"
+            "INSERT INTO drift_runs (id, workspace_id, skill_name, status, created_at)"
+            " VALUES ('dr1', 'default', 'test_skill', 'failed',"
+            " datetime('now', '-1 hours'))"
         )
 
         conn.execute(
-            "INSERT INTO outbox_messages (id, event_id, decision_id, workspace_id, title, body, status, created_at) VALUES ('ob1', 'ev1', 'dec1', 'default', 'failed msg', 'body', 'failed', datetime('now'))"
+            "INSERT INTO traces (id, workspace_id, root_event_id, status, started_at)"
+            " VALUES ('tr1', 'default', 'ev1', 'completed',"
+            " datetime('now', '-2 hours'))"
         )
 
         conn.execute(
-            "INSERT INTO drift_runs (id, workspace_id, skill_name, status, created_at) VALUES ('dr1', 'default', 'test_skill', 'failed', datetime('now', '-1 hours'))"
+            "INSERT INTO traces (id, workspace_id, root_event_id, status, started_at)"
+            " VALUES ('tr2', 'default', 'ev2', 'error', datetime('now', '-1 hours'))"
         )
 
         conn.execute(
-            "INSERT INTO traces (id, workspace_id, root_event_id, status, started_at) VALUES ('tr1', 'default', 'ev1', 'completed', datetime('now', '-2 hours'))"
+            "INSERT INTO model_calls (trace_id, span_id, provider, model, latency_ms)"
+            " VALUES ('tr1', 'sp1', 'mock', 'test-model', 150)"
+        )
+        conn.execute(
+            "INSERT INTO model_calls (trace_id, span_id, provider, model, latency_ms)"
+            " VALUES ('tr2', 'sp2', 'mock', 'test-model', 250)"
         )
 
         conn.execute(
-            "INSERT INTO traces (id, workspace_id, root_event_id, status, started_at) VALUES ('tr2', 'default', 'ev2', 'error', datetime('now', '-1 hours'))"
+            "INSERT INTO tool_calls (trace_id, span_id, capability_name, latency_ms)"
+            " VALUES ('tr1', 'sp1', 'test.tool', 100)"
         )
 
         conn.execute(
-            "INSERT INTO model_calls (trace_id, span_id, provider, model, latency_ms) VALUES ('tr1', 'sp1', 'mock', 'test-model', 150)"
-        )
-        conn.execute(
-            "INSERT INTO model_calls (trace_id, span_id, provider, model, latency_ms) VALUES ('tr2', 'sp2', 'mock', 'test-model', 250)"
-        )
-
-        conn.execute(
-            "INSERT INTO tool_calls (trace_id, span_id, capability_name, latency_ms) VALUES ('tr1', 'sp1', 'test.tool', 100)"
+            "INSERT INTO notification_decisions"
+            " (id, event_id, workspace_id, action, created_at)"
+            " VALUES ('nd1', 'ev1', 'default', 'push', datetime('now', '-3 hours'))"
         )
 
         conn.execute(
-            "INSERT INTO notification_decisions (id, event_id, workspace_id, action, created_at) VALUES ('nd1', 'ev1', 'default', 'push', datetime('now', '-3 hours'))"
-        )
-
-        conn.execute(
-            "INSERT INTO drift_state (id, enabled) VALUES ('main', 1) ON CONFLICT(id) DO UPDATE SET enabled=1"
+            "INSERT INTO drift_state (id, enabled) VALUES ('main', 1)"
+            " ON CONFLICT(id) DO UPDATE SET enabled=1"
         )
 
         conn.commit()
@@ -295,7 +313,7 @@ class TestOverviewServiceData:
                 attention = data["attention"]
                 assert attention["total_issues"] > 0
                 assert attention["pending_approvals"] == 1
-                assert attention["pending_candidates"] == 1
+                assert attention["pending_candidates"] == 0
                 assert attention["failed_deliveries"] == 1
                 assert attention["failed_drift_runs"] == 1
             finally:

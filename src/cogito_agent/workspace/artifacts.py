@@ -44,9 +44,22 @@ class ArtifactService:
             " mime_type, content_json, content_sha256, size_bytes,"
             " created_by, trace_id, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (aid, workspace_id, source_type, source_id, title, artifact_type,
-             mime_type, content_json, content_sha, size,
-             created_by, trace_id, now, now),
+            (
+                aid,
+                workspace_id,
+                source_type,
+                source_id,
+                title,
+                artifact_type,
+                mime_type,
+                content_json,
+                content_sha,
+                size,
+                created_by,
+                trace_id,
+                now,
+                now,
+            ),
         )
         self._db.connection.commit()
 
@@ -69,11 +82,17 @@ class ArtifactService:
         assert result is not None
         return result
 
-    def get_artifact_by_id(self, aid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM artifacts WHERE id = ? AND deleted_at IS NULL",
-            (aid,),
-        )
+    def get_artifact_by_id(
+        self,
+        aid: str,
+        workspace_id: str = "",
+    ) -> dict[str, object] | None:
+        sql = "SELECT * FROM artifacts WHERE id = ? AND deleted_at IS NULL"
+        params: list[object] = [aid]
+        if workspace_id:
+            sql += " AND workspace_id = ?"
+            params.append(workspace_id)
+        cur = self._db.connection.execute(sql, params)
         return _row_to_dict(cur.fetchone())
 
     def list_artifacts(
@@ -97,8 +116,8 @@ class ArtifactService:
         cur = self._db.connection.execute(sql, params)
         return _rows_to_dicts(cur.fetchall())
 
-    def delete_artifact(self, aid: str) -> bool:
-        row = self.get_artifact_by_id(aid)
+    def delete_artifact(self, aid: str, workspace_id: str = "") -> bool:
+        row = self.get_artifact_by_id(aid, workspace_id)
         if row is None:
             return False
         now = datetime.now(UTC).isoformat()
@@ -139,6 +158,7 @@ class ArtifactService:
         safe = self._redactor.redact(raw_content)
         if artifact_type == "json":
             import html
+
             try:
                 parsed = json.loads(safe)
                 pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
@@ -147,10 +167,13 @@ class ArtifactService:
                 return f"<pre><code>{html.escape(safe)}</code></pre>"
         if artifact_type == "text":
             import html
+
             return f"<pre><code>{html.escape(safe)}</code></pre>"
         try:
             import markdown as md_lib
+
             return str(md_lib.markdown(safe))
         except Exception:
             import html
+
             return f"<pre><code>{html.escape(safe)}</code></pre>"

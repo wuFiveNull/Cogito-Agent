@@ -1,0 +1,42 @@
+{% extends "console/base.html" %}
+{% block content %}
+<form class="filter-bar" method="get" action="/console/runs">
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for value in ["pending", "running", "waiting_approval", "succeeded", "failed", "cancelled", "abandoned"] %}
+    <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ value }}</option>
+    {% endfor %}
+  </select>
+  <select name="run_type">
+    <option value="">All types</option>
+    {% for value in ["scheduled", "skill", "drift"] %}
+    <option value="{{ value }}" {% if type_filter == value %}selected{% endif %}>{{ value }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn-filter" type="submit">Filter</button>
+  <a class="btn-clear" href="/console/runs">Clear</a>
+</form>
+
+<div class="trc-list">
+  {% for run in runs %}
+  <div class="trc-card">
+    <div class="trc-card-top">
+      <span class="trc-badge trc-badge-{{ run.status | e }}">{{ run.status | e }}</span>
+      <strong>{{ run.run_type | e }}</strong>
+      <span>{{ run.attempt_count }}/{{ run.max_attempts }} attempts</span>
+    </div>
+    <div class="trc-card-meta">
+      <code>{{ run.id | e }}</code>
+      &middot; {{ run.definition_id | e }}
+      &middot; {{ run.created_at | e }}
+    </div>
+    {% if run.error_message %}<div class="trc-error">{{ run.error_message | e }}</div>{% endif %}
+    <div class="trc-card-actions">
+      <a class="btn-action btn-view" href="/console/runs/{{ run.id | e }}">View</a>
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">No durable runs found.</div>
+  {% endfor %}
+</div>
+{% endblock %}

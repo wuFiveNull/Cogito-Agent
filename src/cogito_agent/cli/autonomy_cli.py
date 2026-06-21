@@ -27,17 +27,24 @@ def _build_loop(db_path: str) -> tuple[Database, ProactiveLoop]:
     policy = PolicyEngine()
     gate = NotificationGate(db, policy_engine=policy, audit_logger=audit)
     sched = SchedulerEngine(
-        db, tracer=tracer, audit_logger=audit,
-        policy_engine=policy, notification_gate=gate,
+        db,
+        tracer=tracer,
+        audit_logger=audit,
+        policy_engine=policy,
+        notification_gate=gate,
     )
     dstore = DecisionStore(db)
     outbox = Outbox(db)
     fb_store = FeedbackStore(db, audit_logger=audit)
     loop = ProactiveLoop(
-        scheduler=sched, notification_gate=gate,
-        decision_store=dstore, outbox=outbox,
-        feedback_store=fb_store, tracer=tracer,
-        audit_logger=audit, policy_engine=policy,
+        scheduler=sched,
+        notification_gate=gate,
+        decision_store=dstore,
+        outbox=outbox,
+        feedback_store=fb_store,
+        tracer=tracer,
+        audit_logger=audit,
+        policy_engine=policy,
         db=db,
     )
     return db, loop

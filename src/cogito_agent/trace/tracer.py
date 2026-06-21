@@ -5,10 +5,13 @@ from datetime import UTC, datetime
 from cogito_agent.shared import Span, SpanKind, Trace
 from cogito_agent.storage import Database
 
+from .redaction import RedactionHelper
+
 
 class Tracer:
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._redactor = RedactionHelper()
 
     def create_trace(
         self,
@@ -22,8 +25,7 @@ class Tracer:
             session_id=session_id,
         )
         self._db.connection.execute(
-            "INSERT INTO traces (id, workspace_id, session_id, root_event_id)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT INTO traces (id, workspace_id, session_id, root_event_id) VALUES (?, ?, ?, ?)",
             (trace.id, workspace_id, session_id, root_event_id),
         )
         self._db.connection.commit()
@@ -43,9 +45,7 @@ class Tracer:
             parent_span_id=parent_span_id,
         )
         self._db.connection.execute(
-            "INSERT INTO spans"
-            " (id, trace_id, parent_span_id, name, kind)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO spans (id, trace_id, parent_span_id, name, kind) VALUES (?, ?, ?, ?, ?)",
             (span.id, trace_id, parent_span_id, name, kind.value),
         )
         self._db.connection.commit()
@@ -88,14 +88,24 @@ class Tracer:
             for token in redactions:
                 input_summary = input_summary.replace(token, "[REDACTED]")
                 output_summary = output_summary.replace(token, "[REDACTED]")
+        input_summary = self._redactor.redact(input_summary)
+        output_summary = self._redactor.redact(output_summary)
+        error = self._redactor.redact(error) if error else error
         self._db.connection.execute(
             "INSERT INTO tool_calls"
             " (trace_id, span_id, capability_name, input_summary,"
             " decision, status, output_summary, latency_ms, error)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                trace_id, span_id, capability_name, input_summary,
-                decision, status, output_summary, latency_ms, error,
+                trace_id,
+                span_id,
+                capability_name,
+                input_summary,
+                decision,
+                status,
+                output_summary,
+                latency_ms,
+                error,
             ),
         )
         self._db.connection.commit()
@@ -119,6 +129,9 @@ class Tracer:
             for token in redactions:
                 prompt_summary = prompt_summary.replace(token, "[REDACTED]")
                 response_summary = response_summary.replace(token, "[REDACTED]")
+        prompt_summary = self._redactor.redact(prompt_summary)
+        response_summary = self._redactor.redact(response_summary)
+        error = self._redactor.redact(error) if error else error
         self._db.connection.execute(
             "INSERT INTO model_calls"
             " (trace_id, span_id, provider, model,"
@@ -127,10 +140,17 @@ class Tracer:
             " latency_ms, stop_reason, error)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                trace_id, span_id, provider, model,
-                input_token_count, output_token_count,
-                prompt_summary, response_summary,
-                latency_ms, stop_reason, error,
+                trace_id,
+                span_id,
+                provider,
+                model,
+                input_token_count,
+                output_token_count,
+                prompt_summary,
+                response_summary,
+                latency_ms,
+                stop_reason,
+                error,
             ),
         )
         self._db.connection.commit()

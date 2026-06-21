@@ -37,13 +37,9 @@ def _get_db() -> _Database:
 
 
 def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
+    from cogito_agent.application import WorkspaceApplicationService
 
-    db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+    WorkspaceApplicationService(_get_db()).ensure_workspace(workspace_id)
 
 
 def _list_approvals(
@@ -139,13 +135,17 @@ def _error_partial(request: Request, message: str, request_id: str) -> HTMLRespo
         "menu": _menu_items(),
     }
     return templates.TemplateResponse(
-        request, "console/components/error_banner.html", ctx, status_code=404,
+        request,
+        "console/components/error_banner.html",
+        ctx,
+        status_code=404,
     )
 
 
 def _success_partial(request: Request, message: str) -> HTMLResponse:
     return templates.TemplateResponse(
-        request, "console/components/approval_success.html",
+        request,
+        "console/components/approval_success.html",
         {"request": request, "message": message, "menu": _menu_items()},
     )
 
@@ -216,81 +216,67 @@ async def approval_detail(request: Request, approval_id: str) -> HTMLResponse:
 
 @approval_router.post(
     "/{approval_id}/approve",
-    response_class=HTMLResponse, include_in_schema=False,
+    response_class=HTMLResponse,
+    include_in_schema=False,
 )
 async def approval_approve(
     request: Request,
     approval_id: str,
     reason: str = Form(""),
 ) -> HTMLResponse:
+    from cogito_agent.application import ApprovalApplicationService
+    from cogito_agent.governance import AuditLogger
     from cogito_agent.storage.repositories import ApprovalRepository
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
-    repo = ApprovalRepository(db)
-
-    result = repo.resolve(approval_id, "approved", CONSOLE_ACTOR)
+    service = ApprovalApplicationService(ApprovalRepository(db), AuditLogger(db))
+    result, existing = service.resolve(
+        approval_id,
+        decision="approved",
+        actor_id=CONSOLE_ACTOR,
+        workspace_id=CONSOLE_WORKSPACE_ID,
+        reason=reason,
+    )
     if result is None:
-        existing = repo.get_by_id(approval_id)
         if existing is None:
             return _error_partial(request, "Approval not found", rid)
         msg = f"Approval already processed (status: {existing.get('status', 'unknown')})"
         return _error_partial(request, msg, rid)
 
-    _audit_log(
-        CONSOLE_ACTOR, "approval.approve",
-        f"approval:{approval_id}", CONSOLE_WORKSPACE_ID,
-        details={
-            "operation": "approve",
-            "approval_id": approval_id,
-            "capability": result.get("capability_name", ""),
-            "resource": result.get("resource", ""),
-            "reason": reason,
-            "decision_before": "pending",
-            "decision_after": "approved",
-        },
-        request_id=rid,
-    )
     return _success_partial(request, "Approval approved.")
 
 
 @approval_router.post(
     "/{approval_id}/reject",
-    response_class=HTMLResponse, include_in_schema=False,
+    response_class=HTMLResponse,
+    include_in_schema=False,
 )
 async def approval_reject(
     request: Request,
     approval_id: str,
     reason: str = Form(""),
 ) -> HTMLResponse:
+    from cogito_agent.application import ApprovalApplicationService
+    from cogito_agent.governance import AuditLogger
     from cogito_agent.storage.repositories import ApprovalRepository
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
-    repo = ApprovalRepository(db)
-
-    result = repo.resolve(approval_id, "rejected", CONSOLE_ACTOR)
+    service = ApprovalApplicationService(ApprovalRepository(db), AuditLogger(db))
+    result, existing = service.resolve(
+        approval_id,
+        decision="rejected",
+        actor_id=CONSOLE_ACTOR,
+        workspace_id=CONSOLE_WORKSPACE_ID,
+        reason=reason,
+    )
     if result is None:
-        existing = repo.get_by_id(approval_id)
         if existing is None:
             return _error_partial(request, "Approval not found", rid)
         msg = f"Approval already processed (status: {existing.get('status', 'unknown')})"
         return _error_partial(request, msg, rid)
 
-    _audit_log(
-        CONSOLE_ACTOR, "approval.reject",
-        f"approval:{approval_id}", CONSOLE_WORKSPACE_ID,
-        details={
-            "operation": "reject",
-            "approval_id": approval_id,
-            "capability": result.get("capability_name", ""),
-            "resource": result.get("resource", ""),
-            "reason": reason,
-            "decision_before": "pending",
-            "decision_after": "rejected",
-        },
-        request_id=rid,
-    )
     return _success_partial(request, "Approval rejected.")

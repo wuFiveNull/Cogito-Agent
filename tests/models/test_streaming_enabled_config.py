@@ -1,4 +1,5 @@
 """Tests: model.streaming_enabled config flag controls streaming behavior."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -16,8 +17,7 @@ def _mock_adapter(supports: bool = True) -> MagicMock:
 
 def test_streaming_enabled_true_calls_stream_chat():
     adapter = _mock_adapter(supports=True)
-    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}],
-                          streaming_enabled=True)
+    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}], streaming_enabled=True)
     tokens = list(gen)
     adapter.stream_chat.assert_called_once()
     adapter.chat.assert_not_called()
@@ -27,8 +27,7 @@ def test_streaming_enabled_true_calls_stream_chat():
 
 def test_streaming_enabled_false_calls_chat():
     adapter = _mock_adapter(supports=True)
-    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}],
-                          streaming_enabled=False)
+    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}], streaming_enabled=False)
     tokens = list(gen)
     adapter.stream_chat.assert_not_called()
     adapter.chat.assert_called_once()
@@ -38,8 +37,7 @@ def test_streaming_enabled_false_calls_chat():
 
 def test_streaming_enabled_true_adapter_no_streaming():
     adapter = _mock_adapter(supports=False)
-    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}],
-                          streaming_enabled=True)
+    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}], streaming_enabled=True)
     tokens = list(gen)
     adapter.stream_chat.assert_not_called()
     adapter.chat.assert_called_once()
@@ -48,8 +46,7 @@ def test_streaming_enabled_true_adapter_no_streaming():
 
 def test_streaming_enabled_false_adapter_no_streaming():
     adapter = _mock_adapter(supports=False)
-    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}],
-                          streaming_enabled=False)
+    gen = StreamGenerator(adapter, [{"role": "user", "content": "hi"}], streaming_enabled=False)
     tokens = list(gen)
     adapter.stream_chat.assert_not_called()
     adapter.chat.assert_called_once()

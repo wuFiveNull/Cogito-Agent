@@ -18,9 +18,7 @@ from cogito_agent.storage.repositories import ApprovalRepository
 
 
 def _make_workspace(db: Database, wid: str = "ws-approval-cli") -> str:
-    db.connection.execute(
-        "INSERT OR IGNORE INTO workspaces (id, name) VALUES (?, ?)", (wid, wid)
-    )
+    db.connection.execute("INSERT OR IGNORE INTO workspaces (id, name) VALUES (?, ?)", (wid, wid))
     db.connection.commit()
     return wid
 
@@ -71,7 +69,9 @@ def _make_approval_skill_manifest() -> SkillManifest:
 
 
 def _make_skill_run_pending(
-    db: Database, wid: str, manifest: SkillManifest,
+    db: Database,
+    wid: str,
+    manifest: SkillManifest,
 ) -> tuple[str, str]:
     runner = SkillRunner(db)
     result = runner.run(manifest, wid, inputs={})
@@ -175,6 +175,7 @@ def test_approval_list_by_workspace() -> None:
 
 def test_run_approval_list_empty() -> None:
     from cogito_agent.cli.approval import _run_approval_list
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     db.close()
@@ -185,6 +186,7 @@ def test_run_approval_list_empty() -> None:
 
 def test_run_approval_list_pending() -> None:
     from cogito_agent.cli.approval import _run_approval_list
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -198,6 +200,7 @@ def test_run_approval_list_pending() -> None:
 
 def test_run_approval_list_all() -> None:
     from cogito_agent.cli.approval import _run_approval_list
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -211,6 +214,7 @@ def test_run_approval_list_all() -> None:
 
 def test_run_approval_list_approved() -> None:
     from cogito_agent.cli.approval import _run_approval_list
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -224,6 +228,7 @@ def test_run_approval_list_approved() -> None:
 
 def test_run_approval_show_found() -> None:
     from cogito_agent.cli.approval import _run_approval_show
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -236,6 +241,7 @@ def test_run_approval_show_found() -> None:
 
 def test_run_approval_show_not_found() -> None:
     from cogito_agent.cli.approval import _run_approval_show
+
     db, db_path = _init_db()
     db.close()
     ns = _make_ns(db_path=db_path, approval_id="nonexistent")
@@ -245,6 +251,7 @@ def test_run_approval_show_not_found() -> None:
 
 def test_run_approval_approve_pending() -> None:
     from cogito_agent.cli.approval import _run_approval_approve
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -265,6 +272,7 @@ def test_run_approval_approve_pending() -> None:
 
 def test_run_approval_approve_already_resolved() -> None:
     from cogito_agent.cli.approval import _run_approval_approve
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -279,6 +287,7 @@ def test_run_approval_approve_already_resolved() -> None:
 
 def test_run_approval_approve_nonexistent() -> None:
     from cogito_agent.cli.approval import _run_approval_approve
+
     db, db_path = _init_db()
     db.close()
     ns = _make_ns(db_path=db_path, approval_id="nonexistent")
@@ -288,6 +297,7 @@ def test_run_approval_approve_nonexistent() -> None:
 
 def test_run_approval_reject_pending() -> None:
     from cogito_agent.cli.approval import _run_approval_reject
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -308,6 +318,7 @@ def test_run_approval_reject_pending() -> None:
 
 def test_run_approval_reject_already_resolved() -> None:
     from cogito_agent.cli.approval import _run_approval_reject
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -322,6 +333,7 @@ def test_run_approval_reject_already_resolved() -> None:
 
 def test_run_approval_reject_nonexistent() -> None:
     from cogito_agent.cli.approval import _run_approval_reject
+
     db, db_path = _init_db()
     db.close()
     ns = _make_ns(db_path=db_path, approval_id="nonexistent")
@@ -334,6 +346,7 @@ def test_run_approval_reject_nonexistent() -> None:
 
 def test_approve_and_resume_skill_run() -> None:
     from cogito_agent.cli.approval import _run_approval_approve, _run_approval_resume
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     manifest = _make_approval_skill_manifest()
@@ -357,10 +370,12 @@ def test_approve_and_resume_skill_run() -> None:
     db3 = Database(db_path)
     db3.initialize()
     # SkillRunner.resume() creates a new row with a new created_at; find the last inserted one
-    all_rows = list(db3.connection.execute(
-        "SELECT rowid, id, status FROM skill_run_logs WHERE skill_name = ? ORDER BY rowid DESC",
-        ("test-approval-skill",),
-    ))
+    all_rows = list(
+        db3.connection.execute(
+            "SELECT rowid, id, status FROM skill_run_logs WHERE skill_name = ? ORDER BY rowid DESC",
+            ("test-approval-skill",),
+        )
+    )
     assert len(all_rows) >= 2, f"Expected at least 2 rows, got {len(all_rows)}"
     # The latest inserted row should be the resumed one (highest rowid)
     latest = all_rows[0]
@@ -377,6 +392,7 @@ def test_approve_and_resume_skill_run() -> None:
 
 def test_reject_and_resume_skill_run() -> None:
     from cogito_agent.cli.approval import _run_approval_reject, _run_approval_resume
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     manifest = _make_approval_skill_manifest()
@@ -399,10 +415,12 @@ def test_reject_and_resume_skill_run() -> None:
 
     db3 = Database(db_path)
     db3.initialize()
-    all_rows = list(db3.connection.execute(
-        "SELECT rowid, id, status FROM skill_run_logs WHERE skill_name = ? ORDER BY rowid DESC",
-        ("test-approval-skill",),
-    ))
+    all_rows = list(
+        db3.connection.execute(
+            "SELECT rowid, id, status FROM skill_run_logs WHERE skill_name = ? ORDER BY rowid DESC",
+            ("test-approval-skill",),
+        )
+    )
     assert len(all_rows) >= 2, f"Expected at least 2 rows, got {len(all_rows)}"
     latest = all_rows[0]
     assert latest["status"] == "rejected", f"Expected rejected, got {latest['status']}"
@@ -415,6 +433,7 @@ def test_reject_and_resume_skill_run() -> None:
 
 def test_resume_nonexistent_skill_run() -> None:
     from cogito_agent.cli.approval import _run_approval_resume
+
     db, db_path = _init_db()
     db.close()
     ns = _make_ns(db_path=db_path, skill_run_id="nonexistent")
@@ -425,6 +444,7 @@ def test_resume_nonexistent_skill_run() -> None:
 def test_resume_not_pending_skill_run() -> None:
     """Resume a completed run should fail."""
     from cogito_agent.cli.approval import _run_approval_resume
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     manifest = SkillManifest(
@@ -437,9 +457,7 @@ def test_resume_not_pending_skill_run() -> None:
     runner = SkillRunner(db)
     result = runner.run(manifest, wid, inputs={})
     assert result.status == "completed"
-    cur = db.connection.execute(
-        "SELECT id FROM skill_run_logs WHERE status = 'completed' LIMIT 1"
-    )
+    cur = db.connection.execute("SELECT id FROM skill_run_logs WHERE status = 'completed' LIMIT 1")
     row = cur.fetchone()
     assert row is not None
     skill_run_id = str(row["id"])
@@ -452,6 +470,7 @@ def test_resume_not_pending_skill_run() -> None:
 def test_resume_no_resume_data() -> None:
     """Skill run without resume_data_json should fail."""
     from cogito_agent.cli.approval import _run_approval_resume
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     rid = str(uuid.uuid4())
@@ -470,6 +489,7 @@ def test_resume_no_resume_data() -> None:
 def test_duplicate_approve_fails() -> None:
     """Approving an already-approved approval should print warning."""
     from cogito_agent.cli.approval import _run_approval_approve
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -492,6 +512,7 @@ def test_duplicate_approve_fails() -> None:
 def test_duplicate_reject_fails() -> None:
     """Rejecting an already-rejected approval should print warning."""
     from cogito_agent.cli.approval import _run_approval_reject
+
     db, db_path = _init_db()
     wid = _make_workspace(db)
     repo = ApprovalRepository(db)
@@ -519,4 +540,5 @@ def _make_ns(**kwargs: object) -> object:
         def __init__(self, **kw: object) -> None:
             for k, v in kw.items():
                 setattr(self, k, v)
+
     return FakeNamespace(**kwargs)

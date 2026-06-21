@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class TurnBudget(BaseModel):
     max_model_calls: int = 10
-    max_tool_calls: int = 2
+    max_tool_calls: int = 5
     max_wall_time_seconds: int = 60
     max_input_tokens: int = 8192
     max_output_tokens: int = 4096

@@ -65,6 +65,7 @@ def run_daemon(
             signal.signal(signal.SIGHUP, _reload)
 
     if stop_event is not None:
+
         def _watch_stop_event() -> None:
             stop_event.wait()
             engine.stop()

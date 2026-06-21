@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +17,7 @@ from fastapi.testclient import TestClient
 from cogito_agent.api.app import app
 from cogito_agent.config.loader import CogitoConfig, _deep_merge, load_config, load_toml_config
 from cogito_agent.storage.database import Database
+from cogito_agent.version import APP_VERSION
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOML Config Tests
@@ -129,7 +128,7 @@ def test_health_returns_200() -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["version"] == "0.16.0-dev"
+    assert data["version"] == APP_VERSION
     assert "database" in data["checks"]
     assert "config" in data["checks"]
     assert data["checks"]["database"]["status"] == "ok"
@@ -142,7 +141,7 @@ def test_health_returns_json() -> None:
 
 def test_health_has_version() -> None:
     resp = client.get("/api/v1/health")
-    assert resp.json()["version"] == "0.16.0-dev"
+    assert resp.json()["version"] == APP_VERSION
 
 
 def test_health_db_check_content() -> None:
@@ -164,6 +163,7 @@ def test_setup_logging_no_crash() -> None:
     cfg.logging.format = "json"
     setup_logging(cfg.logging)
     import logging
+
     assert logging.getLogger().level == logging.INFO
 
 
@@ -174,6 +174,7 @@ def test_setup_logging_text_format() -> None:
     cfg.logging.format = "text"
     setup_logging(cfg.logging)
     import logging
+
     assert logging.getLogger().hasHandlers()
 
 
@@ -192,6 +193,7 @@ def test_setup_logging_level_config() -> None:
     cfg.logging.level = "WARNING"
     setup_logging(cfg.logging)
     import logging
+
     root = logging.getLogger()
     assert root.level <= logging.WARNING
 
@@ -241,7 +243,6 @@ def test_database_foreign_keys_on() -> None:
 def test_database_migration_idempotent() -> None:
     db = Database()
     db.initialize()
-    v1 = db.current_version()
     db.migrate()
     v2 = db.current_version()
     # Second migrate should be a no-op
@@ -420,7 +421,7 @@ def test_health_does_not_leak_stack_trace() -> None:
     """Health endpoint errors should not contain Python stack traces."""
     resp = client.get("/api/v1/health")
     assert "traceback" not in resp.text.lower()
-    assert "file \"" not in resp.text.lower()
+    assert 'file "' not in resp.text.lower()
 
 
 def test_csrf_does_not_block_exempt_api_routes() -> None:

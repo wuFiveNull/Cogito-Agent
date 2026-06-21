@@ -22,11 +22,9 @@ class DeliveryAdapter(Protocol):
         self,
         message: dict[str, Any],
         db: Database,
-    ) -> DeliveryResult:
-        ...
+    ) -> DeliveryResult: ...
 
-    def adapter_name(self) -> str:
-        ...
+    def adapter_name(self) -> str: ...
 
 
 class LocalInboxDeliveryAdapter:
@@ -111,8 +109,17 @@ class ConsoleNotificationAdapter:
                 " (id, workspace_id, title, body, source, priority, trace_id,"
                 " decision_id, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (mid, ws, title, body, "autonomy", priority, trace_id or None,
-                 decision_id, datetime.now(UTC).isoformat()),
+                (
+                    mid,
+                    ws,
+                    title,
+                    body,
+                    "autonomy",
+                    priority,
+                    trace_id or None,
+                    decision_id,
+                    datetime.now(UTC).isoformat(),
+                ),
             )
             db.connection.commit()
             now = datetime.now(UTC).isoformat()

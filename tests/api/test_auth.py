@@ -11,18 +11,28 @@ from cogito_agent.api.app import app
 def test_auth_disabled_no_key() -> None:
     with patch.dict(os.environ, {}, clear=True):
         client = TestClient(app)
-        resp = client.post("/chat", json={
-            "text": "hello", "session_id": "sess", "workspace_id": "ws",
-        })
+        resp = client.post(
+            "/chat",
+            json={
+                "text": "hello",
+                "session_id": "sess",
+                "workspace_id": "ws",
+            },
+        )
         assert resp.status_code in (200, 404)
 
 
 def test_auth_enabled_no_header() -> None:
     with patch.dict(os.environ, {"COGITO_API_KEY": "secret123"}, clear=True):
         client = TestClient(app)
-        resp = client.post("/chat", json={
-            "text": "hello", "session_id": "sess", "workspace_id": "ws",
-        })
+        resp = client.post(
+            "/chat",
+            json={
+                "text": "hello",
+                "session_id": "sess",
+                "workspace_id": "ws",
+            },
+        )
         assert resp.status_code == 401
         data = resp.json()
         assert data["error"]["code"] == "UNAUTHORIZED"

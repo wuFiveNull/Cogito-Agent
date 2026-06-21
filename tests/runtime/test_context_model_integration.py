@@ -1,26 +1,24 @@
 """Integration tests: Context Engine output reaches model messages,
 and capability tool schemas are passed correctly."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import pytest
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.capability.registry import ToolResult
-from cogito_agent.capability.schemas import manifest_to_tool_schema
 from cogito_agent.context import ContextEngine, ContextItem
 from cogito_agent.governance.policy import PolicyEngine, PolicyRule
-from cogito_agent.memory import CandidateExtractor
 from cogito_agent.models import ModelAdapter, ModelResponse, ToolIntent
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import (
     CapabilityManifest,
     CapabilityType,
     DecisionType,
     EventSource,
     EventType,
-    PolicyDecision,
     RiskLevel,
     RuntimeEvent,
     TurnState,
@@ -64,20 +62,30 @@ def test_context_items_appear_in_model_messages(db: Database) -> None:
     wid, sid = _setup(db)
     engine = ContextEngine()
     ctx_items = engine.build(
-        [], [], current_message="hello",
+        [],
+        [],
+        current_message="hello",
     )
-    ctx_items.append(ContextItem(
-        source_type="memory", source_id="mem-test",
-        text="User enjoys hiking", rank=1, token_estimate=10,
-        included=True, reason="retrieved",
-    ))
+    ctx_items.append(
+        ContextItem(
+            source_type="memory",
+            source_id="mem-test",
+            text="User enjoys hiking",
+            rank=1,
+            token_estimate=10,
+            included=True,
+            reason="retrieved",
+        )
+    )
 
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(content="I know you like hiking!")
 
     kernel = RuntimeKernel(db, model_adapter=adapter, context_engine=engine)
     result = kernel._build_model_messages(
-        _event(wid, sid), "hello", object(),
+        _event(wid, sid),
+        "hello",
+        object(),
         ctx=ctx_items,
     )
     contents = [str(m.get("content", "")) for m in result]
@@ -89,7 +97,8 @@ def test_tool_schemas_passed_to_model(db: Database) -> None:
     wid, sid = _setup(db)
     cap_reg = CapabilityRegistry()
     manifest = CapabilityManifest(
-        name="test.read", version="1.0.0",
+        name="test.read",
+        version="1.0.0",
         type=CapabilityType.tool,
         description="Read a test resource",
         input_schema={
@@ -101,7 +110,9 @@ def test_tool_schemas_passed_to_model(db: Database) -> None:
         permissions=[],
         risk_level=RiskLevel.low,
         allowed_contexts=["interactive"],
-        approval_required=False, audit_required=False, idempotent=True,
+        approval_required=False,
+        audit_required=False,
+        idempotent=True,
     )
     cap_reg.register(manifest.name, manifest, lambda **kw: ToolResult(status="ok", summary="done"))
 
@@ -109,12 +120,15 @@ def test_tool_schemas_passed_to_model(db: Database) -> None:
     adapter.chat.return_value = ModelResponse(content="Using tool")
 
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
     )
     schemas = kernel._get_tool_schemas()
-    assert len(schemas) == 1
-    assert schemas[0]["function"]["name"] == "test.read"
-    assert "path" in schemas[0]["function"]["parameters"]["properties"]
+    assert len(schemas) >= 1
+    read_schemas = [s for s in schemas if s["function"]["name"] == "test.read"]
+    assert len(read_schemas) == 1
+    assert "path" in read_schemas[0]["function"]["parameters"]["properties"]
 
 
 def test_tool_intent_dispatched_to_capability(db: Database) -> None:
@@ -124,13 +138,18 @@ def test_tool_intent_dispatched_to_capability(db: Database) -> None:
     cap_reg.register(
         "greeter",
         CapabilityManifest(
-            name="greeter", version="1.0.0",
-            type=CapabilityType.tool, description="",
+            name="greeter",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
             input_schema={"type": "object", "properties": {}, "required": []},
             output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="Hello from tool!"),
     )
@@ -139,15 +158,22 @@ def test_tool_intent_dispatched_to_capability(db: Database) -> None:
         content="",
         tool_intents=[ToolIntent(tool_call_id="c1", capability_name="greeter", arguments={})],
     )
-    policy = PolicyEngine(rules=[
-        PolicyRule("*", "call_model", "*", DecisionType.allow),
-        PolicyRule("*", "tool", "*", DecisionType.allow),
-    ])
+    policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "call_model", "*", DecisionType.allow),
+            PolicyRule("*", "tool", "*", DecisionType.allow),
+        ]
+    )
     from cogito_agent.runtime import TurnBudget
+
     budget = TurnBudget(max_model_calls=5, max_tool_calls=5)
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        policy_engine=policy, budget=budget, max_tool_rounds=1,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        policy_engine=policy,
+        budget=budget,
+        max_tool_rounds=1,
     )
     result = kernel.process(_event(wid, sid))
     assert result.state == TurnState.completed
@@ -159,12 +185,18 @@ def test_disabled_tool_not_exposed(db: Database) -> None:
     wid, sid = _setup(db)
     cap_reg = CapabilityRegistry()
     manifest = CapabilityManifest(
-        name="background_only", version="1.0.0",
-        type=CapabilityType.tool, description="",
-        input_schema={}, output_schema={},
-        permissions=[], risk_level=RiskLevel.low,
+        name="background_only",
+        version="1.0.0",
+        type=CapabilityType.tool,
+        description="",
+        input_schema={},
+        output_schema={},
+        permissions=[],
+        risk_level=RiskLevel.low,
         allowed_contexts=["background"],
-        approval_required=False, audit_required=False, idempotent=True,
+        approval_required=False,
+        audit_required=False,
+        idempotent=True,
     )
     cap_reg.register(manifest.name, manifest, lambda **kw: ToolResult(status="ok"))
 
@@ -172,7 +204,9 @@ def test_disabled_tool_not_exposed(db: Database) -> None:
     adapter.chat.return_value = ModelResponse(content="ok")
 
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
     )
     schemas = kernel._get_tool_schemas()
     tool_names = [s["function"]["name"] for s in schemas]
@@ -186,25 +220,35 @@ def test_policy_denied_tool_not_executed(db: Database) -> None:
     cap_reg.register(
         "forbidden",
         CapabilityManifest(
-            name="forbidden", version="1.0.0",
-            type=CapabilityType.tool, description="",
-            input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.medium,
+            name="forbidden",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.medium,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="executed"),
     )
-    policy = PolicyEngine(rules=[
-        PolicyRule("*", "call_model", "*", DecisionType.allow),
-    ])
+    policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "call_model", "*", DecisionType.allow),
+        ]
+    )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
         content="",
         tool_intents=[ToolIntent(tool_call_id="c1", capability_name="forbidden", arguments={})],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         policy_engine=policy,
     )
     result = kernel.process(_event(wid, sid))
@@ -218,22 +262,32 @@ def test_approval_required_creates_record_with_tool_call(db: Database) -> None:
     cap_reg.register(
         "sensitive",
         CapabilityManifest(
-            name="sensitive", version="1.0.0",
-            type=CapabilityType.tool, description="",
-            input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.high,
+            name="sensitive",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.high,
             allowed_contexts=["interactive"],
-            approval_required=True, audit_required=True, idempotent=False,
+            approval_required=True,
+            audit_required=True,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="done"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
         content="",
-        tool_intents=[ToolIntent(tool_call_id="c1", capability_name="sensitive", arguments={"key": "value"})],
+        tool_intents=[
+            ToolIntent(tool_call_id="c1", capability_name="sensitive", arguments={"key": "value"})
+        ],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
     )
     result = kernel.process(_event(wid, sid))
     assert result.state == TurnState.waiting_approval
@@ -255,26 +309,42 @@ def test_multiple_tool_calls_resolved_individually(db: Database) -> None:
         def invoke(**kw: object) -> ToolResult:
             results[name] = "done"
             return ToolResult(status="ok", summary=f"{name} executed")
+
         return invoke
 
     cap_reg.register(
         "tool_a",
         CapabilityManifest(
-            name="tool_a", version="1.0.0", type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            name="tool_a",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         make_tool("tool_a"),
     )
     cap_reg.register(
         "tool_b",
-        CapabilityManifest(name="tool_b", version="1.0.0", type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+        CapabilityManifest(
+            name="tool_b",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         make_tool("tool_b"),
     )
@@ -286,15 +356,22 @@ def test_multiple_tool_calls_resolved_individually(db: Database) -> None:
             ToolIntent(tool_call_id="c2", capability_name="tool_b", arguments={}),
         ],
     )
-    policy = PolicyEngine(rules=[
-        PolicyRule("*", "call_model", "*", DecisionType.allow),
-        PolicyRule("*", "tool", "*", DecisionType.allow),
-    ])
+    policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "call_model", "*", DecisionType.allow),
+            PolicyRule("*", "tool", "*", DecisionType.allow),
+        ]
+    )
     from cogito_agent.runtime import TurnBudget
+
     budget = TurnBudget(max_model_calls=5, max_tool_calls=5)
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        policy_engine=policy, budget=budget, max_tool_rounds=1,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        policy_engine=policy,
+        budget=budget,
+        max_tool_rounds=1,
     )
     result = kernel.process(_event(wid, sid))
     assert result.state == TurnState.completed
@@ -308,11 +385,18 @@ def test_max_tool_rounds_enforced(db: Database) -> None:
     cap_reg.register(
         "looper",
         CapabilityManifest(
-            name="looper", version="1.0.0", type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            name="looper",
+            version="1.0.0",
+            type=CapabilityType.tool,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=True,
+            approval_required=False,
+            audit_required=False,
+            idempotent=True,
         ),
         lambda **kw: ToolResult(status="ok", summary="loop"),
     )
@@ -322,20 +406,29 @@ def test_max_tool_rounds_enforced(db: Database) -> None:
         call_count[0] += 1
         return ModelResponse(
             content="",
-            tool_intents=[ToolIntent(tool_call_id=f"c{call_count[0]}", capability_name="looper", arguments={})],
+            tool_intents=[
+                ToolIntent(tool_call_id=f"c{call_count[0]}", capability_name="looper", arguments={})
+            ],
         )
 
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.side_effect = side_effect
-    policy = PolicyEngine(rules=[
-        PolicyRule("*", "call_model", "*", DecisionType.allow),
-        PolicyRule("*", "tool", "*", DecisionType.allow),
-    ])
+    policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "call_model", "*", DecisionType.allow),
+            PolicyRule("*", "tool", "*", DecisionType.allow),
+        ]
+    )
     from cogito_agent.runtime import TurnBudget
+
     budget = TurnBudget(max_model_calls=10, max_tool_calls=10)
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        policy_engine=policy, budget=budget, max_tool_rounds=2,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        policy_engine=policy,
+        budget=budget,
+        max_tool_rounds=2,
     )
     result = kernel.process(_event(wid, sid))
     assert result.state == TurnState.completed

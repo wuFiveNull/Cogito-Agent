@@ -36,20 +36,26 @@ def tmp_root() -> Path:
 
 
 class TestWorkspaceRootRegistration:
-    def test_register_root(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_register_root(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root), "Test Root")
         assert root["workspace_id"] == ws
         assert root["label"] == "Test Root"
         assert root["status"] == "active"
 
-    def test_list_roots(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_list_roots(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         registry.register_root(ws, str(tmp_root), "Root 1")
         r2 = Path(tempfile.mkdtemp())
         registry.register_root(ws, str(r2), "Root 2")
         roots = registry.list_roots(ws)
         assert len(roots) == 2
 
-    def test_delete_root(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_delete_root(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root), "Temp Root")
         rid = str(root["id"])
         assert registry.delete_root(rid) is True
@@ -57,19 +63,25 @@ class TestWorkspaceRootRegistration:
 
 
 class TestPathTraversal:
-    def test_path_traversal_deny(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_path_traversal_deny(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         safe = registry.resolve_safe_path(rid, "../etc/passwd")
         assert safe is None
 
-    def test_absolute_path_deny(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_absolute_path_deny(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         safe = registry.resolve_safe_path(rid, "/etc/passwd")
         assert safe is None
 
-    def test_normal_path_resolves(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_normal_path_resolves(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         (tmp_root / "test.txt").write_text("hello", encoding="utf-8")
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
@@ -79,7 +91,9 @@ class TestPathTraversal:
 
 
 class TestFileRegistration:
-    def test_register_file(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_register_file(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         (tmp_root / "hello.md").write_text("# Hello", encoding="utf-8")
@@ -87,7 +101,9 @@ class TestFileRegistration:
         assert f["file_name"] == "hello.md"
         assert f["status"] == "active"
 
-    def test_get_file_by_path(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_get_file_by_path(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         (tmp_root / "test.py").write_text("x = 1", encoding="utf-8")
@@ -96,7 +112,9 @@ class TestFileRegistration:
         assert f is not None
         assert f["file_name"] == "test.py"
 
-    def test_remove_file(self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path) -> None:
+    def test_remove_file(
+        self, db: Database, ws: str, registry: WorkspaceFileRegistry, tmp_root: Path
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         (tmp_root / "del.txt").write_text("delete me", encoding="utf-8")
@@ -123,7 +141,9 @@ class TestIgnorePatterns:
 
 
 class TestWorkspaceIsolation:
-    def test_isolation_between_workspaces(self, db: Database, registry: WorkspaceFileRegistry) -> None:
+    def test_isolation_between_workspaces(
+        self, db: Database, registry: WorkspaceFileRegistry
+    ) -> None:
         ws_repo = WorkspaceRepository(db)
         ws1 = str(ws_repo.create("ws1", "ws1")["id"])
         ws2 = str(ws_repo.create("ws2", "ws2")["id"])
@@ -140,3 +160,24 @@ class TestWorkspaceIsolation:
             assert len(files_ws2) == 1
             assert files_ws1[0]["file_name"] == "file1.txt"
             assert files_ws2[0]["file_name"] == "file2.txt"
+
+    def test_id_mutations_require_matching_workspace(
+        self,
+        db: Database,
+        registry: WorkspaceFileRegistry,
+        tmp_root: Path,
+    ) -> None:
+        ws_repo = WorkspaceRepository(db)
+        ws1 = str(ws_repo.create("ws-scope-1", "ws-scope-1")["id"])
+        ws2 = str(ws_repo.create("ws-scope-2", "ws-scope-2")["id"])
+        root = registry.register_root(ws1, str(tmp_root))
+        record = registry.register_file(
+            ws1,
+            str(root["id"]),
+            "private.txt",
+            "private.txt",
+        )
+        file_id = str(record["id"])
+        assert registry.get_file_by_id(file_id, ws2) is None
+        assert registry.remove_file(file_id, ws2) is False
+        assert registry.get_file_by_id(file_id, ws1) is not None

@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Union
+from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
-
 
 # ── Roles ─────────────────────────────────────────────────────────────────
 
@@ -32,12 +24,22 @@ class ContentPartType(StrEnum):
     file = "file"
 
 
-_ALLOWED_IMAGE_MIME_TYPES: frozenset[str] = frozenset({
-    "image/png", "image/jpeg", "image/webp", "image/gif",
-})
-_ALLOWED_URI_SCHEMES: frozenset[str] = frozenset({
-    "data", "file", "http", "https",
-})
+_ALLOWED_IMAGE_MIME_TYPES: frozenset[str] = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+    }
+)
+_ALLOWED_URI_SCHEMES: frozenset[str] = frozenset(
+    {
+        "data",
+        "file",
+        "http",
+        "https",
+    }
+)
 
 
 class TextPart(BaseModel):
@@ -89,7 +91,7 @@ class FilePart(BaseModel):
     sha256: str | None = None
 
 
-ContentPart = Union[TextPart, ImagePart, FilePart]
+ContentPart = TextPart | ImagePart | FilePart
 
 
 def normalize_content(content: str | list[dict[str, Any]] | list[ContentPart]) -> list[ContentPart]:
@@ -184,11 +186,7 @@ class ChatMessage(BaseModel):
     @staticmethod
     def from_legacy_dict(d: dict[str, object]) -> ChatMessage:
         role_raw = d.get("role", "user")
-        role = (
-            MessageRole(role_raw)
-            if isinstance(role_raw, str)
-            else MessageRole.user
-        )
+        role = MessageRole(role_raw) if isinstance(role_raw, str) else MessageRole.user
         content_raw = d.get("content", "")
         tool_call_id = d.get("tool_call_id")
         name = d.get("name")

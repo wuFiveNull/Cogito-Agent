@@ -6,11 +6,10 @@ from typing import Any
 
 from cogito_agent.models.messages import ContentPart, TextPart
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
-from cogito_agent.storage import Database
-from cogito_agent.storage.repositories import MessageRepository, SessionRepository
 
 from .drift import DriftRuntime
 from .kernel import TurnResult
+from .ports import SubagentRuntimeServicesProvider
 
 
 class SubagentProfile:
@@ -106,16 +105,12 @@ class SubagentSession:
 class SubagentManager:
     def __init__(
         self,
-        db: Database,
+        services: SubagentRuntimeServicesProvider,
         drift_runtime: DriftRuntime | None = None,
         kernel_factory: Any = None,
     ) -> None:
-        self._db = db
-        self._drift = drift_runtime or DriftRuntime(
-            db, kernel_factory=kernel_factory
-        )
-        self._sess_repo = SessionRepository(db)
-        self._msg_repo = MessageRepository(db)
+        self._persistence = services.create_subagent_persistence()
+        self._drift = drift_runtime or DriftRuntime(services, kernel_factory=kernel_factory)
         self._subagents: dict[str, SubagentSession] = {}
 
     def fork(
@@ -138,11 +133,15 @@ class SubagentManager:
             profile=profile,
         )
 
-        self._sess_repo.create(sid, workspace_id, f"sub:{name}" if name else "subagent")
+        self._persistence.create_session(
+            sid,
+            workspace_id,
+            f"sub:{name}" if name else "subagent",
+        )
 
         if instruction:
-            self._msg_repo.create(
-                mid=str(uuid.uuid4()),
+            self._persistence.create_message(
+                message_id=str(uuid.uuid4()),
                 workspace_id=workspace_id,
                 session_id=sid,
                 role="system",
@@ -150,8 +149,8 @@ class SubagentManager:
             )
 
         if initial_message:
-            self._msg_repo.create(
-                mid=str(uuid.uuid4()),
+            self._persistence.create_message(
+                message_id=str(uuid.uuid4()),
                 workspace_id=workspace_id,
                 session_id=sid,
                 role="user",
@@ -162,8 +161,8 @@ class SubagentManager:
             text_parts = [p for p in content if isinstance(p, TextPart)]
             if text_parts:
                 combined = "\n".join(p.text for p in text_parts)
-                self._msg_repo.create(
-                    mid=str(uuid.uuid4()),
+                self._persistence.create_message(
+                    message_id=str(uuid.uuid4()),
                     workspace_id=workspace_id,
                     session_id=sid,
                     role="user",
@@ -207,8 +206,8 @@ class SubagentManager:
         sub.subagent_result = SubagentResult(
             status=sub.status,
             summary=result.output if result else "",
-            trace_id=result.trace_id if result else "",
-            error=result.error if result else "",
+            trace_id=(result.trace_id or "") if result else "",
+            error=(result.error or "") if result else "",
             confidence=0.5,
         )
 
@@ -226,14 +225,12 @@ class SubagentManager:
 
         result_text = sub.result.output or ""
         if result_text:
-            self._msg_repo.create(
-                mid=str(uuid.uuid4()),
+            self._persistence.create_message(
+                message_id=str(uuid.uuid4()),
                 workspace_id=sub.workspace_id,
                 session_id=sub.parent_session_id,
                 role="assistant",
-                content=(
-                    f"[Subagent: {sub.name or sub.id}]\n{result_text}"
-                ),
+                content=(f"[Subagent: {sub.name or sub.id}]\n{result_text}"),
             )
 
         sub.status = "merged"
@@ -249,7 +246,4 @@ class SubagentManager:
         return self._subagents.get(subagent_id)
 
     def list_by_parent(self, parent_session_id: str) -> list[SubagentSession]:
-        return [
-            s for s in self._subagents.values()
-            if s.parent_session_id == parent_session_id
-        ]
+        return [s for s in self._subagents.values() if s.parent_session_id == parent_session_id]

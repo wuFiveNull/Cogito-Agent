@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+
 from cogito_agent.api.app import app
 
 client = TestClient(app)

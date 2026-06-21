@@ -60,8 +60,9 @@ class TestMemoryDetail:
 
     def test_memory_detail_returns_200_for_valid(self) -> None:
         import uuid
+
         from cogito_agent.api.app import get_db
-        from cogito_agent.storage.repositories import WorkspaceRepository, MemoryRepository
+        from cogito_agent.storage.repositories import MemoryRepository, WorkspaceRepository
 
         db = get_db()
         ws = WorkspaceRepository(db).get_by_id("default")

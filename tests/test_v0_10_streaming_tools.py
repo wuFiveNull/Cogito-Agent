@@ -4,18 +4,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.capability.registry import ToolResult
-from cogito_agent.shared import CapabilityManifest, CapabilityType, RiskLevel
 from cogito_agent.models import ModelAdapter, ModelResponse
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import (
+    CapabilityManifest,
+    CapabilityType,
     EventSource,
     EventType,
+    RiskLevel,
     RuntimeEvent,
-    StreamEvent,
     StreamEventType,
-    TurnState,
 )
 from cogito_agent.storage import Database
 
@@ -24,6 +24,7 @@ from cogito_agent.storage import Database
 def db() -> Database:
     import os
     import tempfile
+
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     _db = Database(path=path)
@@ -37,8 +38,7 @@ def db() -> Database:
         pass
 
 
-def _ensure_ws_and_session(db: Database, ws_id: str = "default",
-                           sess_id: str = "s1") -> None:
+def _ensure_ws_and_session(db: Database, ws_id: str = "default", sess_id: str = "s1") -> None:
     cur = db.connection.execute("SELECT id FROM workspaces WHERE id = ?", (ws_id,))
     if cur.fetchone() is None:
         db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, ws_id))
@@ -51,8 +51,9 @@ def _ensure_ws_and_session(db: Database, ws_id: str = "default",
     db.connection.commit()
 
 
-def _make_event(ws_id: str = "default", session_id: str = "s1",
-                text: str = "hello") -> RuntimeEvent:
+def _make_event(
+    ws_id: str = "default", session_id: str = "s1", text: str = "hello"
+) -> RuntimeEvent:
     return RuntimeEvent(
         workspace_id=ws_id,
         session_id=session_id,
@@ -83,21 +84,30 @@ def test_stream_with_tools_dispatched(db: Database) -> None:
     cap_reg.register(
         "greet",
         CapabilityManifest(
-            name="greet", version="1.0.0",
+            name="greet",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive", "background"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="Hello!"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "greet", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "greet", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=1,
     )
     events = list(kernel.process_stream(_make_event()))
@@ -113,21 +123,30 @@ def test_stream_tool_approval_required(db: Database) -> None:
     cap_reg.register(
         "sensitive_tool",
         CapabilityManifest(
-            name="sensitive_tool", version="1.0.0",
+            name="sensitive_tool",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.medium,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.medium,
             allowed_contexts=["interactive"],
-            approval_required=True, audit_required=True, idempotent=False,
+            approval_required=True,
+            audit_required=True,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="done"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "sensitive_tool", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "sensitive_tool", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=1,
     )
     events = list(kernel.process_stream(_make_event()))
@@ -137,13 +156,19 @@ def test_stream_tool_approval_required(db: Database) -> None:
 
 def test_stream_tool_policy_deny(db: Database) -> None:
     _ensure_ws_and_session(db)
-    from cogito_agent.governance.policy import PolicyEngine, PolicyRule, DecisionType, PolicyRequest
+    from cogito_agent.governance.policy import DecisionType, PolicyEngine, PolicyRule
+
     deny_rule = PolicyRule(
-        actor="*", operation="call_tool", context="*",
-        decision=DecisionType.deny, capability="write_file",
+        actor="*",
+        operation="call_tool",
+        context="*",
+        decision=DecisionType.deny,
+        capability="write_file",
     )
     allow_call = PolicyRule(
-        actor="*", operation="call_model", context="*",
+        actor="*",
+        operation="call_model",
+        context="*",
         decision=DecisionType.allow,
     )
     policy = PolicyEngine(rules=[deny_rule, allow_call])
@@ -151,12 +176,18 @@ def test_stream_tool_policy_deny(db: Database) -> None:
     cap_reg.register(
         "write_file",
         CapabilityManifest(
-            name="write_file", version="1.0.0",
+            name="write_file",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.medium,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.medium,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=True, idempotent=False,
+            approval_required=False,
+            audit_required=True,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="written"),
     )
@@ -168,11 +199,15 @@ def test_stream_tool_policy_deny(db: Database) -> None:
         if call_count[0] == 1:
             return ModelResponse(content="", tool_intents=[{"name": "write_file", "arguments": {}}])
         return ModelResponse(content="done")
+
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.side_effect = _side_effect
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        policy_engine=policy, max_tool_rounds=1,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        policy_engine=policy,
+        max_tool_rounds=1,
     )
     events = list(kernel.process_stream(_make_event()))
     types = [e.type for e in events]
@@ -186,21 +221,30 @@ def test_stream_tool_redaction(db: Database) -> None:
     cap_reg.register(
         "reader",
         CapabilityManifest(
-            name="reader", version="1.0.0",
+            name="reader",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="sk-abc123-secret-key"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "reader", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "reader", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=1,
     )
     events = list(kernel.process_stream(_make_event()))
@@ -214,27 +258,38 @@ def test_stream_tool_redaction(db: Database) -> None:
 def test_stream_tool_budget_exceeded(db: Database) -> None:
     _ensure_ws_and_session(db)
     from cogito_agent.runtime.budget import TurnBudget
+
     budget = TurnBudget(max_tool_calls=0)  # No tool calls allowed
     cap_reg = CapabilityRegistry()
     cap_reg.register(
         "expensive",
         CapabilityManifest(
-            name="expensive", version="1.0.0",
+            name="expensive",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="done"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "expensive", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "expensive", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        budget=budget, max_tool_rounds=1,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        budget=budget,
+        max_tool_rounds=1,
     )
     events = list(kernel.process_stream(_make_event()))
     types = [e.type for e in events]
@@ -257,7 +312,9 @@ def test_stream_error_emitted_on_exception(db: Database) -> None:
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.side_effect = RuntimeError("network error")
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, max_tool_rounds=1,
+        db,
+        model_adapter=adapter,
+        max_tool_rounds=1,
     )
     events = list(kernel.process_stream(_make_event()))
     types = [e.type for e in events]

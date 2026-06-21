@@ -89,6 +89,7 @@ def run_memory_consolidation(
     tracer.end_span(span)
 
     from cogito_agent.workspace import ArtifactService
+
     art_svc = ArtifactService(db)
     proposal_json = _format_proposals_json(proposals)
     artifact = art_svc.create_artifact(
@@ -144,18 +145,21 @@ def _find_duplicates(memories: list[dict[str, object]]) -> list[dict[str, object
         if len(group) < 2:
             continue
         ids = [str(m["id"]) for m in group]
-        proposals.append({
-            "action": PROPOSAL_ACTION_MERGE,
-            "reason": f"Duplicate memories ({len(group)} copies of same text)",
-            "confidence": 0.9,
-            "source_memory_ids": ids,
-        })
+        proposals.append(
+            {
+                "action": PROPOSAL_ACTION_MERGE,
+                "reason": f"Duplicate memories ({len(group)} copies of same text)",
+                "confidence": 0.9,
+                "source_memory_ids": ids,
+            }
+        )
     return proposals
 
 
 def _find_stale(memories: list[dict[str, object]]) -> list[dict[str, object]]:
     proposals: list[dict[str, object]] = []
     import datetime as dt
+
     now = dt.datetime.now(dt.UTC)
     for m in memories:
         created_str = str(m.get("created_at", ""))
@@ -170,12 +174,14 @@ def _find_stale(memories: list[dict[str, object]]) -> list[dict[str, object]]:
             continue
         if age_days >= 30 and m.get("status") != "stale":
             confidence = min(0.9, 0.5 + age_days / 365.0)
-            proposals.append({
-                "action": PROPOSAL_ACTION_ARCHIVE,
-                "reason": f"Memory is {age_days} days old without recent updates",
-                "confidence": round(confidence, 2),
-                "source_memory_ids": [str(m["id"])],
-            })
+            proposals.append(
+                {
+                    "action": PROPOSAL_ACTION_ARCHIVE,
+                    "reason": f"Memory is {age_days} days old without recent updates",
+                    "confidence": round(confidence, 2),
+                    "source_memory_ids": [str(m["id"])],
+                }
+            )
     return proposals
 
 
@@ -183,18 +189,20 @@ def _find_conflicting(memories: list[dict[str, object]]) -> list[dict[str, objec
     proposals: list[dict[str, object]] = []
     active = [m for m in memories if m.get("status") in ("active", None)]
     for i, a in enumerate(active):
-        for b in active[i + 1:]:
+        for b in active[i + 1 :]:
             text_a = str(a.get("text", "")).lower()
             text_b = str(b.get("text", "")).lower()
             if not text_a or not text_b:
                 continue
             if _texts_conflict(text_a, text_b):
-                proposals.append({
-                    "action": PROPOSAL_ACTION_REVIEW,
-                    "reason": "Conflicting information detected between two memories",
-                    "confidence": 0.6,
-                    "source_memory_ids": [str(a["id"]), str(b["id"])],
-                })
+                proposals.append(
+                    {
+                        "action": PROPOSAL_ACTION_REVIEW,
+                        "reason": "Conflicting information detected between two memories",
+                        "confidence": 0.6,
+                        "source_memory_ids": [str(a["id"]), str(b["id"])],
+                    }
+                )
     return proposals
 
 
@@ -217,23 +225,27 @@ def _find_low_confidence(memories: list[dict[str, object]]) -> list[dict[str, ob
     for m in memories:
         confidence = float(str(m.get("confidence", 0.5)))
         if confidence < 0.3:
-            proposals.append({
-                "action": PROPOSAL_ACTION_FLAG,
-                "reason": f"Low confidence memory ({confidence:.2f})",
-                "confidence": 1.0 - confidence,
-                "source_memory_ids": [str(m["id"])],
-            })
+            proposals.append(
+                {
+                    "action": PROPOSAL_ACTION_FLAG,
+                    "reason": f"Low confidence memory ({confidence:.2f})",
+                    "confidence": 1.0 - confidence,
+                    "source_memory_ids": [str(m["id"])],
+                }
+            )
     return proposals
 
 
 def _format_proposals_json(proposals: list[dict[str, object]]) -> str:
     import json
+
     data = {"proposals": proposals, "generated_at": datetime.now(UTC).isoformat()}
     return json.dumps(data, indent=2)
 
 
 def _build_summary(proposals: list[dict[str, object]]) -> str:
     from collections import Counter
+
     action_counts: Counter[str] = Counter()
     for p in proposals:
         action_counts[str(p.get("action", ""))] += 1
@@ -252,6 +264,7 @@ def _inbox_notify(
 ) -> None:
     try:
         import uuid
+
         nid = str(uuid.uuid4())
         title = f"Memory Consolidation: {proposal_count} proposals"
         body = (

@@ -5,7 +5,6 @@ import heapq
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any
 
 from cogito_agent.embedding.interface import EmbeddingProvider
 from cogito_agent.storage import Database
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 _EMBEDDING_VERSION = "2"
 
 
-class DenseHealthState(str, enum.Enum):
+class DenseHealthState(enum.StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     DISABLED = "disabled"
@@ -41,6 +40,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 def _unpack_embedding(data: bytes) -> list[float]:
     import struct
+
     return list(struct.unpack(f"{len(data) // 4}f", data))
 
 
@@ -65,6 +65,7 @@ class DenseMemoryRetriever:
         include_archived: bool = False,
     ) -> DenseRetrievalResult:
         import time
+
         t0 = time.time()
         result = DenseRetrievalResult()
 
@@ -106,14 +107,20 @@ class DenseMemoryRetriever:
         for i, (mid, doc_vec) in enumerate(candidates):
             sim = _cosine_similarity(query_vec, doc_vec)
             sim = max(0.0, sim)
-            scored.append((-sim, i, {
-                "id": mid,
-                "memory_id": mid,
-                "dense_score": sim,
-                "dense_rank": 0,
-                "_model_name": self._provider.model_name,
-                "_embedding_version": _EMBEDDING_VERSION,
-            }))
+            scored.append(
+                (
+                    -sim,
+                    i,
+                    {
+                        "id": mid,
+                        "memory_id": mid,
+                        "dense_score": sim,
+                        "dense_rank": 0,
+                        "_model_name": self._provider.model_name,
+                        "_embedding_version": _EMBEDDING_VERSION,
+                    },
+                )
+            )
 
         top_n = heapq.nsmallest(limit, scored)
         top_n.sort(key=lambda x: x[0])
@@ -147,6 +154,7 @@ class DenseMemoryRetriever:
             EmbeddingResponseError,
             EmbeddingTimeoutError,
         )
+
         if isinstance(e, EmbeddingAuthenticationError):
             return "embedding_auth_failed"
         if isinstance(e, EmbeddingRateLimitError):
@@ -177,7 +185,9 @@ class DenseMemoryRetriever:
             return None
 
     def _load_workspace_vectors(
-        self, workspace_id: str, include_archived: bool,
+        self,
+        workspace_id: str,
+        include_archived: bool,
     ) -> list[tuple[str, list[float]]]:
         if not self._provider:
             return []
@@ -235,8 +245,12 @@ class DenseMemoryRetriever:
                 " AND me.provider_name = ? AND me.model_name = ?"
                 " AND me.embedding_version = ?"
                 " LIMIT 1",
-                (workspace_id, self._provider.provider_name,
-                 self._provider.model_name, _EMBEDDING_VERSION),
+                (
+                    workspace_id,
+                    self._provider.provider_name,
+                    self._provider.model_name,
+                    _EMBEDDING_VERSION,
+                ),
             )
             return cur.fetchone() is not None
         except Exception:

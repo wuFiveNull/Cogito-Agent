@@ -1,4 +1,3 @@
-
 from cogito_agent.capability import (
     CapabilityRegistry,
     _validate_json_schema,
@@ -29,6 +28,7 @@ def make_manifest(input_schema: dict[str, object]) -> CapabilityManifest:
 
 def _dummy_invoke(**kwargs: object) -> object:
     from cogito_agent.capability import ToolResult
+
     return ToolResult(status="ok", summary="dummy")
 
 
@@ -65,11 +65,13 @@ def test_invoke_tool() -> None:
 
 def test_invoke_validates_missing_required() -> None:
     registry = CapabilityRegistry()
-    manifest = make_manifest({
-        "type": "object",
-        "properties": {"name": {"type": "string"}},
-        "required": ["name"],
-    })
+    manifest = make_manifest(
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+    )
     registry.register("test.tool", manifest, _dummy_invoke)
     result = registry.invoke("test.tool")
     assert result is not None
@@ -79,11 +81,13 @@ def test_invoke_validates_missing_required() -> None:
 
 def test_invoke_validates_type_mismatch() -> None:
     registry = CapabilityRegistry()
-    manifest = make_manifest({
-        "type": "object",
-        "properties": {"age": {"type": "integer"}},
-        "required": ["age"],
-    })
+    manifest = make_manifest(
+        {
+            "type": "object",
+            "properties": {"age": {"type": "integer"}},
+            "required": ["age"],
+        }
+    )
     registry.register("test.tool", manifest, _dummy_invoke)
     result = registry.invoke("test.tool", age="not_an_int")
     assert result is not None
@@ -93,11 +97,13 @@ def test_invoke_validates_type_mismatch() -> None:
 
 def test_invoke_validates_enum() -> None:
     registry = CapabilityRegistry()
-    manifest = make_manifest({
-        "type": "object",
-        "properties": {"mode": {"type": "string", "enum": ["fast", "safe"]}},
-        "required": ["mode"],
-    })
+    manifest = make_manifest(
+        {
+            "type": "object",
+            "properties": {"mode": {"type": "string", "enum": ["fast", "safe"]}},
+            "required": ["mode"],
+        }
+    )
     registry.register("test.tool", manifest, _dummy_invoke)
     result = registry.invoke("test.tool", mode="invalid")
     assert result is not None
@@ -107,11 +113,13 @@ def test_invoke_validates_enum() -> None:
 
 def test_invoke_passes_valid_input() -> None:
     registry = CapabilityRegistry()
-    manifest = make_manifest({
-        "type": "object",
-        "properties": {"value": {"type": "string"}},
-        "required": ["value"],
-    })
+    manifest = make_manifest(
+        {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"],
+        }
+    )
     registry.register("test.tool", manifest, _dummy_invoke)
     result = registry.invoke("test.tool", value="hello")
     assert result is not None
@@ -120,8 +128,10 @@ def test_invoke_passes_valid_input() -> None:
 
 def test_tool_result_has_new_fields() -> None:
     from cogito_agent.capability import ToolResult
+
     result = ToolResult(
-        status="ok", summary="test",
+        status="ok",
+        summary="test",
         artifacts=[{"path": "/tmp/f", "type": "file"}],
         redactions=["token-abc"],
         lineage=[{"source": "/tmp/f", "tool": "test"}],
@@ -156,3 +166,11 @@ def test_validate_json_schema_types() -> None:
     assert _validate_json_schema(schema, {"i": "bad"}) is not None
     assert _validate_json_schema(schema, {"b": "bad"}) is not None
     assert _validate_json_schema(schema, {"a": [1]}) is not None
+
+
+def test_registry_unregister() -> None:
+    registry = CapabilityRegistry()
+    registry.register("test.tool", make_manifest({}), _dummy_invoke)
+    assert registry.unregister("test.tool") is True
+    assert registry.get_manifest("test.tool") is None
+    assert registry.unregister("test.tool") is False

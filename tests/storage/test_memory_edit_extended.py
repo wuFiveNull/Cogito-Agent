@@ -38,7 +38,5 @@ def test_update_text_same_content_no_version(db: Database) -> None:
     _setup(db)
     repo = MemoryEditRepository(db)
     repo.update_text("mem-1", "ws-1", "original text")
-    cur = db.connection.execute(
-        "SELECT COUNT(*) as cnt FROM memories WHERE status = 'stale'"
-    )
+    cur = db.connection.execute("SELECT COUNT(*) as cnt FROM memories WHERE status = 'stale'")
     assert cur.fetchone()["cnt"] == 0

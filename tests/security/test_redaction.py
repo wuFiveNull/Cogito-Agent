@@ -59,7 +59,7 @@ def test_redact_session_token() -> None:
 
 def test_redact_auth_token_value() -> None:
     r = RedactionHelper()
-    result = r.redact('auth-token: some-secret-value-here')
+    result = r.redact("auth-token: some-secret-value-here")
     assert "[REDACTED]" in result
     assert "some-secret-value-here" not in result
 

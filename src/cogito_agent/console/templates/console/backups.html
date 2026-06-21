@@ -1,0 +1,37 @@
+{% extends "console/base.html" %}
+{% block content %}
+{% if error %}<div class="error-banner" role="alert">{{ error | e }}</div>{% endif %}
+{% if not available %}
+<div class="empty-state">Backup operations are disabled because this Console uses an in-memory database. Configure a file-backed COGITO_DB_PATH and restart.</div>
+{% else %}
+<p>Console backups exclude secrets. Restore always validates archive paths, checksums, and SQLite integrity, and creates a pre-restore safety copy.</p>
+<form method="post" action="/console/backups/create" class="filter-bar">
+  <button class="btn-action btn-accept" type="submit">Create backup without secrets</button>
+</form>
+
+<table class="info-table">
+  <tr><th>Backup</th><th>Size</th><th>Modified</th><th>Actions</th></tr>
+  {% for backup in backups %}
+  <tr>
+    <td><code>{{ backup.name | e }}</code></td><td>{{ backup.size_bytes }}</td><td>{{ backup.modified_at | e }}</td>
+    <td>
+      <form method="post" action="/console/backups/preflight">
+        <input type="hidden" name="name" value="{{ backup.name | e }}">
+        <button class="btn-action btn-view" type="submit">Dry-run restore</button>
+      </form>
+      <form method="post" action="/console/backups/restore">
+        <input type="hidden" name="name" value="{{ backup.name | e }}">
+        <input name="confirmation" placeholder="Type exact filename" aria-label="Exact backup filename confirmation">
+        <button class="btn-action btn-reject" type="submit">Restore</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="4" class="empty-state">No backup archives found.</td></tr>{% endfor %}
+</table>
+{% endif %}
+
+{% if report %}
+<h3>Operation report</h3>
+<pre class="trc-raw">{{ report | tojson(indent=2) }}</pre>
+{% endif %}
+{% endblock %}

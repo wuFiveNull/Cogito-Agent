@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.models import (
     ModelCandidate,
     ModelResponse,
     ModelRouter,
     RoutedModelAdapter,
 )
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent, TurnState
 from cogito_agent.storage import Database, SessionRepository, WorkspaceRepository
 
@@ -19,15 +19,11 @@ class _Adapter:
     def __init__(self, response: ModelResponse) -> None:
         self._response = response
 
-    def chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> ModelResponse:
+    def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
         del messages, kwargs
         return self._response
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]:
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]:
         del messages, kwargs
         if self._response.error:
             raise RuntimeError(self._response.error)
@@ -69,9 +65,7 @@ def test_runtime_persists_route_decision_fallback_and_redacts_error(
         enabled=False,
     )
     adapters = {
-        primary.id: _Adapter(
-            ModelResponse(error="Bearer sk-route-secret failed")
-        ),
+        primary.id: _Adapter(ModelResponse(error="Bearer sk-route-secret failed")),
         fallback.id: _Adapter(ModelResponse(content="fallback answer")),
     }
     routed = RoutedModelAdapter(
@@ -97,8 +91,7 @@ def test_runtime_persists_route_decision_fallback_and_redacts_error(
     assert "disabled:disabled-model" in combined_details
     assert "sk-route-secret" not in combined_details
     route_spans = db.connection.execute(
-        "SELECT name, status FROM spans "
-        "WHERE trace_id = ? AND name LIKE 'model.route%'",
+        "SELECT name, status FROM spans WHERE trace_id = ? AND name LIKE 'model.route%'",
         (result.trace_id,),
     ).fetchall()
     assert [(row["name"], row["status"]) for row in route_spans] == [

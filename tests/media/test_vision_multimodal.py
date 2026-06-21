@@ -14,38 +14,29 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import os
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 from PIL import Image
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.capability import CapabilityRegistry
-from cogito_agent.capability.tools import INSPECT_IMAGE_MANIFEST
-from cogito_agent.media import MediaProcessor, VisionObservation
+from cogito_agent.media import MediaProcessor
 from cogito_agent.media.processor import (
-    MEDIA_PREPROCESSING_VERSION,
-    normalize_prompt,
     ImageTooLargeError,
     UnsupportedImageTypeError,
+    normalize_prompt,
 )
 from cogito_agent.media.types import (
-    Attachment,
-    create_attachment_id,
     create_cache_key,
 )
 from cogito_agent.media.vision_service import (
-    AttachmentAccessDeniedError,
-    AttachmentNotFoundError,
     VisionCapabilityUnavailableError,
     VisionObservationService,
 )
 from cogito_agent.models import (
-    ModelAdapter,
     ModelCandidate,
     ModelResponse,
     ModelRouter,
@@ -53,15 +44,9 @@ from cogito_agent.models import (
     ToolIntent,
 )
 from cogito_agent.models.messages import (
-    ChatMessage,
-    ContentPart,
     ImagePart,
-    MessageRole,
     TextPart,
-    has_image,
-    normalize_content,
 )
-from cogito_agent.runtime import RuntimeKernel, TurnResult
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
@@ -69,8 +54,8 @@ from cogito_agent.storage.repositories import (
     VisionObservationRepository,
 )
 
-
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
 
 def _create_test_image(
     format: str = "PNG",
@@ -297,16 +282,22 @@ class TestAttachmentUpload:
         _ensure_workspace(db, "ws1")
         _ensure_workspace(db, "ws2")
         att_repo.create(
-            att_id="att_001", workspace_id="ws1",
-            content_hash="abc", media_type="image/png",
+            att_id="att_001",
+            workspace_id="ws1",
+            content_hash="abc",
+            media_type="image/png",
             original_filename="a.png",
-            storage_path="/tmp/a.png", size_bytes=100,
+            storage_path="/tmp/a.png",
+            size_bytes=100,
         )
         att_repo.create(
-            att_id="att_002", workspace_id="ws2",
-            content_hash="def", media_type="image/png",
+            att_id="att_002",
+            workspace_id="ws2",
+            content_hash="def",
+            media_type="image/png",
             original_filename="b.png",
-            storage_path="/tmp/b.png", size_bytes=100,
+            storage_path="/tmp/b.png",
+            size_bytes=100,
         )
         assert att_repo.get_by_id("att_001", "ws1") is not None
         assert att_repo.get_by_id("att_001", "ws2") is None
@@ -334,19 +325,25 @@ class TestVisionCache:
 
         png_data = _create_test_png()
         att = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
         # First call
         result1 = vision_service.inspect_image(
-            att.id, "Describe this image", "ws1",
+            att.id,
+            "Describe this image",
+            "ws1",
         )
         assert fake_adapter.call_count == 1
 
         # Second call — same prompt → should be cache hit
         result2 = vision_service.inspect_image(
-            att.id, "Describe this image", "ws1",
+            att.id,
+            "Describe this image",
+            "ws1",
         )
         assert fake_adapter.call_count == 1  # NOT incremented
         assert result1 == result2
@@ -361,7 +358,9 @@ class TestVisionCache:
 
         png_data = _create_test_png()
         att = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -381,11 +380,15 @@ class TestVisionCache:
 
         tmp = str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test")
         att1 = vision_service.store_attachment(
-            _create_test_png(size=(50, 50)), workspace_id="ws1", filename="a.png",
+            _create_test_png(size=(50, 50)),
+            workspace_id="ws1",
+            filename="a.png",
             storage_dir=tmp,
         )
         att2 = vision_service.store_attachment(
-            _create_test_png(size=(100, 100)), workspace_id="ws1", filename="b.png",
+            _create_test_png(size=(100, 100)),
+            workspace_id="ws1",
+            filename="b.png",
             storage_dir=tmp,
         )
 
@@ -405,7 +408,9 @@ class TestVisionCache:
 
         png_data = _create_test_png()
         att = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -425,7 +430,9 @@ class TestVisionCache:
 
         png_data = _create_test_png()
         att = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -447,10 +454,16 @@ class TestVisionCache:
         tmp = str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test")
         png_data = _create_test_png()
         att1 = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="a.png", storage_dir=tmp,
+            png_data,
+            workspace_id="ws1",
+            filename="a.png",
+            storage_dir=tmp,
         )
         att2 = vision_service.store_attachment(
-            png_data, workspace_id="ws2", filename="b.png", storage_dir=tmp,
+            png_data,
+            workspace_id="ws2",
+            filename="b.png",
+            storage_dir=tmp,
         )
 
         vision_service.inspect_image(att1.id, "Describe", "ws1")
@@ -471,7 +484,10 @@ class TestVisionCache:
         tmp = str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test")
         png_data = _create_test_png()
         att = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png", storage_dir=tmp,
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
+            storage_dir=tmp,
         )
 
         vision_service.inspect_image(att.id, "Describe", "ws1")
@@ -550,7 +566,9 @@ class TestInspectImageCapability:
         assert manifest.name == "inspect_image"
         assert manifest.risk_level.value == "low"
 
-    def test_capability_schema_validation(self, vision_service: VisionObservationService, db: Database):
+    def test_capability_schema_validation(
+        self, vision_service: VisionObservationService, db: Database
+    ):
         _ensure_workspace(db, "ws1")
         cap_reg = CapabilityRegistry()
         fake_adapter = FakeVisionAdapter()
@@ -565,7 +583,9 @@ class TestInspectImageCapability:
         # Valid call with attachment_id
         png_data = _create_test_png()
         att = vision_service.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
         vision_service.set_current_context(workspace_id="ws1")
@@ -601,7 +621,9 @@ class TestRuntimeIntegration:
 
         png_data = _create_test_png()
         svc.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
         assert fake_adapter.call_count == 0  # No vision calls
@@ -621,7 +643,9 @@ class TestRuntimeIntegration:
 
         png_data = _create_test_png()
         att = svc.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -638,15 +662,20 @@ class TestRuntimeIntegration:
         assert "Existing observations" in ctx
         assert "Describe" in ctx
 
-    def test_cached_observation_used_on_repeat(
-        self, db: Database, processor: MediaProcessor
-    ):
+    def test_cached_observation_used_on_repeat(self, db: Database, processor: MediaProcessor):
         """Second identical tool call returns cached result (no extra provider call)."""
         _ensure_workspace(db, "ws1")
+
         class TestVisionService(VisionObservationService):
             def _call_vision_model(self, prepared, prompt, trace_id):
-                return {"text": "test", "provider": "fake", "model": "fake",
-                        "input_tokens": 0, "output_tokens": 0, "latency_ms": 0}
+                return {
+                    "text": "test",
+                    "provider": "fake",
+                    "model": "fake",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "latency_ms": 0,
+                }
 
         svc = TestVisionService(db, media_processor=processor)
         fake = FakeVisionAdapter("test result")
@@ -654,7 +683,9 @@ class TestRuntimeIntegration:
 
         png_data = _create_test_png()
         att = svc.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -665,9 +696,7 @@ class TestRuntimeIntegration:
 
         assert r1 == r2
 
-    def test_new_question_creates_new_observation(
-        self, db: Database
-    ):
+    def test_new_question_creates_new_observation(self, db: Database):
         """Different question about same image creates new observation."""
         _ensure_workspace(db, "ws1")
         svc = VisionObservationService(db)
@@ -676,7 +705,9 @@ class TestRuntimeIntegration:
 
         png_data = _create_test_png()
         att = svc.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -697,7 +728,9 @@ class TestRuntimeIntegration:
 
         png_data = _create_test_png()
         att = svc.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -705,7 +738,8 @@ class TestRuntimeIntegration:
 
         fake_chat = FakeChatAdapter()
         candidate = ModelCandidate(
-            provider="fake", model="fake-chat",
+            provider="fake",
+            model="fake-chat",
             capabilities={"chat", "tools"},
             input_modalities={"text"},
         )
@@ -746,7 +780,9 @@ class TestRuntimeIntegration:
 
         png_data = _create_test_png()
         att = svc.store_attachment(
-            png_data, workspace_id="ws1", filename="test.png",
+            png_data,
+            workspace_id="ws1",
+            filename="test.png",
             storage_dir=str(Path(os.environ.get("TEMP", "/tmp")) / "cogito_test"),
         )
 
@@ -758,7 +794,11 @@ class TestRuntimeIntegration:
         assert len(obs_after) >= 1
 
         ctx_text = svc.format_observations_for_context([att.id], "ws1")
-        assert "A red square" in ctx_text or "This image shows a red square" in ctx_text or "result" in ctx_text
+        assert (
+            "A red square" in ctx_text
+            or "This image shows a red square" in ctx_text
+            or "result" in ctx_text
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -787,8 +827,10 @@ class TestModelMessages:
         """Old text-only chat request works with attachment_ids support."""
         # This simulates what the API does
         from cogito_agent.api.app import ChatRequest
+
         req = ChatRequest(
-            session_id="s1", workspace_id="ws1",
+            session_id="s1",
+            workspace_id="ws1",
             text="hello",
         )
         parts = req.get_content_parts()
@@ -823,7 +865,8 @@ class TestDatabaseMigration:
         _ensure_workspace(db)
         # Insert attachment first to satisfy FK
         db.connection.execute(
-            "INSERT OR IGNORE INTO attachments (id, workspace_id, content_hash, media_type, storage_path, size_bytes)"
+            "INSERT OR IGNORE INTO attachments"
+            " (id, workspace_id, content_hash, media_type, storage_path, size_bytes)"
             " VALUES (?, ?, ?, ?, ?, ?)",
             ("att_001", "ws1", "hash1", "image/png", "/tmp/test.png", 100),
         )
@@ -854,23 +897,38 @@ class TestDatabaseMigration:
         # Insert attachments first to satisfy FK
         for att_id in ("att_1", "att_2"):
             db.connection.execute(
-                "INSERT OR IGNORE INTO attachments (id, workspace_id, content_hash, media_type, storage_path, size_bytes)"
+                "INSERT OR IGNORE INTO attachments"
+                " (id, workspace_id, content_hash, media_type, storage_path, size_bytes)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
                 (att_id, "ws1", "hash1", "image/png", "/tmp/test.png", 100),
             )
         db.connection.commit()
         cache_key = create_cache_key("ws1", "h1", "t", "o", "m", "v1")
         obs_repo.create(
-            obs_id="obs_1", workspace_id="ws1", attachment_id="att_1",
-            image_content_hash="h1", prompt="t", normalized_prompt="t",
-            result_text="r1", provider="o", model="m",
-            preprocessing_version="v1", cache_key=cache_key,
+            obs_id="obs_1",
+            workspace_id="ws1",
+            attachment_id="att_1",
+            image_content_hash="h1",
+            prompt="t",
+            normalized_prompt="t",
+            result_text="r1",
+            provider="o",
+            model="m",
+            preprocessing_version="v1",
+            cache_key=cache_key,
         )
         obs_repo.create(
-            obs_id="obs_2", workspace_id="ws1", attachment_id="att_1",
-            image_content_hash="h1", prompt="t", normalized_prompt="t",
-            result_text="r2", provider="o", model="m",
-            preprocessing_version="v1", cache_key=cache_key,
+            obs_id="obs_2",
+            workspace_id="ws1",
+            attachment_id="att_1",
+            image_content_hash="h1",
+            prompt="t",
+            normalized_prompt="t",
+            result_text="r2",
+            provider="o",
+            model="m",
+            preprocessing_version="v1",
+            cache_key=cache_key,
         )
         # Should still have the first record
         cached = obs_repo.get_by_cache_key(cache_key)
@@ -889,7 +947,8 @@ class TestMediaProcessorSecurity:
         # Create a small file that claims to be huge
         # (test PIL's DecompressionBombError)
         try:
-            from PIL import Image, ImageFile
+            from PIL import ImageFile
+
             ImageFile.LOAD_TRUNCATED_IMAGES = True
             # This is a tiny header that might trick PIL - just verify it doesn't crash
             processor.validate_and_prepare(b"\x89PNG\r\n\x1a\n" + b"0" * 100, filename="bomb.png")

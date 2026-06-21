@@ -39,8 +39,17 @@ class FeedbackStore:
             " (id, decision_id, event_id, workspace_id, user_id, value, comment,"
             " trace_id, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (fid, decision_id, event_id, workspace_id, user_id, value, comment,
-             trace_id or None, now),
+            (
+                fid,
+                decision_id,
+                event_id,
+                workspace_id,
+                user_id,
+                value,
+                comment,
+                trace_id or None,
+                now,
+            ),
         )
         self._db.connection.commit()
 
@@ -57,15 +66,12 @@ class FeedbackStore:
 
     def get_feedback_for_decision(self, decision_id: str) -> list[dict[str, Any]]:
         cur = self._db.connection.execute(
-            "SELECT * FROM feedback_entries WHERE decision_id = ?"
-            " ORDER BY created_at DESC",
+            "SELECT * FROM feedback_entries WHERE decision_id = ? ORDER BY created_at DESC",
             (decision_id,),
         )
         return [dict(r) for r in cur.fetchall()]
 
-    def get_recent_feedback(
-        self, workspace_id: str, limit: int = 10
-    ) -> list[str]:
+    def get_recent_feedback(self, workspace_id: str, limit: int = 10) -> list[str]:
         cur = self._db.connection.execute(
             "SELECT value FROM feedback_entries"
             " WHERE workspace_id = ?"
@@ -99,6 +105,7 @@ class FeedbackStore:
 
         if time_range and time_range != "all":
             from datetime import timedelta
+
             days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
             days = days_map.get(time_range, 0)
             if days:
@@ -111,8 +118,7 @@ class FeedbackStore:
             where = "WHERE " + " AND ".join(where_clauses)
 
         cur = self._db.connection.execute(
-            "SELECT * FROM feedback_entries"
-            f" {where} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT * FROM feedback_entries {where} ORDER BY created_at DESC LIMIT ?",
             (*params, limit),
         )
         return [dict(r) for r in cur.fetchall()]
@@ -121,13 +127,15 @@ class FeedbackStore:
         where = "WHERE workspace_id=?" if workspace_id != "*" else ""
         params = (workspace_id,) if workspace_id != "*" else ()
         cur = self._db.connection.execute(
-            "SELECT value, COUNT(*) AS cnt FROM feedback_entries"
-            f" {where} GROUP BY value",
+            f"SELECT value, COUNT(*) AS cnt FROM feedback_entries {where} GROUP BY value",
             params,
         )
         result: dict[str, int] = {
-            "useful": 0, "not_useful": 0, "too_many": 0,
-            "wrong_time": 0, "irrelevant": 0,
+            "useful": 0,
+            "not_useful": 0,
+            "too_many": 0,
+            "wrong_time": 0,
+            "irrelevant": 0,
         }
         for r in cur.fetchall():
             result[str(r["value"])] = r["cnt"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from cogito_agent.application.runtime_factory import default_workspace_path
 from cogito_agent.context import ContextEngine
 from cogito_agent.embedding.interface import EmbeddingProvider
 from cogito_agent.embedding.service import MemoryEmbeddingIndexService
@@ -10,10 +11,9 @@ from cogito_agent.memory import MemoryApplicationService, MemoryRetriever
 from cogito_agent.retrieval import MemoryRetrievalService
 from cogito_agent.retrieval.dense import DenseMemoryRetriever
 from cogito_agent.retrieval.fusion import CandidateFusion
-from cogito_agent.retrieval.query import MemoryQueryBuilder
-from cogito_agent.retrieval.resident import ResidentMemorySelector
 from cogito_agent.retrieval.sparse import SparseMemoryRetriever
 from cogito_agent.storage import Database
+from cogito_agent.storage.context_sink import SqliteContextTraceSink
 
 
 @dataclass
@@ -39,11 +39,11 @@ def build_application_services(
     Every caller (API, CLI, daemon) must use this factory so that
     the HTTP client, secrets, config, and providers are wired exactly once.
     """
-    from cogito_agent.embedding.service import create_embedding_provider_from_config as _make_provider
+    from cogito_agent.embedding.service import (
+        create_embedding_provider_from_config as _make_provider,
+    )
     from cogito_agent.governance import AuditLogger
     from cogito_agent.retrieval import MemoryRetrievalService
-    from cogito_agent.retrieval.gate import RetrievalGate
-    from cogito_agent.retrieval.service import create_retrieval_service
 
     # 1. Embedding provider
     if embedding_provider is None and config is not None:
@@ -64,15 +64,12 @@ def build_application_services(
 
     fusion = None
     if retrieval_cfg is not None:
-        w = retrieval_cfg.weights
+        rrf_cfg = retrieval_cfg.rrf
         fusion = CandidateFusion(
-            dense_weight=w.dense,
-            sparse_weight=w.sparse,
-            recency_weight=w.recency,
-            confidence_weight=w.confidence,
-            task_relevance_weight=w.task_relevance,
-            type_priority_weight=w.type_priority,
+            rrf_k=rrf_cfg.k,
+            keyword_weight=rrf_cfg.keyword_weight,
             recency_half_life_days=retrieval_cfg.recency_half_life_days,
+            hotness_alpha=rrf_cfg.hotness_alpha,
         )
 
     memory_retrieval = MemoryRetrievalService(
@@ -99,7 +96,10 @@ def build_application_services(
     max_tokens = 4096
     if config is not None and hasattr(config, "dynamic_token_budget"):
         max_tokens = getattr(config, "dynamic_token_budget", 4096)
-    context_engine = ContextEngine(total_token_budget=max_tokens)
+    context_engine = ContextEngine(
+        total_token_budget=max_tokens,
+        trace_sink=SqliteContextTraceSink(db),
+    )
 
     return ApplicationServices(
         db=db,

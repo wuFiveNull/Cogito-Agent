@@ -102,7 +102,8 @@ class MultimodalCoordinator:
                 )
                 logger.info(
                     "Vision succeeded via %s: %s",
-                    cid, observation.summary[:100],
+                    cid,
+                    observation.summary[:100],
                 )
                 break
             except Exception as exc:

@@ -27,14 +27,22 @@ def register_migration(version: int, sql: str) -> None:
 
 register_migration(2, _load_migration_sql("0002_memory_v2.sql"))
 register_migration(3, _load_migration_sql("0003_memory_v2_complete.sql"))
-register_migration(4, """
+register_migration(
+    4,
+    """
     ALTER TABLE scheduled_jobs ADD COLUMN last_error TEXT;
     ALTER TABLE notifications ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
-""")
-register_migration(5, """
+""",
+)
+register_migration(
+    5,
+    """
     ALTER TABLE skill_run_logs ADD COLUMN resume_data_json TEXT;
-""")
-register_migration(7, """
+""",
+)
+register_migration(
+    7,
+    """
     ALTER TABLE outbox_messages ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE outbox_messages ADD COLUMN last_error TEXT;
     ALTER TABLE outbox_messages ADD COLUMN next_retry_at TEXT;
@@ -44,8 +52,11 @@ register_migration(7, """
     ALTER TABLE outbox_messages ADD COLUMN failed_at TEXT;
     ALTER TABLE outbox_messages ADD COLUMN updated_at TEXT;
     ALTER TABLE inbox_items ADD COLUMN decision_id TEXT DEFAULT '';
-""")
-register_migration(9, """
+""",
+)
+register_migration(
+    9,
+    """
     CREATE TABLE IF NOT EXISTS workspace_roots (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
@@ -130,17 +141,23 @@ register_migration(9, """
     CREATE INDEX IF NOT EXISTS idx_art_source ON artifacts(source_type, source_id);
     CREATE INDEX IF NOT EXISTS idx_art_trace ON artifacts(trace_id);
     CREATE INDEX IF NOT EXISTS idx_art_type ON artifacts(artifact_type);
-""")
+""",
+)
 register_migration(11, _load_migration_sql("0011_approval_tool_call.sql"))
-register_migration(12, """
+register_migration(
+    12,
+    """
     ALTER TABLE context_items ADD COLUMN freshness_score REAL NOT NULL DEFAULT 0.5;
     ALTER TABLE context_items ADD COLUMN trust_score REAL NOT NULL DEFAULT 0.5;
     ALTER TABLE context_items ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE context_items ADD COLUMN stable_ref TEXT NOT NULL DEFAULT '';
     ALTER TABLE context_items ADD COLUMN exclusion_reason TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_context_stable_ref ON context_items(stable_ref);
-""")
-register_migration(13, """
+""",
+)
+register_migration(
+    13,
+    """
     CREATE TABLE IF NOT EXISTS session_summaries (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
@@ -157,13 +174,49 @@ register_migration(13, """
     );
     CREATE INDEX IF NOT EXISTS idx_summary_session
         ON session_summaries(workspace_id, session_id, created_at);
-""")
+""",
+)
 register_migration(14, _load_migration_sql("0014_vision_attachments.sql"))
 register_migration(15, _load_migration_sql("0015_meme_assets.sql"))
 register_migration(16, _load_migration_sql("0016_embeddings_v2.sql"))
 register_migration(17, _load_migration_sql("0017_retrieval_traces.sql"))
+register_migration(18, _load_migration_sql("0018_mcp_trust.sql"))
+register_migration(19, _load_migration_sql("0019_durable_runs.sql"))
+register_migration(20, _load_migration_sql("0020_autonomy_acks.sql"))
+register_migration(21, _load_migration_sql("0021_memory_chunks_fts.sql"))
+register_migration(22, _load_migration_sql("0022_cleanup_old_memory_tables.sql"))
+register_migration(23, _load_migration_sql("0023_cleanup_memory_edit_log.sql"))
+register_migration(24, _load_migration_sql("0024_cleanup_memory_candidates.sql"))
+register_migration(
+    25,
+    """
+    CREATE TABLE IF NOT EXISTS memory_items (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        memory_type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        reinforcement INTEGER NOT NULL DEFAULT 1,
+        emotional_weight INTEGER NOT NULL DEFAULT 0,
+        extra_json TEXT NOT NULL DEFAULT '{}',
+        source_ref TEXT NOT NULL DEFAULT '',
+        happened_at TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_items_hash
+        ON memory_items (workspace_id, content_hash, memory_type);
+    CREATE INDEX IF NOT EXISTS idx_memory_items_type
+        ON memory_items (workspace_id, memory_type);
+    CREATE INDEX IF NOT EXISTS idx_memory_items_time
+        ON memory_items (workspace_id, happened_at);
+    """,
+)
 
-register_migration(10, """
+register_migration(
+    10,
+    """
     CREATE TABLE IF NOT EXISTS drift_runs (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
@@ -193,11 +246,15 @@ register_migration(10, """
         runs_today INTEGER NOT NULL DEFAULT 0,
         pause_reason TEXT DEFAULT '',
         paused_at TEXT,
+        last_user_at TEXT,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     INSERT OR IGNORE INTO drift_state (id) VALUES ('main');
-""")
-register_migration(6, """
+""",
+)
+register_migration(
+    6,
+    """
     CREATE TABLE IF NOT EXISTS notification_decisions (
         id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
@@ -248,7 +305,8 @@ register_migration(6, """
     );
     CREATE INDEX IF NOT EXISTS idx_fe_decision ON feedback_entries(decision_id);
     CREATE INDEX IF NOT EXISTS idx_fe_workspace ON feedback_entries(workspace_id);
-""")
+""",
+)
 
 
 class Database:
@@ -264,17 +322,76 @@ class Database:
         self._conn.executescript(_SCHEMA_SQL)
         self._conn.commit()
 
+    def create_runtime_services(
+        self,
+        *,
+        capability_registry: Any = None,
+        policy_engine: Any = None,
+        artifact_writer: Any = None,
+    ) -> Any:
+        """Compose SQLite-backed runtime ports outside the runtime package.
+
+        Application composition roots use this adapter to bind concrete local
+        services to the provider-neutral runtime ports.
+        """
+        from cogito_agent.execution import (
+            GovernedCapabilityExecutor,
+            default_guardians,
+        )
+        from cogito_agent.governance import AuditLogger, PolicyEngine
+        from cogito_agent.runtime.ports import RuntimeServices
+        from cogito_agent.storage.repositories import ApprovalRepository
+        from cogito_agent.storage.runtime_persistence import SqliteRuntimePersistence
+        from cogito_agent.trace import Tracer
+
+        policy = policy_engine or PolicyEngine()
+        tracer = Tracer(self)
+        audit = AuditLogger(self)
+        executor = None
+        if capability_registry is not None:
+            executor = GovernedCapabilityExecutor(
+                capability_registry,
+                policy,
+                approvals=ApprovalRepository(self),
+                audit=audit,
+                tracer=tracer,
+                guardians=default_guardians(),
+                artifact_writer=artifact_writer,
+            )
+        return RuntimeServices(
+            persistence=SqliteRuntimePersistence(self),
+            tracer=tracer,
+            audit=audit,
+            policy=policy,
+            capability_catalog=capability_registry,
+            capability_executor=executor,
+        )
+
+    def create_subagent_persistence(self) -> Any:
+        from cogito_agent.storage.subagent_persistence import (
+            SqliteSubagentPersistence,
+        )
+
+        return SqliteSubagentPersistence(self)
+
+    def create_run_repository(self) -> Any:
+        from cogito_agent.runs import RunRepository
+
+        return RunRepository(self)
+
     @property
     def connection(self) -> sqlite3.Connection:
         return self._conn
+
+    @property
+    def path(self) -> str:
+        return self._path
 
     def close(self) -> None:
         self._conn.close()
 
     def current_version(self) -> int:
-        cur = self._conn.execute(
-            "SELECT COALESCE(MAX(version), 0) FROM schema_version"
-        )
+        cur = self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
@@ -344,18 +461,35 @@ class Database:
     def export_workspace(self, workspace_id: str) -> dict[str, Any]:
         data: dict[str, Any] = {"workspace_id": workspace_id}
         tables = [
-            "sessions", "messages", "memories",
-            "file_artifacts", "memory_candidates", "traces", "spans",
-            "tool_calls", "model_calls", "audit_logs", "source_lineage",
-            "context_items", "approval_records", "workspace_settings",
-            "scheduled_jobs", "notifications",
-            "workspace_skills", "skill_run_logs",
-            "inbox_items", "inbox", "memory_edit_log",
+            "sessions",
+            "messages",
+            "memories",
+            "file_artifacts",
+            "traces",
+            "spans",
+            "tool_calls",
+            "model_calls",
+            "audit_logs",
+            "source_lineage",
+            "context_items",
+            "approval_records",
+            "workspace_settings",
+            "scheduled_jobs",
+            "notifications",
+            "workspace_skills",
+            "skill_run_logs",
+            "inbox_items",
+            "inbox",
             "daemon_state",
-            "workspace_roots", "workspace_files", "file_chunks",
-            "file_chunk_embeddings", "artifacts",
+            "workspace_roots",
+            "workspace_files",
+            "file_chunks",
+            "file_chunk_embeddings",
+            "artifacts",
             "drift_runs",
-            "attachments", "vision_observations", "message_attachments",
+            "attachments",
+            "vision_observations",
+            "message_attachments",
         ]
         for table in tables:
             try:
@@ -368,9 +502,7 @@ class Database:
                     data[table] = rows
             except Exception:
                 pass
-        cur = self._conn.execute(
-            "SELECT * FROM workspaces WHERE id = ?", (workspace_id,)
-        )
+        cur = self._conn.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
         ws_row = cur.fetchone()
         if ws_row:
             data["workspace"] = dict(ws_row)

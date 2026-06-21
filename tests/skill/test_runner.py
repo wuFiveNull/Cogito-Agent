@@ -15,7 +15,9 @@ TRANSFORM_MANIFEST = SkillManifest(
     outputs={},
     steps=[
         SkillStep(
-            id="s1", name="transform", kind=StepKind.transform,
+            id="s1",
+            name="transform",
+            kind=StepKind.transform,
             input_mapping={"out": "$val"},
         ),
     ],
@@ -41,12 +43,16 @@ def test_run_stop_on_error(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="bad", name="bad-step", kind=StepKind.capability,
+                id="bad",
+                name="bad-step",
+                kind=StepKind.capability,
                 uses_capability="nonexistent.tool",
                 on_error=OnError.stop,
             ),
             SkillStep(
-                id="s2", name="after", kind=StepKind.transform,
+                id="s2",
+                name="after",
+                kind=StepKind.transform,
                 input_mapping={"x": "$nonexistent"},
                 on_error=OnError.stop,
             ),
@@ -77,12 +83,16 @@ def test_run_skip_on_error(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="b1", name="skip-step", kind=StepKind.capability,
+                id="b1",
+                name="skip-step",
+                kind=StepKind.capability,
                 uses_capability="nonexistent.tool",
                 on_error=OnError.skip,
             ),
             SkillStep(
-                id="b2", name="after-skip", kind=StepKind.transform,
+                id="b2",
+                name="after-skip",
+                kind=StepKind.transform,
                 input_mapping={"x": "$val"},
                 on_error=OnError.skip,
             ),

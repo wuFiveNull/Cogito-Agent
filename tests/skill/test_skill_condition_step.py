@@ -18,7 +18,9 @@ def test_condition_empty_expression_returns_true(db_runner: SkillRunner) -> None
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="check", kind=StepKind.condition,
+                id="c1",
+                name="check",
+                kind=StepKind.condition,
                 condition_expression="",
             ),
         ],
@@ -40,7 +42,9 @@ def test_condition_with_input_ref_resolves(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="check", kind=StepKind.condition,
+                id="c1",
+                name="check",
+                kind=StepKind.condition,
                 condition_expression="$input.val == 'hello'",
             ),
         ],
@@ -61,11 +65,15 @@ def test_condition_with_step_output_ref_resolves(db_runner: SkillRunner) -> None
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="transform", kind=StepKind.transform,
+                id="s1",
+                name="transform",
+                kind=StepKind.transform,
                 input_mapping={"out": "$input.val"},
             ),
             SkillStep(
-                id="c1", name="check", kind=StepKind.condition,
+                id="c1",
+                name="check",
+                kind=StepKind.condition,
                 condition_expression="$step.s1._output == 'hello'",
             ),
         ],
@@ -86,7 +94,9 @@ def test_condition_with_contains_keyword(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="check", kind=StepKind.condition,
+                id="c1",
+                name="check",
+                kind=StepKind.condition,
                 condition_expression="$input.val contains 'world'",
             ),
         ],
@@ -107,11 +117,15 @@ def test_condition_false_does_not_break_run(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="check", kind=StepKind.condition,
+                id="c1",
+                name="check",
+                kind=StepKind.condition,
                 condition_expression="$input.val == 'world'",
             ),
             SkillStep(
-                id="s1", name="after", kind=StepKind.transform,
+                id="s1",
+                name="after",
+                kind=StepKind.transform,
                 input_mapping={"out": "$input.val"},
             ),
         ],
@@ -134,7 +148,9 @@ def test_condition_step_logged_with_status_ok(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="c1", name="check", kind=StepKind.condition,
+                id="c1",
+                name="check",
+                kind=StepKind.condition,
                 condition_expression="$input.val == 'true'",
             ),
         ],

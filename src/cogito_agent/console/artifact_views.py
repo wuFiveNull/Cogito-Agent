@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.storage import Database as _Database
+from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
 from .utils import menu_items as _menu_items
@@ -24,16 +25,14 @@ CONSOLE_WORKSPACE_ID = "default"
 
 def _get_db() -> _Database:
     from cogito_agent.api.app import get_db as _get_shared_db
+
     return _get_shared_db()
 
 
 def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
-    db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+    from cogito_agent.application import WorkspaceApplicationService
+
+    WorkspaceApplicationService(_get_db()).ensure_workspace(workspace_id)
 
 
 def _redact_item(item: dict[str, object]) -> dict[str, object]:
@@ -55,6 +54,7 @@ async def artifacts_list(
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
     from cogito_agent.workspace import ArtifactService
+
     svc = ArtifactService(db)
     artifacts = svc.list_artifacts(
         CONSOLE_WORKSPACE_ID,
@@ -65,7 +65,7 @@ async def artifacts_list(
     ctx: dict[str, object] = {
         "request": request,
         "title": "Artifacts",
-        "version": "0.13.0-dev",
+        "version": APP_VERSION,
         "menu": _menu_items(),
         "artifacts": redacted,
         "source_type_filter": source_type,
@@ -79,8 +79,9 @@ async def artifact_detail(request: Request, aid: str) -> HTMLResponse:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
     from cogito_agent.workspace import ArtifactService
+
     svc = ArtifactService(db)
-    row = svc.get_artifact_by_id(aid)
+    row = svc.get_artifact_by_id(aid, CONSOLE_WORKSPACE_ID)
     if row is None:
         ctx: dict[str, object] = {
             "request": request,
@@ -94,7 +95,7 @@ async def artifact_detail(request: Request, aid: str) -> HTMLResponse:
     detail_ctx: dict[str, object] = {
         "request": request,
         "title": f"Artifact: {item.get('title', 'Unknown')}",
-        "version": "0.13.0-dev",
+        "version": APP_VERSION,
         "menu": _menu_items(),
         "artifact": item,
         "html_content": html_content,
@@ -106,13 +107,15 @@ async def artifact_detail(request: Request, aid: str) -> HTMLResponse:
 async def artifact_download(request: Request, aid: str) -> Response:
     db = _get_db()
     from cogito_agent.workspace import ArtifactService
+
     svc = ArtifactService(db)
-    row = svc.get_artifact_by_id(aid)
+    row = svc.get_artifact_by_id(aid, CONSOLE_WORKSPACE_ID)
     if row is None:
         return Response(status_code=404)
     content = svc.get_artifact_content(aid)
     mime = str(row.get("mime_type", "text/plain"))
-    fname = str(row.get("title", "artifact"))
+    fname = Path(str(row.get("title", "artifact"))).name
+    fname = fname.replace('"', "_").replace("\r", "_").replace("\n", "_")
     return Response(
         content=content,
         media_type=mime,
@@ -124,6 +127,7 @@ async def artifact_download(request: Request, aid: str) -> Response:
 async def artifact_delete(request: Request, aid: str) -> RedirectResponse:
     db = _get_db()
     from cogito_agent.workspace import ArtifactService
+
     svc = ArtifactService(db)
-    svc.delete_artifact(aid)
+    svc.delete_artifact(aid, CONSOLE_WORKSPACE_ID)
     return RedirectResponse(url="/console/artifacts", status_code=303)

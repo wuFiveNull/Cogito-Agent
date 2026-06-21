@@ -40,6 +40,4 @@ def test_pid_file_replaces_stale_or_invalid_owner(tmp_path: Path) -> None:
 
 def test_default_pid_path_is_next_to_database(tmp_path: Path) -> None:
     db_path = tmp_path / "data" / "cogito.db"
-    assert _default_pid_path(str(db_path)) == str(
-        db_path.resolve().with_name("cogito.pid")
-    )
+    assert _default_pid_path(str(db_path)) == str(db_path.resolve().with_name("cogito.pid"))

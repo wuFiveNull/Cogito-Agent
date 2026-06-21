@@ -48,7 +48,7 @@ jobs:
           from cogito_agent.skill.builtin.loader import BuiltinSkillLoader;
           db=Database('smoke.db'); db.initialize();
           assert len(BuiltinSkillLoader(db).load_all()) == 6;
-          assert cogito_agent.__version__ == '0.16.0-dev'; db.close()"
+          assert cogito_agent.__version__ == '0.17.0-dev'; db.close()"
 
   browser:
     runs-on: ubuntu-latest

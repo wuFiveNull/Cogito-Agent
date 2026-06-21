@@ -59,9 +59,7 @@ def render_safe_markdown(text: str) -> str:
             flush_paragraph()
             close_list()
             if in_code:
-                output.append(
-                    f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>"
-                )
+                output.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
                 code_lines.clear()
                 in_code = False
             else:

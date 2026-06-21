@@ -26,9 +26,7 @@ class SourceLineage:
             (lid, trace_id, output_ref, source_type, source_id, span_id, note),
         )
         self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM source_lineage WHERE id = ?", (lid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM source_lineage WHERE id = ?", (lid,))
         return dict(cur.fetchone())
 
     def list_by_trace(self, trace_id: str) -> list[dict[str, object]]:

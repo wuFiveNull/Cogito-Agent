@@ -27,6 +27,7 @@ class TestMemorySecurity:
     def test_memory_content_redacted(self) -> None:
         """Memory content containing secrets should be redacted."""
         import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.storage.repositories import MemoryRepository, WorkspaceRepository
 

@@ -92,7 +92,8 @@ cogito secrets test <name>                            # test secret availability
 
 # API authentication (single-key, optional)
 export COGITO_API_KEY=your-secret-key
-cogito-demo              # start API server with Bearer token auth
+cogito-console           # start the local Console/API with persistent SQLite storage
+cogito-demo              # run a single end-to-end CLI turn
 
 # True per-token streaming: /chat/stream
 # Uses RuntimeKernel.process_stream() with SSE delta events per token
@@ -124,7 +125,7 @@ curl -N -X POST http://localhost:8000/chat/stream \
 
 ## Release Status
 
-**v0.16.0-dev (BGE-M3 Embedding + Memory Retrieval V2)** — Memory Retrieval V2 with OpenAI-compatible embedding API (BAAI/bge-m3, 1024-dim), dual independent dense/sparse recall, Retrieval Gate, QueryBuilder, CandidateFusion with score breakdown, resident memory layer, type threshold/quota, MemoryEmbeddingIndexService, retry-failed/purge-stale, RetrievalTrace persistence, CLI embed doctor/rebuild, API `/memories/embeddings/status` etc.
+**v0.17.0-dev (Personal Local Architecture Refactor)** — Runtime Ports, shared Application Services, a single governed capability executor, MCP trust and schema-hash grants, durable Scheduler/Drift/Skill runs, transactional autonomy envelopes with durable ACK state, stable prompt layers, large ToolResult artifact offload, and Console operations for Runs, MCP, backup and restore.
 Verified baseline: **1433+ tests passed, 4 skipped** under Python 3.11; Python 3.12/3.13 hosted release verification remains required.
 Includes: v0.14.0 Real Skills + Drift Runtime, v0.13.0 Workspace Files + Artifacts, v0.11.0 Delivery Hardening, v0.10.0 Hybrid Memory + Streaming Tools + Tool Loop, v0.9.0 Multi-Session Chat, v0.8.0 Console MVP, v0.7.0 Autonomy Plane MVP.
 

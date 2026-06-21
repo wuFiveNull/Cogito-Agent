@@ -46,8 +46,10 @@ def test_process_event_quiet_hours_skip(proactive_loop: ProactiveLoop, wid: str)
 
 def test_emit_event_push(proactive_loop: ProactiveLoop, wid: str):
     decision = proactive_loop.emit_event(
-        title="emit test", body="hello",
-        source="cli", workspace_id=wid,
+        title="emit test",
+        body="hello",
+        source="cli",
+        workspace_id=wid,
     )
     assert decision.action == DecisionAction.push
     assert decision.event_id
@@ -55,7 +57,8 @@ def test_emit_event_push(proactive_loop: ProactiveLoop, wid: str):
 
 def test_emit_event_trace(proactive_loop: ProactiveLoop, wid: str):
     decision = proactive_loop.emit_event(
-        title="emit trace", workspace_id=wid,
+        title="emit trace",
+        workspace_id=wid,
         priority="urgent",
     )
     cur = proactive_loop._db.connection.execute(

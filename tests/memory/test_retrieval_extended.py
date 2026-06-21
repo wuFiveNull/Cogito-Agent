@@ -9,9 +9,7 @@ def _setup(db: Database) -> None:
     mem_repo.create("mem-1", "ws-1", "User likes Python", "preference")
     mem_repo.create("mem-2", "ws-1", "Project uses FastAPI", "project")
     mem_repo.create("mem-3", "ws-1", "Alice works at Acme", "profile")
-    db.connection.execute(
-        "UPDATE memories SET confidence = 0.9 WHERE id = 'mem-3'"
-    )
+    db.connection.execute("UPDATE memories SET confidence = 0.9 WHERE id = 'mem-3'")
     db.connection.commit()
 
 
@@ -34,9 +32,7 @@ def test_search_ranks_by_confidence(db: Database) -> None:
 
 def test_search_ranks_consolidated_higher(db: Database) -> None:
     _setup(db)
-    db.connection.execute(
-        "UPDATE memories SET status = 'consolidated' WHERE id = 'mem-1'"
-    )
+    db.connection.execute("UPDATE memories SET status = 'consolidated' WHERE id = 'mem-1'")
     db.connection.commit()
     retriever = MemoryRetriever(db)
     results = retriever.search("ws-1", "Python")

@@ -5,6 +5,7 @@ Provides a model adapter that:
 - Emits multiple delta tokens on stream_chat()
 - Returns the full response via chat()
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -46,9 +47,7 @@ class MockModel:
         self._tool_intents = tool_intents or []
         self._fail_on_prompt = fail_on_prompt
 
-    def chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> ModelResponse:
+    def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
         prompt = messages[-1]["content"] if messages else ""
         if self._fail_on_prompt and self._fail_on_prompt in prompt:
             return ModelResponse(
@@ -63,9 +62,7 @@ class MockModel:
             provider=self.provider,
         )
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]:
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]:
         prompt = messages[-1]["content"] if messages else ""
         if self._fail_on_prompt and self._fail_on_prompt in prompt:
             raise RuntimeError(f"MockModel triggered failure: {self._fail_on_prompt}")

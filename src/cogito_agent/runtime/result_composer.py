@@ -99,9 +99,7 @@ class ResultComposer:
         for item in items:
             results.append(
                 ComposedToolSummary(
-                    capability_name=str(
-                        item.get("capability_name", item.get("tool", ""))
-                    ),
+                    capability_name=str(item.get("capability_name", item.get("tool", ""))),
                     status=str(item.get("status", "")),
                     summary=str(item.get("summary", item.get("output", "")))[:1000],
                     error=str(item.get("error", ""))[:1000],

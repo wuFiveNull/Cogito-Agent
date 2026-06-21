@@ -26,12 +26,14 @@ CheckList = list[dict[str, object]]
 
 def _get_db():  # type: ignore[no-untyped-def]
     from cogito_agent.api.app import get_db as _get_shared_db
+
     return _get_shared_db()
 
 
 def _cfg() -> dict[str, str]:
     try:
         from cogito_agent.cli.config_manager import get_config
+
         return get_config()
     except Exception:
         return {}
@@ -40,6 +42,7 @@ def _cfg() -> dict[str, str]:
 def _count(table: str, where: str = "") -> int:
     try:
         from cogito_agent.storage import Database
+
         db = Database()
         db.initialize()
         sql = f"SELECT COUNT(*) AS cnt FROM {table}"
@@ -67,8 +70,11 @@ def _build_checks() -> CheckList:
 
 
 def _check(
-    section: str, name: str, status: str,
-    message: str, details: object = None,
+    section: str,
+    name: str,
+    status: str,
+    message: str,
+    details: object = None,
 ) -> dict[str, object]:
     c: dict[str, object] = {
         "section": section,
@@ -99,18 +105,25 @@ def _core_checks() -> CheckList:
 
     try:
         from cogito_agent.cli.config_manager import get_config
+
         cfg = get_config()
         config_ok = len(cfg) > 0
-        checks.append(_check(
-            "core", "config_load", "ok" if config_ok else "warning",
-            "Config loaded" if config_ok else "Config empty or unreadable",
-        ))
+        checks.append(
+            _check(
+                "core",
+                "config_load",
+                "ok" if config_ok else "warning",
+                "Config loaded" if config_ok else "Config empty or unreadable",
+            )
+        )
     except Exception as exc:
         checks.append(_check("core", "config_load", "error", redact_html(str(exc))))
 
     pkg_checks = [
-        ("fastapi", "fastapi"), ("pydantic", "pydantic"),
-        ("jinja2", "jinja2"), ("sqlite3", "sqlite3"),
+        ("fastapi", "fastapi"),
+        ("pydantic", "pydantic"),
+        ("jinja2", "jinja2"),
+        ("sqlite3", "sqlite3"),
     ]
     pkg_ok = 0
     pkg_err = 0
@@ -120,10 +133,14 @@ def _core_checks() -> CheckList:
             pkg_ok += 1
         except ImportError:
             pkg_err += 1
-    checks.append(_check(
-        "core", "packages", "ok" if pkg_err == 0 else "warning",
-        f"{pkg_ok}/{len(pkg_checks)} core packages available",
-    ))
+    checks.append(
+        _check(
+            "core",
+            "packages",
+            "ok" if pkg_err == 0 else "warning",
+            f"{pkg_ok}/{len(pkg_checks)} core packages available",
+        )
+    )
 
     return checks
 
@@ -132,6 +149,7 @@ def _db_checks() -> CheckList:
     checks: CheckList = []
     try:
         from cogito_agent.storage import Database
+
         db = Database()
         db.initialize()
         db.migrate()
@@ -147,7 +165,6 @@ def _db_checks() -> CheckList:
 
     tables = [
         ("memories", ""),
-        ("memory_candidates", ""),
         ("approval_records", ""),
         ("traces", ""),
         ("audit_logs", ""),
@@ -158,15 +175,23 @@ def _db_checks() -> CheckList:
     for table, where in tables:
         try:
             cnt = _count(table, where)
-            checks.append(_check(
-                "database", f"table_{table}", "ok",
-                f"{table}: {cnt} rows",
-            ))
+            checks.append(
+                _check(
+                    "database",
+                    f"table_{table}",
+                    "ok",
+                    f"{table}: {cnt} rows",
+                )
+            )
         except Exception as exc:
-            checks.append(_check(
-                "database", f"table_{table}", "warning",
-                f"{table}: count error - {redact_html(str(exc))}",
-            ))
+            checks.append(
+                _check(
+                    "database",
+                    f"table_{table}",
+                    "warning",
+                    f"{table}: count error - {redact_html(str(exc))}",
+                )
+            )
 
     return checks
 
@@ -178,6 +203,7 @@ def _provider_checks() -> CheckList:
 
     try:
         from cogito_agent.models.registry import _PROVIDERS
+
         providers = list(_PROVIDERS.keys())
     except Exception:
         providers = []
@@ -188,7 +214,9 @@ def _provider_checks() -> CheckList:
         checks.append(_check("provider", "provider", "ok", f"'{provider}' registered"))
     else:
         known = ", ".join(providers) if providers else "none registered"
-        checks.append(_check("provider", "provider", "warning", f"'{provider}' not in known list ({known})"))  # noqa: E501
+        checks.append(
+            _check("provider", "provider", "warning", f"'{provider}' not in known list ({known})")
+        )  # noqa: E501
 
     model_name = cfg.get("model.model", "")
     if provider == "mock":
@@ -221,21 +249,24 @@ def _provider_checks() -> CheckList:
     if provider != "mock" and secret_ref:
         try:
             from cogito_agent.security import get_provider_from_config
+
             sp = get_provider_from_config(cfg)
             sv = sp.get_secret(secret_ref)
             if sv is not None:
                 checks.append(_check("provider", "secret_ref", "ok", "resolved"))
             else:
-                checks.append(_check("provider", "secret_ref", "warning",
-                    "configured but not found"))
+                checks.append(
+                    _check("provider", "secret_ref", "warning", "configured but not found")
+                )
         except Exception:
             checks.append(_check("provider", "secret_ref", "warning", "error resolving"))
     elif provider != "mock":
         api_key_env = cfg.get("model.api_key_env", "MODEL_API_KEY")
         val = os.environ.get(api_key_env)
         if val:
-            checks.append(_check("provider", "api_key_env", "ok",
-                f"${api_key_env} is set (legacy)"))
+            checks.append(
+                _check("provider", "api_key_env", "ok", f"${api_key_env} is set (legacy)")
+            )
         else:
             checks.append(_check("provider", "api_key_env", "warning", f"${api_key_env} not set"))
 
@@ -253,13 +284,18 @@ def _secrets_checks() -> CheckList:
 
     try:
         from cogito_agent.security import get_provider_from_config
+
         provider = get_provider_from_config(cfg)
         keys = provider.list_keys()
         available = len(keys) > 0 or backend == "local"
-        checks.append(_check(
-            "secrets", "available", "ok" if available else "warning",
-            f"available ({len(keys)} keys)" if available else "no secrets found",
-        ))
+        checks.append(
+            _check(
+                "secrets",
+                "available",
+                "ok" if available else "warning",
+                f"available ({len(keys)} keys)" if available else "no secrets found",
+            )
+        )
     except Exception as exc:
         checks.append(_check("secrets", "available", "warning", redact_html(str(exc))))
 
@@ -274,9 +310,14 @@ def _secrets_checks() -> CheckList:
         "dev_sqlite": "HIGH (plaintext SQLite - dev only)",
     }
     risk_level = risk_map.get(backend, "unknown")
-    checks.append(_check("secrets", "security_risk", "ok" if "low" in risk_level else "warning",
-        f"backend={backend} risk={risk_level}",
-    ))
+    checks.append(
+        _check(
+            "secrets",
+            "security_risk",
+            "ok" if "low" in risk_level else "warning",
+            f"backend={backend} risk={risk_level}",
+        )
+    )
 
     if backend == "local":
         local_path = cfg.get("secrets.local_path", "")
@@ -286,6 +327,7 @@ def _secrets_checks() -> CheckList:
     elif backend == "keychain":
         try:
             from cogito_agent.security import KeychainSecretProvider
+
             kc = KeychainSecretProvider(service_name=service_name)
             if kc.available:
                 checks.append(_check("secrets", "keychain", "ok", "available"))
@@ -298,20 +340,31 @@ def _secrets_checks() -> CheckList:
     elif backend == "local_encrypted":
         try:
             from cogito_agent.security import LocalEncryptedSecretProvider
+
             LocalEncryptedSecretProvider()
             checks.append(_check("secrets", "encrypted_provider", "ok", "available"))
         except Exception as exc:
             checks.append(_check("secrets", "encrypted_provider", "warning", redact_html(str(exc))))
     elif backend == "dev_sqlite":
-        checks.append(_check("secrets", "dev_sqlite_provider", "warning",
-            "DevSqliteSecretProvider: plaintext SQLite, NOT for production"))
+        checks.append(
+            _check(
+                "secrets",
+                "dev_sqlite_provider",
+                "warning",
+                "DevSqliteSecretProvider: plaintext SQLite, NOT for production",
+            )
+        )
 
     try:
         env_secrets_count = len([k for k in os.environ if k.startswith("COGITO_")])
-        checks.append(_check(
-            "secrets", "env_presence", "ok",
-            f"{env_secrets_count} COGITO_* env vars present (values not shown)",
-        ))
+        checks.append(
+            _check(
+                "secrets",
+                "env_presence",
+                "ok",
+                f"{env_secrets_count} COGITO_* env vars present (values not shown)",
+            )
+        )
     except Exception:
         checks.append(_check("secrets", "env_presence", "warning", "cannot enumerate"))
 
@@ -323,6 +376,7 @@ def _governance_checks() -> CheckList:
 
     try:
         from cogito_agent.governance import PolicyEngine
+
         PolicyEngine()
         checks.append(_check("governance", "policy_engine", "ok", "available"))
     except Exception:
@@ -331,6 +385,7 @@ def _governance_checks() -> CheckList:
     try:
         from cogito_agent.storage import Database
         from cogito_agent.storage.repositories import ApprovalRepository
+
         db = Database()
         db.initialize()
         ApprovalRepository(db)
@@ -342,6 +397,7 @@ def _governance_checks() -> CheckList:
     try:
         from cogito_agent.governance import AuditLogger
         from cogito_agent.storage import Database
+
         db = Database()
         db.initialize()
         AuditLogger(db)
@@ -353,6 +409,7 @@ def _governance_checks() -> CheckList:
     try:
         from cogito_agent.storage import Database
         from cogito_agent.trace import Tracer
+
         db = Database()
         db.initialize()
         Tracer(db)
@@ -363,12 +420,15 @@ def _governance_checks() -> CheckList:
 
     try:
         from datetime import UTC, datetime, timedelta
+
         cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
         from cogito_agent.storage import Database
+
         db = Database()
         db.initialize()
         cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at >= ?", (cutoff,))
+            "SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at >= ?", (cutoff,)
+        )
         row = cur.fetchone()
         audit_count = row["cnt"] if row else 0
         db.close()
@@ -379,10 +439,12 @@ def _governance_checks() -> CheckList:
     try:
         cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
         from cogito_agent.storage import Database
+
         db = Database()
         db.initialize()
         cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ?", (cutoff,))
+            "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ?", (cutoff,)
+        )
         row = cur.fetchone()
         trace_count = row["cnt"] if row else 0
         db.close()
@@ -401,21 +463,40 @@ def _autonomy_checks() -> CheckList:
     status = "ok" if enabled == "true" else "warning"
     checks.append(_check("autonomy", "enabled", status, f"autonomy.enabled={enabled}"))
 
-    checks.append(_check("autonomy", "quiet_hours", "ok",
-        f"start={cfg.get('autonomy.quiet_hours.start', '22:00')} "
-        f"end={cfg.get('autonomy.quiet_hours.end', '08:00')} "
-        f"enabled={cfg.get('autonomy.quiet_hours.enabled', 'true')}"))
+    checks.append(
+        _check(
+            "autonomy",
+            "quiet_hours",
+            "ok",
+            f"start={cfg.get('autonomy.quiet_hours.start', '22:00')} "
+            f"end={cfg.get('autonomy.quiet_hours.end', '08:00')} "
+            f"enabled={cfg.get('autonomy.quiet_hours.enabled', 'true')}",
+        )
+    )
 
-    checks.append(_check("autonomy", "quota", "ok",
-        f"daily={cfg.get('autonomy.notification.daily_quota', '5')} "
-        f"hourly={cfg.get('autonomy.notification.hourly_quota', '2')}"))
+    checks.append(
+        _check(
+            "autonomy",
+            "quota",
+            "ok",
+            f"daily={cfg.get('autonomy.notification.daily_quota', '5')} "
+            f"hourly={cfg.get('autonomy.notification.hourly_quota', '2')}",
+        )
+    )
 
-    checks.append(_check("autonomy", "dedup", "ok",
-        f"window={cfg.get('autonomy.dedup.window_minutes', '120')}min"))
+    checks.append(
+        _check(
+            "autonomy",
+            "dedup",
+            "ok",
+            f"window={cfg.get('autonomy.dedup.window_minutes', '120')}min",
+        )
+    )
 
     try:
         from cogito_agent.autonomy import DecisionStore, FeedbackStore, Outbox
         from cogito_agent.storage import Database
+
         db = Database()
         db.initialize()
         DecisionStore(db)
@@ -423,6 +504,7 @@ def _autonomy_checks() -> CheckList:
         Outbox(db)
         checks.append(_check("autonomy", "outbox_store", "ok", "available"))
         from cogito_agent.governance import AuditLogger
+
         FeedbackStore(db, audit_logger=AuditLogger(db))
         checks.append(_check("autonomy", "feedback_store", "ok", "available"))
         db.close()
@@ -448,8 +530,14 @@ def _console_checks() -> CheckList:
     if static_dir.is_dir():
         css_files = list(static_dir.glob("*.css"))
         js_files = list(static_dir.glob("*.js"))
-        checks.append(_check("console", "static_assets", "ok",
-            f"available ({len(css_files)} CSS, {len(js_files)} JS)"))
+        checks.append(
+            _check(
+                "console",
+                "static_assets",
+                "ok",
+                f"available ({len(css_files)} CSS, {len(js_files)} JS)",
+            )
+        )
     else:
         checks.append(_check("console", "static_assets", "error", "not found"))
 
@@ -461,15 +549,23 @@ def _console_checks() -> CheckList:
         checks.append(_check("console", "htmx", "warning", "not found"))
 
     import os
+
     api_key = os.environ.get("COGITO_API_KEY", "")
     if api_key:
         checks.append(_check("console", "auth_middleware", "ok", "active (COGITO_API_KEY set)"))
     else:
-        checks.append(_check("console", "auth_middleware", "ok",
-            "inactive (no API key configured)"))
+        checks.append(
+            _check("console", "auth_middleware", "ok", "inactive (no API key configured)")
+        )
 
-    checks.append(_check("console", "limitations", "info",
-        "No real Telegram/Feishu delivery; Config/Doctor read-only in v0.8"))
+    checks.append(
+        _check(
+            "console",
+            "limitations",
+            "info",
+            "No real Telegram/Feishu delivery; Config/Doctor read-only in v0.8",
+        )
+    )
 
     return checks
 
@@ -519,26 +615,30 @@ async def doctor_api(request: Request, live: str = Query("")) -> JSONResponse:
             status_code=501,
             content={
                 "status": "error",
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
-                "checks": [{
-                    "section": "provider",
-                    "name": "live_check",
-                    "status": "skipped",
-                    "message": "Live provider check not implemented in console viewer",
-                }],
+                "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
+                "checks": [
+                    {
+                        "section": "provider",
+                        "name": "live_check",
+                        "status": "skipped",
+                        "message": "Live provider check not implemented in console viewer",
+                    }
+                ],
                 "limitations": ["Live provider check not available in console viewer"],
             },
         )
 
     checks = _build_checks()
     overall = _overall_status(checks)
-    return JSONResponse({
-        "status": overall,
-        "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
-        "checks": checks,
-        "limitations": [
-            "No real Telegram/Feishu delivery for outbox",
-            "Live provider check not run by default",
-            "Config viewer is read-only in v0.8 Phase 7",
-        ],
-    })
+    return JSONResponse(
+        {
+            "status": overall,
+            "version": os.environ.get("COGITO_CONSOLE_VERSION", APP_VERSION),
+            "checks": checks,
+            "limitations": [
+                "No real Telegram/Feishu delivery for outbox",
+                "Live provider check not run by default",
+                "Config viewer is read-only in v0.8 Phase 7",
+            ],
+        }
+    )

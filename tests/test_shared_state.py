@@ -21,7 +21,6 @@ def test_complete_flow() -> None:
         TurnState.building_context,
         TurnState.model_calling,
         TurnState.composing_result,
-        TurnState.extracting_memory,
         TurnState.completed,
     ]
     for s in path:

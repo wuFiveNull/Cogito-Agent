@@ -30,3 +30,4 @@ class NotificationDecision(BaseModel):
     trace_id: str = ""
     workspace_id: str = "*"
     user_id: str = ""
+    llm_dimensions: dict[str, int] = Field(default_factory=dict)

@@ -24,11 +24,13 @@ def _seed_test_data(db: Database) -> str:
         " VALUES ('sp_obs', 'tr_obs_1', 'test', 'runtime', 'ok')",
     )
     db.connection.execute(
-        "INSERT INTO model_calls (trace_id, span_id, provider, model, prompt_summary, response_summary)"
+        "INSERT INTO model_calls"
+        " (trace_id, span_id, provider, model, prompt_summary, response_summary)"
         " VALUES ('tr_obs_1', 'sp_obs', 'mock', 'mock-chat', 'test prompt', 'test response')",
     )
     db.connection.execute(
-        "INSERT INTO tool_calls (trace_id, span_id, capability_name, decision, input_summary, output_summary)"
+        "INSERT INTO tool_calls"
+        " (trace_id, span_id, capability_name, decision, input_summary, output_summary)"
         " VALUES ('tr_obs_1', 'sp_obs', 'time.now', 'allow', '{}', 'current time')",
     )
     db.connection.execute(
@@ -98,9 +100,7 @@ def test_traces_format_detail() -> None:
 def test_audit_list_empty() -> None:
     db = Database()
     db.initialize()
-    cur = db.connection.execute(
-        "SELECT COUNT(*) as cnt FROM audit_logs"
-    )
+    cur = db.connection.execute("SELECT COUNT(*) as cnt FROM audit_logs")
     assert cur.fetchone()["cnt"] == 0
 
 
@@ -116,9 +116,7 @@ def test_audit_show_detail() -> None:
     db = Database()
     db.initialize()
     _seed_test_data(db)
-    cur = db.connection.execute(
-        "SELECT * FROM audit_logs WHERE id = 'aud_obs_1'"
-    )
+    cur = db.connection.execute("SELECT * FROM audit_logs WHERE id = 'aud_obs_1'")
     row = cur.fetchone()
     assert row is not None
     assert row["actor_id"] == "user"
@@ -132,13 +130,11 @@ def test_usage_summary_counts() -> None:
     cur = db.connection.execute("SELECT COUNT(*) as cnt FROM traces")
     assert cur.fetchone()["cnt"] >= 2
     cur = db.connection.execute(
-        "SELECT COUNT(*) as cnt FROM model_calls mc"
-        " JOIN traces t ON mc.trace_id = t.id"
+        "SELECT COUNT(*) as cnt FROM model_calls mc JOIN traces t ON mc.trace_id = t.id"
     )
     assert cur.fetchone()["cnt"] >= 1
     cur = db.connection.execute(
-        "SELECT COUNT(*) as cnt FROM tool_calls tc"
-        " JOIN traces t ON tc.trace_id = t.id"
+        "SELECT COUNT(*) as cnt FROM tool_calls tc JOIN traces t ON tc.trace_id = t.id"
     )
     assert cur.fetchone()["cnt"] >= 1
     cur = db.connection.execute("SELECT COUNT(*) as cnt FROM audit_logs")

@@ -24,9 +24,7 @@ def _candidate(provider: str, model: str, **overrides: object) -> ModelCandidate
 
 
 def test_router_honors_preference_and_returns_fallbacks() -> None:
-    router = ModelRouter(
-        [_candidate("local", "fast"), _candidate("cloud", "quality")]
-    )
+    router = ModelRouter([_candidate("local", "fast"), _candidate("cloud", "quality")])
 
     decision = router.route(
         ModelRouteRequest(

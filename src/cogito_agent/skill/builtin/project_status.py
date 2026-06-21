@@ -102,8 +102,8 @@ def run_project_status(
             capability_name="workspace.file.search",
             input_summary="project status recent changes",
             output_summary=f"collected {len(memory_sources)} memories, "
-                           f"{len(session_sources)} sessions, "
-                           f"{len(file_chunk_sources)} file chunks",
+            f"{len(session_sources)} sessions, "
+            f"{len(file_chunk_sources)} file chunks",
             decision="allow",
         )
     except Exception:
@@ -131,6 +131,7 @@ def run_project_status(
     )
 
     from cogito_agent.workspace import ArtifactService
+
     art_svc = ArtifactService(db)
     artifact = art_svc.create_artifact(
         workspace_id=workspace_id,
@@ -237,10 +238,13 @@ def _build_report(
     # Risks and blockers
     lines.append("## Risks & Blockers")
     lines.append("")
-    blockers = [m for m in memory_sources
-                if "block" in str(m.get("text", "")).lower()
-                or "risk" in str(m.get("text", "")).lower()
-                or "issue" in str(m.get("text", "")).lower()]
+    blockers = [
+        m
+        for m in memory_sources
+        if "block" in str(m.get("text", "")).lower()
+        or "risk" in str(m.get("text", "")).lower()
+        or "issue" in str(m.get("text", "")).lower()
+    ]
     if blockers:
         for b in blockers[:3]:
             lines.append(f"- ⚠️ {str(b.get('text', ''))[:200]}")
@@ -268,10 +272,13 @@ def _create_inbox_notification(
 ) -> None:
     try:
         import uuid as _uuid
+
         nid = str(_uuid.uuid4())
         title = f"Project Status Report: {artifact.get('title', '')}"
-        body = ("A new project status report has been generated. "
-                f"View it at /console/artifacts/{artifact.get('id', '')}")
+        body = (
+            "A new project status report has been generated. "
+            f"View it at /console/artifacts/{artifact.get('id', '')}"
+        )
         db.connection.execute(
             "INSERT INTO inbox_items"
             " (id, workspace_id, title, body, source, trace_id, created_at)"

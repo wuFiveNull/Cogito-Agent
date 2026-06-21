@@ -105,9 +105,7 @@ class TestDriftRuntime:
         drift._ensure_state()
         result = drift._execute_skill_runtime("memory_consolidation", drift._get_state())
         trace_id = result["trace_id"]
-        traces = db.connection.execute(
-            "SELECT * FROM traces WHERE id = ?", (trace_id,)
-        ).fetchall()
+        traces = db.connection.execute("SELECT * FROM traces WHERE id = ?", (trace_id,)).fetchall()
         assert len(traces) >= 1
 
     def test_drift_get_run(self, db: Database) -> None:
@@ -187,11 +185,11 @@ class TestDriftRuntime:
 class TestDriftMaintenance:
     def test_drift_maintenance_consolidate(self, db: Database) -> None:
         from cogito_agent.runtime.drift import DriftMaintenance
+
         maint = DriftMaintenance(db)
         for i in range(2):
             db.connection.execute(
-                "INSERT INTO memories (id, workspace_id, type, text)"
-                " VALUES (?, ?, ?, ?)",
+                "INSERT INTO memories (id, workspace_id, type, text) VALUES (?, ?, ?, ?)",
                 (str(uuid.uuid4()), "default", "general", "Duplicate text"),
             )
         db.connection.commit()
@@ -200,6 +198,7 @@ class TestDriftMaintenance:
 
     def test_drift_maintenance_archive_stale(self, db: Database) -> None:
         from cogito_agent.runtime.drift import DriftMaintenance
+
         maint = DriftMaintenance(db)
         db.connection.execute(
             "INSERT INTO memories (id, workspace_id, type, text, created_at, updated_at)"

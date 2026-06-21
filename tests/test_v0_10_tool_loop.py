@@ -4,14 +4,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.capability.registry import ToolResult
-from cogito_agent.shared import CapabilityManifest, CapabilityType, RiskLevel
 from cogito_agent.models import ModelAdapter, ModelResponse
-from cogito_agent.runtime import RuntimeKernel
 from cogito_agent.shared import (
+    CapabilityManifest,
+    CapabilityType,
     EventSource,
     EventType,
+    RiskLevel,
     RuntimeEvent,
     TurnState,
 )
@@ -22,6 +24,7 @@ from cogito_agent.storage import Database
 def db() -> Database:
     import os
     import tempfile
+
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     _db = Database(path=path)
@@ -32,8 +35,7 @@ def db() -> Database:
     os.unlink(path)
 
 
-def _ensure_ws_and_session(db: Database, ws_id: str = "default",
-                           sess_id: str = "s1") -> None:
+def _ensure_ws_and_session(db: Database, ws_id: str = "default", sess_id: str = "s1") -> None:
     cur = db.connection.execute("SELECT id FROM workspaces WHERE id = ?", (ws_id,))
     if cur.fetchone() is None:
         db.connection.execute("INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, ws_id))
@@ -46,8 +48,9 @@ def _ensure_ws_and_session(db: Database, ws_id: str = "default",
     db.connection.commit()
 
 
-def _make_event(ws_id: str = "default", session_id: str = "s1",
-                text: str = "hello") -> RuntimeEvent:
+def _make_event(
+    ws_id: str = "default", session_id: str = "s1", text: str = "hello"
+) -> RuntimeEvent:
     return RuntimeEvent(
         workspace_id=ws_id,
         session_id=session_id,
@@ -79,18 +82,26 @@ def test_single_tool_round_success(db: Database) -> None:
     cap_reg.register(
         "echo",
         CapabilityManifest(
-            name="echo", version="1.0.0",
+            name="echo",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="echo response"),
     )
     adapter = _make_adapter([{"name": "echo", "arguments": {}}], "final reply")
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=3,
     )
     result = kernel.process(_make_event())
@@ -104,12 +115,18 @@ def test_multi_round_tool_loop(db: Database) -> None:
     cap_reg.register(
         "step",
         CapabilityManifest(
-            name="step", version="1.0.0",
+            name="step",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="step done"),
     )
@@ -125,7 +142,9 @@ def test_multi_round_tool_loop(db: Database) -> None:
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.side_effect = side_effect
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=3,
     )
     result = kernel.process(_make_event())
@@ -141,21 +160,30 @@ def test_max_tool_rounds_termination(db: Database) -> None:
     cap_reg.register(
         "loop_tool",
         CapabilityManifest(
-            name="loop_tool", version="1.0.0",
+            name="loop_tool",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="still looping"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "loop_tool", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "loop_tool", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=2,
     )
     result = kernel.process(_make_event())
@@ -169,26 +197,37 @@ def test_max_tool_rounds_respected(db: Database) -> None:
     cap_reg.register(
         "round_tool",
         CapabilityManifest(
-            name="round_tool", version="1.0.0",
+            name="round_tool",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=True,
+            approval_required=False,
+            audit_required=False,
+            idempotent=True,
         ),
-        lambda **kw: ToolResult(status="ok", summary=f"round data"),
+        lambda **kw: ToolResult(status="ok", summary="round data"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     # Always respond with tool intents
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "round_tool", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "round_tool", "arguments": {}}],
     )
     max_rounds = 3
     from cogito_agent.runtime.budget import TurnBudget
+
     budget = TurnBudget(max_model_calls=20, max_tool_calls=20)
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        budget=budget, max_tool_rounds=max_rounds,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        budget=budget,
+        max_tool_rounds=max_rounds,
     )
     result = kernel.process(_make_event())
     # Should be completed (not budget-exceeded)
@@ -200,10 +239,13 @@ def test_no_tool_loop_without_cap_reg(db: Database) -> None:
     _ensure_ws_and_session(db)
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="hello world", tool_intents=[{"name": "unknown", "arguments": {}}],
+        content="hello world",
+        tool_intents=[{"name": "unknown", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=None,
+        db,
+        model_adapter=adapter,
+        capability_registry=None,
         max_tool_rounds=3,
     )
     result = kernel.process(_make_event())
@@ -217,25 +259,36 @@ def test_tool_loop_budget_check_each_round(db: Database) -> None:
     cap_reg.register(
         "budget_tool",
         CapabilityManifest(
-            name="budget_tool", version="1.0.0",
+            name="budget_tool",
+            version="1.0.0",
             type=CapabilityType.tool,
-            description="", input_schema={}, output_schema={},
-            permissions=[], risk_level=RiskLevel.low,
+            description="",
+            input_schema={},
+            output_schema={},
+            permissions=[],
+            risk_level=RiskLevel.low,
             allowed_contexts=["interactive"],
-            approval_required=False, audit_required=False, idempotent=False,
+            approval_required=False,
+            audit_required=False,
+            idempotent=False,
         ),
         lambda **kw: ToolResult(status="ok", summary="done"),
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "budget_tool", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "budget_tool", "arguments": {}}],
     )
     # Budget allows only 1 tool call
     from cogito_agent.runtime.budget import TurnBudget
+
     budget = TurnBudget(max_model_calls=10, max_tool_calls=1)
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
-        budget=budget, max_tool_rounds=3,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
+        budget=budget,
+        max_tool_rounds=3,
     )
     result = kernel.process(_make_event())
     assert result.state == TurnState.failed

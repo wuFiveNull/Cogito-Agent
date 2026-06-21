@@ -22,6 +22,7 @@ class Outbox:
         priority: str = "normal",
         source: str = "system",
         trace_id: str = "",
+        commit: bool = True,
     ) -> str:
         mid = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
@@ -30,10 +31,23 @@ class Outbox:
             " (id, event_id, decision_id, workspace_id, user_id, title, body,"
             " status, priority, source, trace_id, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (mid, event_id, decision_id, workspace_id, user_id, title, body,
-             "pending", priority, source, trace_id or None, now),
+            (
+                mid,
+                event_id,
+                decision_id,
+                workspace_id,
+                user_id,
+                title,
+                body,
+                "pending",
+                priority,
+                source,
+                trace_id or None,
+                now,
+            ),
         )
-        self._db.connection.commit()
+        if commit:
+            self._db.connection.commit()
         return mid
 
     def mark_sent(self, message_id: str) -> None:
@@ -52,6 +66,31 @@ class Outbox:
         )
         self._db.connection.commit()
 
+    def mark_read(self, message_id: str) -> bool:
+        cursor = self._db.connection.execute(
+            "UPDATE outbox_messages SET read_at=? WHERE id=?",
+            (datetime.now(UTC).isoformat(), message_id),
+        )
+        self._db.connection.commit()
+        return cursor.rowcount == 1
+
+    def dismiss(self, message_id: str) -> bool:
+        cursor = self._db.connection.execute(
+            "UPDATE outbox_messages SET dismissed_at=?, status='skipped' WHERE id=?",
+            (datetime.now(UTC).isoformat(), message_id),
+        )
+        self._db.connection.commit()
+        return cursor.rowcount == 1
+
+    def retry(self, message_id: str) -> bool:
+        cursor = self._db.connection.execute(
+            "UPDATE outbox_messages SET status='pending', last_error=NULL,"
+            " next_retry_at=NULL, delivery_attempts=0 WHERE id=?",
+            (message_id,),
+        )
+        self._db.connection.commit()
+        return cursor.rowcount == 1
+
     def list_pending(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, Any]]:
         if workspace_id == "*":
             cur = self._db.connection.execute(
@@ -68,9 +107,7 @@ class Outbox:
             )
         return [dict(r) for r in cur.fetchall()]
 
-    def list_all(
-        self, workspace_id: str = "*", limit: int = 50
-    ) -> list[dict[str, Any]]:
+    def list_all(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, Any]]:
         if workspace_id == "*":
             cur = self._db.connection.execute(
                 "SELECT * FROM outbox_messages ORDER BY created_at DESC LIMIT ?",
@@ -111,14 +148,13 @@ class Outbox:
             params.append(status)
 
         if q:
-            where_clauses.append(
-                "(title LIKE ? OR body LIKE ? OR id LIKE ? OR decision_id LIKE ?)"
-            )
+            where_clauses.append("(title LIKE ? OR body LIKE ? OR id LIKE ? OR decision_id LIKE ?)")
             like = f"%{q}%"
             params.extend([like, like, like, like])
 
         if time_range and time_range != "all":
             from datetime import timedelta
+
             days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
             days = days_map.get(time_range, 0)
             if days:
@@ -131,8 +167,7 @@ class Outbox:
             where = "WHERE " + " AND ".join(where_clauses)
 
         cur = self._db.connection.execute(
-            "SELECT * FROM outbox_messages"
-            f" {where} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT * FROM outbox_messages {where} ORDER BY created_at DESC LIMIT ?",
             (*params, limit),
         )
         return [dict(r) for r in cur.fetchall()]
@@ -141,8 +176,7 @@ class Outbox:
         where = "WHERE workspace_id=?" if workspace_id != "*" else ""
         params = (workspace_id,) if workspace_id != "*" else ()
         cur = self._db.connection.execute(
-            "SELECT status, COUNT(*) AS cnt FROM outbox_messages"
-            f" {where} GROUP BY status",
+            f"SELECT status, COUNT(*) AS cnt FROM outbox_messages {where} GROUP BY status",
             params,
         )
         result: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0, "skipped": 0}

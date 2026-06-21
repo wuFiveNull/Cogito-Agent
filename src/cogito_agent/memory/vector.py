@@ -78,6 +78,7 @@ class EmbeddingService:
             return
         try:
             from sentence_transformers import SentenceTransformer
+
             self._model = SentenceTransformer(self._model_name)
         except ImportError:
             self._mock = MockEmbeddingService()
@@ -176,15 +177,17 @@ class HybridRetriever:
 
     def _has_embeddings(self) -> bool:
         try:
-            cur = self._db.connection.execute(
-                "SELECT 1 FROM memory_embeddings LIMIT 1"
-            )
+            cur = self._db.connection.execute("SELECT 1 FROM memory_embeddings_v2 LIMIT 1")
             return cur.fetchone() is not None
         except Exception:
             return False
 
     def _fts_search_raw(
-        self, workspace_id: str, query: str, limit: int, include_archived: bool = False,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int,
+        include_archived: bool = False,
     ) -> list[dict[str, object]]:
         archived_clause = "" if include_archived else " AND m.archived_at IS NULL"
         try:
@@ -203,15 +206,23 @@ class HybridRetriever:
             return []
 
     def _fts_only_search(
-        self, workspace_id: str, query: str, limit: int, include_archived: bool = False,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int,
+        include_archived: bool = False,
     ) -> list[dict[str, object]]:
         from .retrieval import MemoryRetriever
+
         return MemoryRetriever(self._db).search(workspace_id, query, limit, include_archived)
 
     def _get_embedding(self, memory_id: str) -> bytes | None:
-        cur = self._db.connection.execute(
-            "SELECT embedding FROM memory_embeddings WHERE memory_id = ?",
-            (memory_id,),
-        )
-        row = cur.fetchone()
-        return row["embedding"] if row else None
+        try:
+            cur = self._db.connection.execute(
+                "SELECT embedding FROM memory_embeddings_v2 WHERE memory_id = ?",
+                (memory_id,),
+            )
+            row = cur.fetchone()
+            return row["embedding"] if row else None
+        except Exception:
+            return None

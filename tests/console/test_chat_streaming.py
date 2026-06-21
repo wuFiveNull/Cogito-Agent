@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-
-import pytest
 from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app
@@ -34,7 +31,11 @@ class TestChatStreamEndpoint:
             data={"message": "hello"},
         )
         # Should contain at least a metadata or delta event
-        assert "event: metadata" in resp.text or "event: delta" in resp.text or "event: final" in resp.text
+        assert (
+            "event: metadata" in resp.text
+            or "event: delta" in resp.text
+            or "event: final" in resp.text
+        )
 
     def test_chat_stream_empty_message(self) -> None:
         resp = client.post(

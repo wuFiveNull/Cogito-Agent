@@ -13,7 +13,9 @@ class ScoreBreakdown:
     confidence_score: float = 0.0
     task_relevance_score: float = 0.0
     type_priority_score: float = 0.0
-    final_score: float = 0.0
+    final_score: float = 0.0  # RRF score for ranking (rank-based, not absolute relevance)
+    semantic_score: float = 0.0  # max(dense, sparse) for threshold/filtering
+    hotness_score: float = 0.0  # confidence * recency decay for frequently-used boost
 
 
 _TYPE_PRIORITY_MAP: dict[str, float] = {
@@ -34,8 +36,9 @@ def _compute_recency_score(mem: dict[str, object], half_life_days: float = 90.0)
         if isinstance(raw_updated, str) and raw_updated:
             dt = datetime.fromisoformat(raw_updated)
             now = datetime.now(UTC)
-            age_days = (now - dt.replace(tzinfo=UTC) if dt.tzinfo is None
-                        else (now - dt)).total_seconds() / 86400.0
+            age_days = (
+                now - dt.replace(tzinfo=UTC) if dt.tzinfo is None else (now - dt)
+            ).total_seconds() / 86400.0
             age_days = max(0.0, age_days)
             return math.exp(-math.log(2) * age_days / half_life_days)
     except (ValueError, TypeError):
@@ -56,7 +59,8 @@ def _compute_type_priority_score(mem: dict[str, object]) -> float:
 
 
 def _compute_task_relevance_score(
-    mem: dict[str, object], query: str,
+    mem: dict[str, object],
+    query: str,
 ) -> float:
     if not query:
         return 0.0
@@ -77,24 +81,39 @@ def _compute_task_relevance_score(
     return min(score, 1.0)
 
 
+def _hit_id(item: dict[str, object]) -> str:
+    return str(item.get("id", "") or item.get("memory_id", "") or "")
+
+
+def _hit_score(item: dict[str, object]) -> float:
+    """Best-effort score extraction — used only for tiebreaking, not ranking."""
+    raw = item.get("sparse_score") or item.get("dense_score") or 0.0
+    return float(raw) if isinstance(raw, (int, float)) else 0.0
+
+
 class CandidateFusion:
+    """Fuse sparse and dense candidates using Reciprocal Rank Fusion (RRF).
+
+    RRF is rank-based, not score-based — it doesn't care about absolute
+    score magnitudes or whether two scorers use different scales. This
+    replaces the old weighted-sum approach which required brittle tuning
+    of 6 fixed weights.
+
+    Design follows Akashic's memory2/retriever.py pattern:
+    RRF with configurable k and keyword weight.
+    """
+
     def __init__(
         self,
-        dense_weight: float = 0.35,
-        sparse_weight: float = 0.30,
-        recency_weight: float = 0.10,
-        confidence_weight: float = 0.10,
-        task_relevance_weight: float = 0.10,
-        type_priority_weight: float = 0.05,
+        rrf_k: float = 60.0,
+        keyword_weight: float = 0.5,
         recency_half_life_days: float = 90.0,
+        hotness_alpha: float = 0.0,
     ) -> None:
-        self._dense_weight = dense_weight
-        self._sparse_weight = sparse_weight
-        self._recency_weight = recency_weight
-        self._confidence_weight = confidence_weight
-        self._task_relevance_weight = task_relevance_weight
-        self._type_priority_weight = type_priority_weight
+        self._rrf_k = rrf_k
+        self._keyword_weight = keyword_weight
         self._recency_half_life_days = recency_half_life_days
+        self._hotness_alpha = hotness_alpha
 
     def fuse(
         self,
@@ -102,46 +121,96 @@ class CandidateFusion:
         dense_candidates: list[dict[str, object]],
         query: str = "",
     ) -> list[tuple[dict[str, object], ScoreBreakdown]]:
-        merged: dict[str, tuple[dict[str, object], ScoreBreakdown, int]] = {}
+        # ── 1. Build rank maps ──
+        # Dense candidates sorted by dense_score descending → rank 1 = best
+        dense_sorted = sorted(
+            dense_candidates,
+            key=lambda x: float(x.get("dense_score", 0.0) or 0.0),
+            reverse=True,
+        )
+        dense_rank: dict[str, int] = {}
+        for rank, item in enumerate(dense_sorted, 1):
+            mid = _hit_id(item)
+            if mid:
+                dense_rank.setdefault(mid, rank)
 
-        for mem in sparse_candidates:
-            mid = str(mem.get("id", ""))
-            breakdown = ScoreBreakdown()
-            raw_sparse = mem.get("sparse_score", 0.0)
-            breakdown.sparse_score = raw_sparse if isinstance(raw_sparse, (int, float)) else 0.0
-            merged[mid] = (mem, breakdown, 0)
+        # Sparse candidates sorted by sparse_score descending → rank 1 = best
+        sparse_sorted = sorted(
+            sparse_candidates,
+            key=lambda x: float(x.get("sparse_score", 0.0) or 0.0),
+            reverse=True,
+        )
+        kw_rank: dict[str, int] = {}
+        for rank, item in enumerate(sparse_sorted, 1):
+            mid = _hit_id(item)
+            if mid:
+                kw_rank.setdefault(mid, rank)
 
-        for mem in dense_candidates:
-            mid = str(mem.get("id", ""))
-            raw_dense = mem.get("dense_score", 0.0)
-            dense_score = raw_dense if isinstance(raw_dense, (int, float)) else 0.0
-            if mid in merged:
-                _, breakdown, _ = merged[mid]
-                breakdown.dense_score = dense_score
-            else:
-                breakdown = ScoreBreakdown()
-                breakdown.dense_score = dense_score
-                merged[mid] = (mem, breakdown, 0)
+        # ── 2. Build unified item map (merge fields from both channels) ──
+        merged: dict[str, dict[str, object]] = {}
+        for item in sparse_candidates:
+            mid = _hit_id(item)
+            if mid:
+                merged[mid] = dict(item)
+        for item in dense_candidates:
+            mid = _hit_id(item)
+            if mid:
+                if mid in merged:
+                    # Keep sparse fields, add dense-only fields
+                    for key in ("dense_score", "dense_rank"):
+                        if key in item:
+                            merged[mid][key] = item[key]
+                else:
+                    merged[mid] = dict(item)
 
+        # ── 3. RRF scoring ──
         results: list[tuple[dict[str, object], ScoreBreakdown]] = []
-        for mem, breakdown, _ in merged.values():
-            breakdown.recency_score = _compute_recency_score(
-                mem, self._recency_half_life_days,
+        for mid, item in merged.items():
+            rrf = 0.0
+            if mid in dense_rank:
+                rrf += 1.0 / (self._rrf_k + dense_rank[mid])
+            if mid in kw_rank:
+                rrf += self._keyword_weight / (self._rrf_k + kw_rank[mid])
+
+            dense_score = float(item.get("dense_score", 0.0) or 0.0)
+            sparse_score = float(item.get("sparse_score", 0.0) or 0.0)
+            recency_score = _compute_recency_score(item, self._recency_half_life_days)
+            confidence_score = _compute_confidence_score(item)
+            task_relevance_score = _compute_task_relevance_score(item, query)
+            type_priority_score = _compute_type_priority_score(item)
+
+            # Hotness: confidence-weighted recency — frequently-accessed,
+            # high-confidence memories get a ranking boost.
+            hotness_score = confidence_score * recency_score
+
+            # Blend: RRF base + hotness boost (when hotness_alpha > 0)
+            if self._hotness_alpha > 0:
+                rrf_boosted = rrf * (1.0 + self._hotness_alpha * hotness_score)
+            else:
+                rrf_boosted = rrf
+
+            # threshold uses best available relevance signal
+            semantic_score = max(
+                dense_score,
+                sparse_score,
+                task_relevance_score * 0.5,
+                recency_score * 0.3,
             )
-            breakdown.confidence_score = _compute_confidence_score(mem)
-            breakdown.task_relevance_score = _compute_task_relevance_score(mem, query)
-            breakdown.type_priority_score = _compute_type_priority_score(mem)
 
-            breakdown.final_score = (
-                self._dense_weight * breakdown.dense_score
-                + self._sparse_weight * breakdown.sparse_score
-                + self._recency_weight * breakdown.recency_score
-                + self._confidence_weight * breakdown.confidence_score
-                + self._task_relevance_weight * breakdown.task_relevance_score
-                + self._type_priority_weight * breakdown.type_priority_score
+            breakdown = ScoreBreakdown(
+                dense_score=dense_score,
+                sparse_score=sparse_score,
+                recency_score=recency_score,
+                confidence_score=confidence_score,
+                task_relevance_score=task_relevance_score,
+                type_priority_score=type_priority_score,
+                final_score=rrf_boosted,
+                semantic_score=semantic_score,
+                hotness_score=hotness_score,
             )
+            item["_rrf_score"] = rrf_boosted
+            results.append((item, breakdown))
 
-            results.append((mem, breakdown))
-
-        results.sort(key=lambda x: x[1].final_score, reverse=True)
+        # ── 4. Sort by RRF score descending, tiebreak by individual score ──
+        results.sort(key=lambda x: (x[1].final_score, _hit_score(x[0])), reverse=True)
         return results

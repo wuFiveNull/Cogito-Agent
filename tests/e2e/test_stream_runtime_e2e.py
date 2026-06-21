@@ -1,4 +1,5 @@
 """E2E: /chat/stream uses RuntimeKernel end-to-end."""
+
 from __future__ import annotations
 
 import json
@@ -20,19 +21,25 @@ def test_stream_runtime_e2e(client: TestClient) -> None:
     client.post("/workspaces", params={"name": "e2e-stream"})
 
     # Create session
-    sess_resp = client.post("/sessions", json={
-        "workspace_id": "e2e-stream",
-        "title": "e2e-stream-test",
-    })
+    sess_resp = client.post(
+        "/sessions",
+        json={
+            "workspace_id": "e2e-stream",
+            "title": "e2e-stream-test",
+        },
+    )
     assert sess_resp.status_code == 200
     sid = sess_resp.json()["id"]
 
     # Stream a message
-    resp = client.post("/chat/stream", json={
-        "text": "test message",
-        "session_id": sid,
-        "workspace_id": "e2e-stream",
-    })
+    resp = client.post(
+        "/chat/stream",
+        json={
+            "text": "test message",
+            "session_id": sid,
+            "workspace_id": "e2e-stream",
+        },
+    )
     assert resp.status_code == 200
     assert resp.headers.get("content-type", "").startswith("text/event-stream")
 
@@ -80,17 +87,23 @@ def test_stream_runtime_e2e(client: TestClient) -> None:
 def test_stream_trace_has_channel(client: TestClient) -> None:
     """Trace from streaming turn should have api_stream channel."""
     client.post("/workspaces", params={"name": "e2e-stream2"})
-    sess_resp = client.post("/sessions", json={
-        "workspace_id": "e2e-stream2",
-        "title": "e2e-stream2",
-    })
+    sess_resp = client.post(
+        "/sessions",
+        json={
+            "workspace_id": "e2e-stream2",
+            "title": "e2e-stream2",
+        },
+    )
     sid = sess_resp.json()["id"]
 
-    client.post("/chat/stream", json={
-        "text": "hello",
-        "session_id": sid,
-        "workspace_id": "e2e-stream2",
-    })
+    client.post(
+        "/chat/stream",
+        json={
+            "text": "hello",
+            "session_id": sid,
+            "workspace_id": "e2e-stream2",
+        },
+    )
 
     trace_resp = client.get("/traces", params={"workspace_id": "e2e-stream2"})
     traces = trace_resp.json()

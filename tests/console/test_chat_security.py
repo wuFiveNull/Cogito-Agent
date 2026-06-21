@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-
-import pytest
 from fastapi.testclient import TestClient
 
 from cogito_agent.api.app import app
@@ -58,4 +55,4 @@ class TestChatSecurity:
         )
         html = resp.text
         assert "Traceback" not in html
-        assert "File \"" not in html
+        assert 'File "' not in html

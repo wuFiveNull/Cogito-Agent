@@ -34,8 +34,7 @@ def _merge_streaming_tool_calls(
     args_delta = str(delta_fn.get("arguments", ""))
     if args_delta:
         current_args_raw = (
-            json.dumps(current.arguments, ensure_ascii=False)
-            if current.arguments else ""
+            json.dumps(current.arguments, ensure_ascii=False) if current.arguments else ""
         )
         merged = current_args_raw + args_delta
         try:
@@ -72,9 +71,7 @@ class OpenAICompatibleAdapter:
             "Content-Type": "application/json",
         }
 
-    def _build_body(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> dict[str, object]:
+    def _build_body(self, messages: list[dict[str, object]], **kwargs: object) -> dict[str, object]:
         body: dict[str, object] = {
             "model": self.model,
             "messages": messages,
@@ -90,7 +87,8 @@ class OpenAICompatibleAdapter:
         return body
 
     def _parse_tool_calls(
-        self, raw_tool_calls: list[dict[str, object]],
+        self,
+        raw_tool_calls: list[dict[str, object]],
     ) -> list[ToolIntent]:
         intents: list[ToolIntent] = []
         for tc in raw_tool_calls:
@@ -102,16 +100,18 @@ class OpenAICompatibleAdapter:
                 args = json.loads(args_str)
             except (json.JSONDecodeError, TypeError):
                 args = {}
-            intents.append(ToolIntent(
-                tool_call_id=str(tc.get("id", "")),
-                capability_name=str(fn_dict.get("name", "")),
-                arguments={str(k): v for k, v in args.items()} if isinstance(args, dict) else {},
-            ))
+            intents.append(
+                ToolIntent(
+                    tool_call_id=str(tc.get("id", "")),
+                    capability_name=str(fn_dict.get("name", "")),
+                    arguments={str(k): v for k, v in args.items()}
+                    if isinstance(args, dict)
+                    else {},
+                )
+            )
         return intents
 
-    def _legacy_dicts_to_chat_messages(
-        self, messages: list[dict[str, object]]
-    ) -> list:  # type: ignore[type-arg]
+    def _legacy_dicts_to_chat_messages(self, messages: list[dict[str, object]]) -> list:  # type: ignore[type-arg]
         """Convert legacy dict messages to ChatMessage objects for codec."""
         from .messages import ChatMessage, FilePart, ImagePart, MessageRole, TextPart
 
@@ -128,16 +128,24 @@ class OpenAICompatibleAdapter:
                     if isinstance(item, dict):
                         ptype = item.get("type", "text")
                         if ptype == "image":
-                            parts.append(ImagePart(
-                                uri=str(item.get("uri", item.get("image_url", {}).get("url", ""))),
-                                mime_type=str(item.get("mime_type", "image/png")),
-                            ))
+                            parts.append(
+                                ImagePart(
+                                    uri=str(
+                                        item.get("uri", item.get("image_url", {}).get("url", ""))
+                                    ),
+                                    mime_type=str(item.get("mime_type", "image/png")),
+                                )
+                            )
                         elif ptype == "file":
-                            parts.append(FilePart(
-                                uri=str(item.get("uri", "")),
-                                mime_type=str(item.get("mime_type", "application/octet-stream")),
-                                filename=str(item.get("filename", "file")),
-                            ))
+                            parts.append(
+                                FilePart(
+                                    uri=str(item.get("uri", "")),
+                                    mime_type=str(
+                                        item.get("mime_type", "application/octet-stream")
+                                    ),
+                                    filename=str(item.get("filename", "file")),
+                                )
+                            )
                         else:
                             parts.append(TextPart(text=str(item.get("text", ""))))
                     else:
@@ -164,9 +172,7 @@ class OpenAICompatibleAdapter:
         body = self._build_body(encoded, **kwargs)
         data = json.dumps(body).encode("utf-8")
 
-        req = urllib.request.Request(
-            url, data=data, headers=self._headers, method="POST"
-        )
+        req = urllib.request.Request(url, data=data, headers=self._headers, method="POST")
         start = time.monotonic()
 
         try:
@@ -212,18 +218,14 @@ class OpenAICompatibleAdapter:
             error=None,
         )
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]:
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]:
         chat_msgs = self._legacy_dicts_to_chat_messages(messages)
         encoded = self.codec.encode_messages(chat_msgs)
         url = urljoin(self.base_url, "chat/completions")
         body = self._build_body(encoded, stream=True, **kwargs)
         data = json.dumps(body).encode("utf-8")
 
-        req = urllib.request.Request(
-            url, data=data, headers=self._headers, method="POST"
-        )
+        req = urllib.request.Request(url, data=data, headers=self._headers, method="POST")
 
         accumulated: dict[int, dict[str, object]] = {}
 
@@ -307,7 +309,8 @@ class OpenAICompatibleAdapter:
             yield f"[stream error: {e}]"
 
     def get_tool_calls_from_stream(
-        self, accumulated: dict[int, dict[str, object]] | None = None,
+        self,
+        accumulated: dict[int, dict[str, object]] | None = None,
     ) -> list[ToolIntent]:
         if not accumulated:
             return []
@@ -321,9 +324,13 @@ class OpenAICompatibleAdapter:
                 args = json.loads(args_raw) if args_raw else {}
             except (json.JSONDecodeError, TypeError):
                 args = {"_raw": args_raw}
-            intents.append(ToolIntent(
-                tool_call_id=str(entry.get("id", "")),
-                capability_name=str(fn_data.get("name", "")),
-                arguments={str(k): v for k, v in args.items()} if isinstance(args, dict) else {},
-            ))
+            intents.append(
+                ToolIntent(
+                    tool_call_id=str(entry.get("id", "")),
+                    capability_name=str(fn_data.get("name", "")),
+                    arguments={str(k): v for k, v in args.items()}
+                    if isinstance(args, dict)
+                    else {},
+                )
+            )
         return intents

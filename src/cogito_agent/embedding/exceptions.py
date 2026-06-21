@@ -35,6 +35,4 @@ class EmbeddingDimensionMismatchError(EmbeddingError):
     def __init__(self, expected: int, actual: int) -> None:
         self.expected = expected
         self.actual = actual
-        super().__init__(
-            f"Embedding dimension mismatch: expected {expected}, got {actual}"
-        )
+        super().__init__(f"Embedding dimension mismatch: expected {expected}, got {actual}")

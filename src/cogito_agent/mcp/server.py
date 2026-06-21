@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,7 +12,13 @@ class MCPServerConfig(BaseModel):
     command: str
     args: list[str] = []
     env: dict[str, str] = {}
+    cwd: str | None = None
     enabled: bool = True
+
+    def fingerprint(self) -> str:
+        payload = self.model_dump(mode="json", exclude={"enabled"})
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
 
     @classmethod
     def load_from_directory(cls, directory: str) -> list[MCPServerConfig]:

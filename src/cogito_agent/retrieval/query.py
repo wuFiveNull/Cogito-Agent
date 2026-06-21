@@ -11,6 +11,7 @@ class MemoryQueryContext:
     session_topic_summary: str = ""
     workspace_id: str = ""
     session_id: str = ""
+    trace_id: str = ""
     detected_entities: list[str] = field(default_factory=list)
     temporal_hints: list[str] = field(default_factory=list)
     original_query: str = ""
@@ -19,31 +20,31 @@ class MemoryQueryContext:
 
 
 _ENTITY_PATTERN = re.compile(
-    r'(?:^|\s)([A-Z][a-z]+(?:[A-Z][a-z]+)*)'
-    r'|`([^`]+)`'
-    r'|([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)'
+    r"(?:^|\s)([A-Z][a-z]+(?:[A-Z][a-z]+)*)"
+    r"|`([^`]+)`"
+    r"|([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)"
 )
 
 _TEMPORAL_PATTERNS = [
-    re.compile(r'(上次|之前|后来|曾经|什么时候|那次|earlier|before|previous|last|then|after)'),
+    re.compile(r"(上次|之前|后来|曾经|什么时候|那次|earlier|before|previous|last|then|after)"),
 ]
 
 _GREETING_PATTERNS = [
-    re.compile(r'^(hi|hello|hey|你好|早上好|下午好|晚上好)\b', re.I),
-    re.compile(r'^(好的|可以|谢谢|不用|没事|ok|okay|thanks|thank you|bye|再见)\b', re.I),
-    re.compile(r'^[?.!,\s]*$'),
+    re.compile(r"^(hi|hello|hey|你好|早上好|下午好|晚上好)\b", re.I),
+    re.compile(r"^(好的|可以|谢谢|不用|没事|ok|okay|thanks|thank you|bye|再见)\b", re.I),
+    re.compile(r"^[?.!,\s]*$"),
 ]
 
 _PROFILE_PATTERNS = [
     re.compile(
-        r'(我喜欢|我不喜欢|我的名字|我的偏好|我的习惯|我的性格|我住在|我工作在|我毕业于)', re.I
+        r"(我喜欢|我不喜欢|我的名字|我的偏好|我的习惯|我的性格|我住在|我工作在|我毕业于)", re.I
     ),
-    re.compile(r'(my name|my preference|i like|i love|i prefer|i am|i live)', re.I),
+    re.compile(r"(my name|my preference|i like|i love|i prefer|i am|i live)", re.I),
 ]
 
 _PROJECT_TASK_PATTERNS = [
-    re.compile(r'(项目|任务|功能|bug|feature|issue|PR|分支|branch|repo|仓库)', re.I),
-    re.compile(r'(project|task|deadline|milestone|sprint)', re.I),
+    re.compile(r"(项目|任务|功能|bug|feature|issue|PR|分支|branch|repo|仓库)", re.I),
+    re.compile(r"(project|task|deadline|milestone|sprint)", re.I),
 ]
 
 
@@ -91,12 +92,12 @@ class MemoryQueryBuilder:
                 parts.append(summary)
 
         combined = " ".join(parts)
-        return combined[:self.MAX_QUERY_LENGTH]
+        return combined[: self.MAX_QUERY_LENGTH]
 
     def _sanitize_for_sparse(self, query: str) -> str:
-        sanitized = re.sub(r'[\'\"\(\)\*\:\-\+]', ' ', query)
-        sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-        return sanitized[:self.MAX_QUERY_LENGTH]
+        sanitized = re.sub(r"[\'\"\(\)\*\:\-\+]", " ", query)
+        sanitized = re.sub(r"\s+", " ", sanitized).strip()
+        return sanitized[: self.MAX_QUERY_LENGTH]
 
     @staticmethod
     def _extract_entities(text: str) -> list[str]:

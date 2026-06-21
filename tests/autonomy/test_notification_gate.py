@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 from cogito_agent.autonomy.gate import NotificationGate
 
 
@@ -129,7 +127,9 @@ def test_priority_default_is_normal(gate: NotificationGate, wid: str) -> None:
 def test_try_notify_or_inbox_fallback(gate: NotificationGate, wid: str) -> None:
     gate.set_quiet_hours(wid, start="00:00", end="23:59")
     channel, result = gate.try_notify_or_inbox(
-        wid, "fallback title", "fallback body",
+        wid,
+        "fallback title",
+        "fallback body",
     )
     assert channel == "inbox"
     assert isinstance(result, str)
@@ -138,7 +138,9 @@ def test_try_notify_or_inbox_fallback(gate: NotificationGate, wid: str) -> None:
 
 def test_try_notify_or_inbox_notifies(gate: NotificationGate, wid: str) -> None:
     channel, result = gate.try_notify_or_inbox(
-        wid, "notify title", "notify body",
+        wid,
+        "notify title",
+        "notify body",
     )
     assert channel == "notified"
     assert isinstance(result, str)

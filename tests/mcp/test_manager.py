@@ -7,6 +7,7 @@ from pathlib import Path
 from cogito_agent.capability import CapabilityRegistry
 from cogito_agent.mcp import MCPServerConfig
 from cogito_agent.mcp.manager import MCPServerManager
+from cogito_agent.shared import RiskLevel
 
 
 def test_manager_init() -> None:
@@ -38,6 +39,35 @@ def test_list_servers_empty() -> None:
     cap_reg = CapabilityRegistry()
     manager = MCPServerManager(cap_reg)
     assert manager.list_servers() == []
+
+
+def test_mcp_tools_are_high_risk_and_require_approval(monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, config: MCPServerConfig) -> None:
+            self.config = config
+            self.tools = [{"name": "read", "inputSchema": {"type": "object"}}]
+
+        def connect(self) -> None:
+            pass
+
+        def disconnect(self) -> None:
+            pass
+
+        def is_connected(self) -> bool:
+            return True
+
+    monkeypatch.setattr("cogito_agent.mcp.manager.MCPClient", FakeClient)
+    cap_reg = CapabilityRegistry()
+    manager = MCPServerManager(cap_reg)
+    manager.add_server(MCPServerConfig(name="local", command="server"))
+    manifest = cap_reg.get_manifest("mcp_local_read")
+    assert manifest is not None
+    assert manifest.risk_level == RiskLevel.high
+    assert manifest.approval_required is True
+    assert manifest.audit_required is True
+    assert manifest.allowed_contexts == ["interactive"]
+    manager.remove_server("local")
+    assert cap_reg.get_manifest("mcp_local_read") is None
 
 
 def test_sync_no_config_dir() -> None:

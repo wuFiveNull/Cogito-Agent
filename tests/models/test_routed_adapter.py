@@ -23,17 +23,13 @@ class FakeAdapter:
         self.content = content
         self.error = error
 
-    def chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> ModelResponse:
+    def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
         del messages, kwargs
         if self.error:
             raise self.error
         return ModelResponse(content=self.content)
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]:
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]:
         del messages, kwargs
         if self.error:
             raise self.error
@@ -59,6 +55,7 @@ def test_routed_adapter_falls_back_and_reports_health() -> None:
     }
     observed: list[ModelRouteDecision] = []
     route_events: list[ModelRouteEvent] = []
+
     def resolve(candidate: ModelCandidate) -> ModelAdapter:
         return adapters[candidate.id]
 
@@ -86,11 +83,10 @@ def test_routed_adapter_falls_back_and_reports_health() -> None:
 
 
 def test_routed_adapter_infers_tools_capability() -> None:
-    incapable = ModelCandidate(
-        provider="plain", model="m", capabilities={"chat"}, priority=1
-    )
+    incapable = ModelCandidate(provider="plain", model="m", capabilities={"chat"}, priority=1)
     capable = _candidate("tools", 2)
     router = ModelRouter([incapable, capable])
+
     def resolve(_candidate: ModelCandidate) -> ModelAdapter:
         return FakeAdapter()
 
@@ -111,18 +107,18 @@ def test_stream_falls_back_only_before_output() -> None:
         primary.id: FakeAdapter(error=ConnectionError("offline")),
         fallback.id: FakeAdapter(content="streamed"),
     }
+
     def resolve(candidate: ModelCandidate) -> ModelAdapter:
         return adapters[candidate.id]
 
     adapter = RoutedModelAdapter(router, resolve)
 
-    assert list(adapter.stream_chat([{"role": "user", "content": "hello"}])) == [
-        "streamed"
-    ]
+    assert list(adapter.stream_chat([{"role": "user", "content": "hello"}])) == ["streamed"]
 
 
 def test_routed_adapter_raises_when_no_candidate_is_eligible() -> None:
     router = ModelRouter([])
+
     def resolve(_candidate: ModelCandidate) -> ModelAdapter:
         return FakeAdapter()
 

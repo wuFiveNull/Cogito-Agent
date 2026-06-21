@@ -18,6 +18,7 @@ def _ensure_decision() -> str:
     db = get_db()
     dstore = DecisionStore(db)
     import uuid
+
     did = str(uuid.uuid4())
     dstore.save_decision(
         decision_id=did,
@@ -79,7 +80,7 @@ class TestAutonomyDashboard:
         assert resp.status_code == 200
 
     def test_shows_stat_cards(self) -> None:
-        did = _ensure_decision()
+        _ensure_decision()
         resp = client.get("/console/autonomy")
         assert "Total Decisions" in resp.text
         assert "Push" in resp.text
@@ -133,20 +134,29 @@ class TestAutonomyDecisionDetail:
         assert resp.status_code == 404
 
     def test_detail_shows_trace_link(self) -> None:
+        import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.autonomy import DecisionStore
-        import uuid
 
         db = get_db()
         dstore = DecisionStore(db)
         did = str(uuid.uuid4())
         dstore.save_decision(
-            decision_id=did, event_id=str(uuid.uuid4()),
-            workspace_id="default", user_id="u",
-            action="push", reason_code="rc", reason="r",
-            cost_score=0.5, priority_score=1.0,
-            dedup_hit=False, quiet_hours_hit=False, quota_hit=False,
-            requires_approval=False, trace_id="trace-abc-123",
+            decision_id=did,
+            event_id=str(uuid.uuid4()),
+            workspace_id="default",
+            user_id="u",
+            action="push",
+            reason_code="rc",
+            reason="r",
+            cost_score=0.5,
+            priority_score=1.0,
+            dedup_hit=False,
+            quiet_hours_hit=False,
+            quota_hit=False,
+            requires_approval=False,
+            trace_id="trace-abc-123",
         )
         resp = client.get(f"/console/autonomy/decisions/{did}")
         assert resp.status_code == 200
@@ -171,19 +181,27 @@ class TestAutonomyDecisionDetail:
         assert 'File "' not in html
 
     def test_xss_escape(self) -> None:
+        import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.autonomy import DecisionStore
-        import uuid
 
         db = get_db()
         dstore = DecisionStore(db)
         did = str(uuid.uuid4())
         dstore.save_decision(
-            decision_id=did, event_id=str(uuid.uuid4()),
-            workspace_id="default", user_id="<script>alert('xss')</script>",
-            action="push", reason_code="<script>", reason="<b>bold</b>",
-            cost_score=0.5, priority_score=1.0,
-            dedup_hit=False, quiet_hours_hit=False, quota_hit=False,
+            decision_id=did,
+            event_id=str(uuid.uuid4()),
+            workspace_id="default",
+            user_id="<script>alert('xss')</script>",
+            action="push",
+            reason_code="<script>",
+            reason="<b>bold</b>",
+            cost_score=0.5,
+            priority_score=1.0,
+            dedup_hit=False,
+            quiet_hours_hit=False,
+            quota_hit=False,
             requires_approval=False,
         )
         resp = client.get(f"/console/autonomy/decisions/{did}")
@@ -191,7 +209,7 @@ class TestAutonomyDecisionDetail:
         # User-controlled content must be escaped
         assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
         # Raw user-controlled tags should NOT appear
-        assert '<script>alert' not in html
+        assert "<script>alert" not in html
 
 
 class TestAutonomyFeedback:
@@ -262,26 +280,36 @@ class TestAutonomyFeedback:
         assert resp.status_code == 404
 
     def test_feedback_xss_escape(self) -> None:
+        import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.autonomy import DecisionStore, FeedbackStore
         from cogito_agent.governance import AuditLogger
-        import uuid
 
         db = get_db()
         dstore = DecisionStore(db)
         did = str(uuid.uuid4())
         dstore.save_decision(
-            decision_id=did, event_id=str(uuid.uuid4()),
-            workspace_id="default", user_id="u",
-            action="push", reason_code="rc", reason="r",
-            cost_score=0.5, priority_score=1.0,
-            dedup_hit=False, quiet_hours_hit=False, quota_hit=False,
+            decision_id=did,
+            event_id=str(uuid.uuid4()),
+            workspace_id="default",
+            user_id="u",
+            action="push",
+            reason_code="rc",
+            reason="r",
+            cost_score=0.5,
+            priority_score=1.0,
+            dedup_hit=False,
+            quiet_hours_hit=False,
+            quota_hit=False,
             requires_approval=False,
         )
         fb = FeedbackStore(db, audit_logger=AuditLogger(db))
         fb.record_feedback(
-            decision_id=did, event_id="e",
-            value="useful", comment="<script>alert('xss')</script>",
+            decision_id=did,
+            event_id="e",
+            value="useful",
+            comment="<script>alert('xss')</script>",
             workspace_id="default",
         )
         resp = client.get("/console/autonomy/feedback")
@@ -289,7 +317,7 @@ class TestAutonomyFeedback:
         # User-controlled comment must be HTML-escaped
         assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
         # Raw user-controlled script tag should NOT appear
-        assert '<script>alert(' not in html
+        assert "<script>alert(" not in html
 
 
 class TestAutonomyOutbox:
@@ -351,15 +379,17 @@ class TestAutonomyOutboxDetail:
         assert 'File "' not in html
 
     def test_outbox_xss_escape(self) -> None:
+        import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.autonomy import Outbox
-        import uuid
 
         db = get_db()
         obox = Outbox(db)
         did = str(uuid.uuid4())
         mid = obox.enqueue(
-            event_id="e", decision_id=did,
+            event_id="e",
+            decision_id=did,
             title="<script>alert('xss')</script>",
             body="<b>bold</b>",
             workspace_id="default",
@@ -369,20 +399,22 @@ class TestAutonomyOutboxDetail:
         # User-controlled title must be HTML-escaped
         assert "&lt;script&gt;alert" in html or "redacted" in html.lower()
         # Raw user-controlled tags should NOT appear
-        assert '<script>alert(' not in html
+        assert "<script>alert(" not in html
 
 
 class TestAutonomySecurity:
     def test_outbox_body_redacted_bearer(self) -> None:
+        import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.autonomy import Outbox
-        import uuid
 
         db = get_db()
         obox = Outbox(db)
         did = str(uuid.uuid4())
         mid = obox.enqueue(
-            event_id="e", decision_id=did,
+            event_id="e",
+            decision_id=did,
             title="Test",
             body="Token: sk-my-secret-api-key-12345",
             workspace_id="default",
@@ -392,20 +424,27 @@ class TestAutonomySecurity:
         assert "sk-my-secret-api-key-12345" not in html
 
     def test_decision_reason_redacted_api_key(self) -> None:
+        import uuid
+
         from cogito_agent.api.app import get_db
         from cogito_agent.autonomy import DecisionStore
-        import uuid
 
         db = get_db()
         dstore = DecisionStore(db)
         did = str(uuid.uuid4())
         dstore.save_decision(
-            decision_id=did, event_id=str(uuid.uuid4()),
-            workspace_id="default", user_id="u",
-            action="push", reason_code="rc",
+            decision_id=did,
+            event_id=str(uuid.uuid4()),
+            workspace_id="default",
+            user_id="u",
+            action="push",
+            reason_code="rc",
             reason="Key: sk-test-key-abcdef123456",
-            cost_score=0.5, priority_score=1.0,
-            dedup_hit=False, quiet_hours_hit=False, quota_hit=False,
+            cost_score=0.5,
+            priority_score=1.0,
+            dedup_hit=False,
+            quiet_hours_hit=False,
+            quota_hit=False,
             requires_approval=False,
         )
         resp = client.get(f"/console/autonomy/decisions/{did}")

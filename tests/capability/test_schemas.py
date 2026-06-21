@@ -1,4 +1,5 @@
 """Tests: Capability Manifest to tool schema conversion and filtering."""
+
 from __future__ import annotations
 
 import json
@@ -69,7 +70,9 @@ def test_filter_background_allowed() -> None:
         _make_manifest("both.tool", contexts=["interactive", "background"]),
     ]
     available = filter_available_tools(
-        manifests, interaction_mode="background", background_allowed=True,
+        manifests,
+        interaction_mode="background",
+        background_allowed=True,
     )
     names = [m.name for m in available]
     assert "both.tool" in names

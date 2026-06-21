@@ -67,12 +67,13 @@ class TestRedactionRegression:
         for pat in self.SECRET_VALUE_PATTERNS:
             if pat in body:
                 idx = body.index(pat)
-                ctx = body[max(0, idx-30):idx+len(pat)+30]
+                ctx = body[max(0, idx - 30) : idx + len(pat) + 30]
                 pytest.fail(f"{path} contains '{pat}' in: ...{ctx}...")
 
     @pytest.mark.parametrize("path", ALL_CONSOLE_PAGES + API_ENDPOINTS)
     def test_no_api_key_leak(self, path: str) -> None:
         import re
+
         resp = client.get(path)
         body = resp.text
         matches = re.findall(r"sk-[a-zA-Z0-9]{10,}", body)
@@ -82,6 +83,7 @@ class TestRedactionRegression:
     @pytest.mark.parametrize("path", ALL_CONSOLE_PAGES + API_ENDPOINTS)
     def test_no_bearer_token_leak(self, path: str) -> None:
         import re
+
         resp = client.get(path)
         body = resp.text
         matches = re.findall(r"Bearer\s+[A-Za-z0-9\-._~+/]{8,}", body)
@@ -95,4 +97,4 @@ class TestXSSRegression:
         resp = client.get(path)
         body = resp.text
         assert "Traceback" not in body, f"{path} leaks traceback"
-        assert "File \"" not in body, f"{path} leaks file path"
+        assert 'File "' not in body, f"{path} leaks file path"

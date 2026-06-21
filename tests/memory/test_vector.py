@@ -17,15 +17,13 @@ from cogito_agent.storage.repositories import MemoryRepository, WorkspaceReposit
 
 class _FakeEmbeddingService:
     model_name = "test-model"
+    dimension = 4
 
     def encode(self, text: str) -> list[float]:
-        dim = 4
         h = hash(text) % 10000
-        return [math.sin(h + i) for i in range(dim)]
+        return [math.sin(h + i) for i in range(self.dimension)]
 
-    def compute_similarity(
-        self, a: list[float], b: list[float]
-    ) -> float:
+    def compute_similarity(self, a: list[float], b: list[float]) -> float:
         return _cosine_similarity(a, b)
 
 
@@ -94,9 +92,11 @@ def test_hybrid_retriever_with_embeddings(tmp_path) -> None:
         vec = fake.encode(text)
         blob = _pack_embedding(vec)
         db.connection.execute(
-            "INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding, model_name)"
-            " VALUES (?, ?, ?)",
-            (mid, blob, fake.model_name),
+            "INSERT OR REPLACE INTO memory_embeddings_v2"
+            " (memory_id, workspace_id, provider_name, model_name, dimension,"
+            " embedding, content_hash, embedding_version, status, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, '2', 'ready', datetime('now'), datetime('now'))",
+            (mid, "ws-emb", "test", fake.model_name, fake.dimension, blob, ""),
         )
     db.connection.commit()
 

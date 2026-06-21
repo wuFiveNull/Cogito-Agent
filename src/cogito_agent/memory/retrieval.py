@@ -21,7 +21,8 @@ _TYPE_PRIORITY: dict[str, int] = {
 
 
 def _score_memory(
-    memory: dict[str, object], query: str | None = None,
+    memory: dict[str, object],
+    query: str | None = None,
 ) -> float:
     raw_type = memory.get("type", "general")
     type_str = str(raw_type) if raw_type is not None else "general"
@@ -38,11 +39,11 @@ def _score_memory(
         text = str(memory.get("text", ""))
         if query.lower() in text.lower():
             score *= 1.5
-        words = set(re.sub(r'[^\w\s]', '', query.lower()).split())
-        text_words = set(re.sub(r'[^\w\s]', '', text.lower()).split())
+        words = set(re.sub(r"[^\w\s]", "", query.lower()).split())
+        text_words = set(re.sub(r"[^\w\s]", "", text.lower()).split())
         overlap = len(words & text_words)
         if overlap > 0:
-            score *= (1.0 + 0.2 * min(overlap, 5))
+            score *= 1.0 + 0.2 * min(overlap, 5)
 
     if memory.get("status") in ("consolidated", "indexed"):
         score *= 1.2
@@ -55,29 +56,40 @@ def _score_memory(
 
 class MemoryRetriever:
     def __init__(
-        self, db: Database,
+        self,
+        db: Database,
         service: Any = None,
     ) -> None:
         self._db = db
         self._service = service
 
-    def _ensure_service(self):
+    def _ensure_service(self) -> None:
         if self._service is None:
             from cogito_agent.retrieval.service import create_retrieval_service
+
             self._service = create_retrieval_service(self._db)
 
     def search(
-        self, workspace_id: str, query: str, limit: int = 10,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
         include_archived: bool = False,
     ) -> list[dict[str, object]]:
         self._ensure_service()
-        return self._service.search_compat(
-            workspace_id, query, limit=limit,
+        result: list[dict[str, object]] = self._service.search_compat(
+            workspace_id,
+            query,
+            limit=limit,
             include_archived=include_archived,
         )
+        return result
 
     def search_with_lineage(
-        self, workspace_id: str, query: str, limit: int = 10,
+        self,
+        workspace_id: str,
+        query: str,
+        limit: int = 10,
         include_archived: bool = False,
     ) -> list[dict[str, object]]:
         results = self.search(workspace_id, query, limit, include_archived)
@@ -107,14 +119,19 @@ class MemoryRetriever:
 
             hybrid = HybridRetriever(self._db)
             return hybrid.search(
-                workspace_id, query, limit,
-                bm25_weight=bm25_weight, semantic_weight=semantic_weight,
+                workspace_id,
+                query,
+                limit,
+                bm25_weight=bm25_weight,
+                semantic_weight=semantic_weight,
             )
         except Exception:
             return self.search(workspace_id, query, limit)
 
     def list_recent(
-        self, workspace_id: str, limit: int = 20,
+        self,
+        workspace_id: str,
+        limit: int = 20,
     ) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
             "SELECT * FROM memories WHERE workspace_id = ?"

@@ -64,6 +64,16 @@ class ModelRouteConfig(BaseModel):
     fallback_strategy: str = "ordered"
 
 
+class VisionSettings(BaseModel):
+    enabled: bool = False
+    provider: str = ""
+    base_url: str | None = None
+    api_key_ref: str | None = None
+    api_key: str | None = None
+    model: str = ""
+    timeout_sec: int = 60
+
+
 class ModelSettings(BaseModel):
     provider: str = "mock"
     base_url: str = ""
@@ -76,6 +86,7 @@ class ModelSettings(BaseModel):
     streaming_enabled: bool = True
     candidates: list[ModelCandidateConfig] = Field(default_factory=list)
     routes: dict[str, ModelRouteConfig] = Field(default_factory=dict)
+    vision: VisionSettings = Field(default_factory=VisionSettings)
 
 
 class QuietHoursSettings(BaseModel):
@@ -100,12 +111,31 @@ class FeedbackSettings(BaseModel):
     enabled: bool = True
 
 
+class JudgementSettings(BaseModel):
+    """Settings for the LLM Judge used in notification decisions.
+
+    The Judge evaluates 3 LLM dimensions (information_gap, relevance,
+    expected_impact) on a 1-5 scale and blends them with 3 deterministic
+    dimensions (urgency, balance, dynamics) using configurable weights.
+    """
+    send_threshold: float = 0.60
+    veto_balance_min: float = 0.1
+    veto_llm_dim_min: int = 2
+    weight_urgency: float = 0.15
+    weight_balance: float = 0.10
+    weight_dynamics: float = 0.10
+    weight_information_gap: float = 0.25
+    weight_relevance: float = 0.20
+    weight_expected_impact: float = 0.20
+
+
 class AutonomySettings(BaseModel):
     enabled: bool = True
     quiet_hours: QuietHoursSettings = Field(default_factory=QuietHoursSettings)
     notification: NotificationSettings = Field(default_factory=NotificationSettings)
     dedup: DedupSettings = Field(default_factory=DedupSettings)
     feedback: FeedbackSettings = Field(default_factory=FeedbackSettings)
+    judgement: JudgementSettings = Field(default_factory=JudgementSettings)
 
 
 class SecretsSettings(BaseModel):
@@ -132,10 +162,12 @@ class LoggingSettings(BaseModel):
 
 
 class SecuritySettings(BaseModel):
-    cors_origins: list[str] = Field(default_factory=lambda: [
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+    )
     max_request_size: int = 10 * 1024 * 1024
     csrf_enabled: bool = True
 
@@ -155,6 +187,7 @@ class EmbeddingSettings(BaseModel):
     base_url: str = ""
     model: str = "all-MiniLM-L6-v2"
     expected_dimension: int = 0
+    api_key: str = ""
     api_key_secret_name: str = ""
     api_key_env: str = "OPENAI_API_KEY"
     encoding_format: str = "float"
@@ -168,13 +201,19 @@ class EmbeddingSettings(BaseModel):
     max_input_tokens: int = 8192
 
 
-class RetrievalWeightsSettings(BaseModel):
-    dense: float = 0.35
-    sparse: float = 0.30
-    recency: float = 0.10
-    confidence: float = 0.10
-    task_relevance: float = 0.10
-    type_priority: float = 0.05
+class RetrievalRRFSettings(BaseModel):
+    """RRF (Reciprocal Rank Fusion) parameters.
+
+    Replaces the old weighted-sum fusion which required 6 hand-tuned weights.
+    RRF is rank-based and doesn't care about absolute score magnitudes.
+
+    hotness_alpha (0=disabled): when >0, boosts frequently-accessed, high-
+    confidence memories by blending hotness_score into the RRF rank score:
+    final = rrf * (1 + hotness_alpha * hotness_score)
+    """
+    k: float = 60.0
+    keyword_weight: float = 0.5
+    hotness_alpha: float = 0.0
 
 
 class TypePolicySettings(BaseModel):
@@ -194,17 +233,19 @@ class RetrievalSettings(BaseModel):
     min_final_score: float = 0.20
     recency_half_life_days: float = 90.0
     query_recent_user_turns: int = 2
-    weights: RetrievalWeightsSettings = Field(default_factory=RetrievalWeightsSettings)
-    type_policy: dict[str, TypePolicySettings] = Field(default_factory=lambda: {
-        "profile": TypePolicySettings(threshold=0.35, max_items=2, resident_eligible=True),
-        "preference": TypePolicySettings(threshold=0.40, max_items=3, resident_eligible=True),
-        "project": TypePolicySettings(threshold=0.50, max_items=4, resident_eligible=False),
-        "task": TypePolicySettings(threshold=0.50, max_items=4, resident_eligible=False),
-        "relationship": TypePolicySettings(threshold=0.50, max_items=2, resident_eligible=True),
-        "episodic": TypePolicySettings(threshold=0.58, max_items=3, resident_eligible=False),
-        "skill": TypePolicySettings(threshold=0.60, max_items=2, resident_eligible=False),
-        "general": TypePolicySettings(threshold=0.60, max_items=2, resident_eligible=False),
-    })
+    rrf: RetrievalRRFSettings = Field(default_factory=RetrievalRRFSettings)
+    type_policy: dict[str, TypePolicySettings] = Field(
+        default_factory=lambda: {
+            "profile": TypePolicySettings(threshold=0.35, max_items=2, resident_eligible=True),
+            "preference": TypePolicySettings(threshold=0.40, max_items=3, resident_eligible=True),
+            "project": TypePolicySettings(threshold=0.50, max_items=4, resident_eligible=False),
+            "task": TypePolicySettings(threshold=0.50, max_items=4, resident_eligible=False),
+            "relationship": TypePolicySettings(threshold=0.50, max_items=2, resident_eligible=True),
+            "episodic": TypePolicySettings(threshold=0.58, max_items=3, resident_eligible=False),
+            "skill": TypePolicySettings(threshold=0.60, max_items=2, resident_eligible=False),
+            "general": TypePolicySettings(threshold=0.60, max_items=2, resident_eligible=False),
+        }
+    )
 
 
 class MemorySettings(BaseModel):
@@ -326,6 +367,7 @@ def load_config(
     if os.path.isfile(yaml_path):
         try:
             import yaml
+
             with open(yaml_path, encoding="utf-8") as f:
                 yaml_data = yaml.safe_load(f) or {}
             raw = _deep_merge(raw, yaml_data)
@@ -337,6 +379,7 @@ def load_config(
     if os.path.isfile(json_path):
         try:
             import json as _json
+
             with open(json_path, encoding="utf-8") as f:
                 json_data = _json.load(f) or {}
             raw = _deep_merge(raw, json_data)
@@ -452,3 +495,111 @@ def initialize_config(path: str | None = None, *, force: bool = False) -> str:
     # Refuse to leave an invalid generated configuration behind unnoticed.
     CogitoConfig(**load_toml_config(str(target)))
     return str(target)
+
+
+# ── Model adapter builder (moved from config_loader.py) ──────────────────────
+
+
+def build_multimodel_adapter(
+    config: CogitoConfig | None = None,
+) -> Any | None:
+    """Build a RoutedModelAdapter from multi-candidate config.
+
+    Reads ``model.candidates`` from the config and creates a router with
+    all enabled candidates. Falls back to single-model config if no
+    candidates are defined.
+
+    Returns a ``RoutedModelAdapter`` or ``None`` (mock mode).
+    """
+    if config is None:
+        config = load_config()
+
+    cfg = config.model
+
+    if cfg.candidates:
+        from cogito_agent.models import (
+            ModelAdapter,
+            ModelCandidate,
+            ModelRouter,
+            RoutedModelAdapter,
+        )
+        from cogito_agent.models.openai_adapter import OpenAICompatibleAdapter
+
+        adapters: dict[str, ModelAdapter] = {}
+        candidates: list[ModelCandidate] = []
+
+        for cand_cfg in cfg.candidates:
+            if not cand_cfg.enabled:
+                continue
+            if cand_cfg.provider == "mock":
+                continue
+
+            api_key = cand_cfg.api_key or ""
+            if cand_cfg.api_key_ref:
+                api_key = os.environ.get(cand_cfg.api_key_ref, "") or api_key
+
+            adapter = OpenAICompatibleAdapter(
+                api_key=api_key or "",
+                base_url=cand_cfg.base_url or "",
+                model=cand_cfg.model,
+                timeout_sec=cfg.timeout_seconds,
+            )
+
+            candidate = ModelCandidate(
+                candidate_id=cand_cfg.id,
+                provider=cand_cfg.provider,
+                model=adapter.model,
+                capabilities=set(cand_cfg.capabilities) if cand_cfg.capabilities else {"chat"},
+                roles=frozenset(cand_cfg.roles) if cand_cfg.roles else frozenset({"chat"}),
+                input_modalities=(
+                    frozenset(cand_cfg.input_modalities)
+                    if cand_cfg.input_modalities
+                    else frozenset({"text"})
+                ),
+                output_formats=frozenset(cand_cfg.output_formats)
+                if cand_cfg.output_formats
+                else frozenset(),
+                context_window=cand_cfg.context_window,
+                quality_score=cand_cfg.quality_score,
+                expected_latency_ms=cand_cfg.expected_latency_ms,
+                input_cost_per_million=cand_cfg.input_cost_per_million,
+                output_cost_per_million=cand_cfg.output_cost_per_million,
+                priority=cand_cfg.priority,
+                enabled=True,
+            )
+            adapters[candidate.id] = adapter
+            candidates.append(candidate)
+
+        if not candidates:
+            return None
+
+        router = ModelRouter(candidates)
+
+        def _resolve(c: ModelCandidate) -> ModelAdapter:
+            return adapters[c.id]
+
+        return RoutedModelAdapter(router, _resolve)
+
+    if cfg.provider == "mock":
+        return None
+
+    from cogito_agent.models import ModelCandidate, ModelRouter, RoutedModelAdapter
+    from cogito_agent.models.openai_adapter import OpenAICompatibleAdapter
+
+    api_key = cfg.api_key_env or ""
+    if api_key:
+        api_key = os.environ.get(api_key, "")
+    adapter = OpenAICompatibleAdapter(
+        api_key=api_key or "",
+        base_url=cfg.base_url or "",
+        model=cfg.model,
+        timeout_sec=cfg.timeout_seconds,
+    )
+    candidate = ModelCandidate(
+        provider=cfg.provider,
+        model=adapter.model,
+        capabilities={"chat", "tools"},
+        context_window=32_768,
+    )
+    router = ModelRouter([candidate])
+    return RoutedModelAdapter(router, lambda _c: adapter)

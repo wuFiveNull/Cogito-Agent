@@ -2,8 +2,6 @@
 
 from cogito_agent.autonomy import (
     DecisionAction,
-    DecisionStore,
-    FeedbackStore,
     NotificationGate,
     Outbox,
     ProactiveLoop,
@@ -12,11 +10,12 @@ from cogito_agent.autonomy import (
 from cogito_agent.autonomy.events import AutonomyEvent
 from cogito_agent.governance import AuditLogger, PolicyEngine, PolicyRule
 from cogito_agent.shared import DecisionType
-from cogito_agent.trace import Tracer
 
 
 def test_governance_allow_through_proactive_loop(
-    db, wid: str, permissive_policy: PolicyEngine,
+    db,
+    wid: str,
+    permissive_policy: PolicyEngine,
 ):
     gate = NotificationGate(db, policy_engine=permissive_policy)
     loop = ProactiveLoop(
@@ -31,11 +30,14 @@ def test_governance_allow_through_proactive_loop(
 
 
 def test_governance_deny_through_proactive_loop(
-    db, wid: str,
+    db,
+    wid: str,
 ):
-    deny_policy = PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.deny),
-    ])
+    deny_policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.deny),
+        ]
+    )
     gate = NotificationGate(db, policy_engine=deny_policy)
     loop = ProactiveLoop(
         scheduler=SchedulerEngine(db),
@@ -49,11 +51,14 @@ def test_governance_deny_through_proactive_loop(
 
 
 def test_governance_require_approval_through_proactive_loop(
-    db, wid: str,
+    db,
+    wid: str,
 ):
-    approval_policy = PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.require_approval),
-    ])
+    approval_policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.require_approval),
+        ]
+    )
     gate = NotificationGate(db, policy_engine=approval_policy)
     loop = ProactiveLoop(
         scheduler=SchedulerEngine(db),
@@ -68,11 +73,14 @@ def test_governance_require_approval_through_proactive_loop(
 
 
 def test_governance_deny_writes_audit(
-    db, wid: str,
+    db,
+    wid: str,
 ):
-    deny_policy = PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.deny),
-    ])
+    deny_policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.deny),
+        ]
+    )
     gate = NotificationGate(db, policy_engine=deny_policy)
     audit = AuditLogger(db)
     loop = ProactiveLoop(
@@ -84,8 +92,7 @@ def test_governance_deny_writes_audit(
     event = AutonomyEvent(title="gov deny audit", workspace_id=wid)
     loop.process_event(event)
     cur = db.connection.execute(
-        "SELECT action, decision, reason FROM audit_logs"
-        " WHERE action = 'autonomy.decision_skip'"
+        "SELECT action, decision, reason FROM audit_logs WHERE action = 'autonomy.decision_skip'"
     )
     rows = cur.fetchall()
     assert len(rows) >= 1
@@ -93,11 +100,14 @@ def test_governance_deny_writes_audit(
 
 
 def test_proactive_loop_requires_approval_no_outbox(
-    db, wid: str,
+    db,
+    wid: str,
 ):
-    approval_policy = PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.require_approval),
-    ])
+    approval_policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.require_approval),
+        ]
+    )
     gate = NotificationGate(db, policy_engine=approval_policy)
     outbox = Outbox(db)
     loop = ProactiveLoop(
@@ -110,4 +120,3 @@ def test_proactive_loop_requires_approval_no_outbox(
     loop.process_event(event)
     msgs = outbox.list_all(workspace_id=wid)
     assert len(msgs) == 0
-

@@ -88,12 +88,14 @@ class VisionObservationService:
         ) -> ToolResult:
             if not attachment_id:
                 return ToolResult(
-                    status="error", summary="attachment_id is required",
+                    status="error",
+                    summary="attachment_id is required",
                     error="Missing attachment_id argument",
                 )
             if not prompt:
                 return ToolResult(
-                    status="error", summary="prompt is required",
+                    status="error",
+                    summary="prompt is required",
                     error="Missing prompt argument",
                 )
             try:
@@ -129,7 +131,9 @@ class VisionObservationService:
         self._tracer = tracer
 
     def set_current_context(
-        self, workspace_id: str = "", trace_id: str = "",
+        self,
+        workspace_id: str = "",
+        trace_id: str = "",
     ) -> None:
         self._current_workspace_id = workspace_id
         self._current_trace_id = trace_id
@@ -196,9 +200,7 @@ class VisionObservationService:
             created_at=datetime.now(UTC),
         )
 
-    def get_attachment(
-        self, attachment_id: str, workspace_id: str
-    ) -> Attachment | None:
+    def get_attachment(self, attachment_id: str, workspace_id: str) -> Attachment | None:
         record = self._att_repo.get_by_id(attachment_id, workspace_id)
         if record is None:
             return None
@@ -236,6 +238,7 @@ class VisionObservationService:
         if not attachment.storage_path:
             raise FileNotFoundError(f"No storage path for attachment {attachment.id}")
         from pathlib import Path
+
         return Path(attachment.storage_path).read_bytes()
 
     # ── Vision Observation ─────────────────────────────────────────────────
@@ -290,7 +293,8 @@ class VisionObservationService:
             if cached is not None:
                 logger.info(
                     "Vision cache HIT for attachment %s (prompt: %.50s)",
-                    attachment_id, prompt,
+                    attachment_id,
+                    prompt,
                 )
                 self._log_cache_hit(trace_id, attachment_id, cache_key)
                 return str(cached["result_text"])
@@ -298,7 +302,8 @@ class VisionObservationService:
         # Cache miss — call vision model
         logger.info(
             "Vision cache MISS for attachment %s (prompt: %.50s)",
-            attachment_id, prompt,
+            attachment_id,
+            prompt,
         )
         self._log_cache_miss(trace_id, attachment_id, cache_key)
 
@@ -448,9 +453,7 @@ class VisionObservationService:
             span.output_summary = "cache_key=" + cache_key[:16]
             self._tracer.end_span(span)
 
-    def _log_observation_persist(
-        self, trace_id: str, obs_id: str, cache_key: str
-    ) -> None:
+    def _log_observation_persist(self, trace_id: str, obs_id: str, cache_key: str) -> None:
         if self._tracer is None or not trace_id:
             return
         span = self._tracer.create_span(trace_id, "vision.observation_persist", None)

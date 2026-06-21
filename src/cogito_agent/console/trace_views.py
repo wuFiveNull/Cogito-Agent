@@ -111,12 +111,14 @@ def _trace_stats(workspace_id: str) -> dict[str, int]:
     params = (workspace_id,) if workspace_id != "*" else ()
     total = cur.execute(f"SELECT COUNT(*) FROM traces {wc}", params).fetchone()[0]
     ok = cur.execute(
-        f"SELECT COUNT(*) FROM traces {wc} AND status='completed'" if wc
+        f"SELECT COUNT(*) FROM traces {wc} AND status='completed'"
+        if wc
         else "SELECT COUNT(*) FROM traces WHERE status='completed'",
         params if wc else (),
     ).fetchone()[0]
     err = cur.execute(
-        f"SELECT COUNT(*) FROM traces {wc} AND status='error'" if wc
+        f"SELECT COUNT(*) FROM traces {wc} AND status='error'"
+        if wc
         else "SELECT COUNT(*) FROM traces WHERE status='error'",
         params if wc else (),
     ).fetchone()[0]
@@ -137,9 +139,7 @@ def _build_span_tree(
 
     def _attach_children(node: dict[str, object]) -> dict[str, object]:
         sid = str(node.get("id", ""))
-        node["children"] = [
-            _attach_children(c) for c in children_map.get(sid, [])
-        ]
+        node["children"] = [_attach_children(c) for c in children_map.get(sid, [])]
         return node
 
     return [_attach_children(r) for r in roots]
@@ -212,7 +212,8 @@ async def trace_detail(request: Request, trace_id: str) -> HTMLResponse:
 
     trace = _redact_item(trace)
     raw_spans: list[dict[str, object]] = cast(
-        list[dict[str, object]], trace.get("spans") or [],
+        list[dict[str, object]],
+        trace.get("spans") or [],
     )
     tree = _build_span_tree(raw_spans)
 
@@ -223,17 +224,20 @@ async def trace_detail(request: Request, trace_id: str) -> HTMLResponse:
         )
 
     raw_mc: list[dict[str, object]] = cast(
-        list[dict[str, object]], trace.get("model_calls") or [],
+        list[dict[str, object]],
+        trace.get("model_calls") or [],
     )
     model_calls = [_redact_item(m) for m in raw_mc]
 
     raw_tc: list[dict[str, object]] = cast(
-        list[dict[str, object]], trace.get("tool_calls") or [],
+        list[dict[str, object]],
+        trace.get("tool_calls") or [],
     )
     tool_calls = [_redact_item(t) for t in raw_tc]
 
     raw_al: list[dict[str, object]] = cast(
-        list[dict[str, object]], trace.get("audit_logs") or [],
+        list[dict[str, object]],
+        trace.get("audit_logs") or [],
     )
     audit_logs = [_redact_item(a) for a in raw_al]
 

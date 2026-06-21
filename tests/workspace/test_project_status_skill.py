@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from cogito_agent.skill.builtin.project_status import run_project_status, PROJECT_STATUS_MANIFEST
+from cogito_agent.skill.builtin.project_status import PROJECT_STATUS_MANIFEST, run_project_status
 from cogito_agent.storage import Database
-from cogito_agent.storage.repositories import WorkspaceRepository, MemoryRepository
-from cogito_agent.workspace import WorkspaceFileRegistry, FileIngestionService
+from cogito_agent.storage.repositories import MemoryRepository, WorkspaceRepository
+from cogito_agent.workspace import FileIngestionService, WorkspaceFileRegistry
 
 
 @pytest.fixture
@@ -52,7 +52,9 @@ class TestProjectStatusSkill:
             registry = WorkspaceFileRegistry(db)
             ing = FileIngestionService(db)
             root = registry.register_root(ws, str(tmp))
-            (tmp / "status.md").write_text("# Project Update\n\nWorking on phase 2.", encoding="utf-8")
+            (tmp / "status.md").write_text(
+                "# Project Update\n\nWorking on phase 2.", encoding="utf-8"
+            )
             ing.scan_root(str(root["id"]), ws)
 
             result = run_project_status(db, workspace_id=ws)
@@ -60,14 +62,14 @@ class TestProjectStatusSkill:
             assert result["file_chunk_count"] >= 1
 
     def test_run_project_status_creates_inbox(self, db: Database, ws: str) -> None:
-        result = run_project_status(db, workspace_id=ws)
+        run_project_status(db, workspace_id=ws)
         inbox = db.connection.execute(
             "SELECT * FROM inbox_items WHERE source = 'skill.project_status'"
         ).fetchall()
         assert len(inbox) >= 1
 
     def test_run_project_status_creates_audit_logs(self, db: Database, ws: str) -> None:
-        result = run_project_status(db, workspace_id=ws)
+        run_project_status(db, workspace_id=ws)
         logs = db.connection.execute(
             "SELECT * FROM audit_logs WHERE workspace_id = ?", (ws,)
         ).fetchall()
@@ -77,7 +79,5 @@ class TestProjectStatusSkill:
         result = run_project_status(db, workspace_id=ws)
         trace_id = result["trace_id"]
         assert trace_id is not None
-        trace = db.connection.execute(
-            "SELECT * FROM traces WHERE id = ?", (trace_id,)
-        ).fetchone()
+        trace = db.connection.execute("SELECT * FROM traces WHERE id = ?", (trace_id,)).fetchone()
         assert trace is not None

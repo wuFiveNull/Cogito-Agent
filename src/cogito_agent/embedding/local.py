@@ -37,6 +37,7 @@ class LocalSentenceTransformerEmbeddingProvider:
             return
         try:
             from sentence_transformers import SentenceTransformer
+
             model = SentenceTransformer(self._model_name)
             self._model = model
             self._dimension = model.get_sentence_embedding_dimension()
@@ -53,7 +54,9 @@ class LocalSentenceTransformerEmbeddingProvider:
         self._load_model()
         assert self._model is not None
         embeddings = self._model.encode(
-            list(texts), normalize_embeddings=True, show_progress_bar=False,
+            list(texts),
+            normalize_embeddings=True,
+            show_progress_bar=False,
         )
         return [e.tolist() for e in embeddings]
 

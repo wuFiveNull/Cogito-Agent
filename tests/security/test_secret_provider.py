@@ -1,4 +1,5 @@
 """Tests for SecretProvider implementations."""
+
 from __future__ import annotations
 
 import gc
@@ -106,6 +107,7 @@ def test_local_provider_set_and_get():
 
 def test_local_provider_list():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:
@@ -121,6 +123,7 @@ def test_local_provider_list():
 
 def test_local_provider_delete():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:
@@ -134,6 +137,7 @@ def test_local_provider_delete():
 
 def test_local_provider_rotate():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:
@@ -149,6 +153,7 @@ def test_local_provider_rotate():
 
 def test_local_provider_metadata():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:
@@ -170,6 +175,7 @@ def test_local_provider_metadata():
 
 def test_local_provider_all_metadata():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:
@@ -187,6 +193,7 @@ def test_local_provider_all_metadata():
 
 def test_local_provider_nonexistent():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:

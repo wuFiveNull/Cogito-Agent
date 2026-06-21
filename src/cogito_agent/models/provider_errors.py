@@ -51,27 +51,15 @@ def safe_provider_error_message(
 ) -> str:
     safe_detail = _redactor.redact(detail) if detail else ""
     templates = {
-        ProviderErrorCode.NOT_CONFIGURED: (
-            f"Provider '{provider}' is not configured"
-        ),
+        ProviderErrorCode.NOT_CONFIGURED: (f"Provider '{provider}' is not configured"),
         ProviderErrorCode.SECRET_MISSING: (
             f"Provider '{provider}' requires an API key but none found"
         ),
-        ProviderErrorCode.UNREACHABLE: (
-            f"Provider '{provider}' is unreachable"
-        ),
-        ProviderErrorCode.TIMEOUT: (
-            f"Provider '{provider}' timed out"
-        ),
-        ProviderErrorCode.RATE_LIMITED: (
-            f"Provider '{provider}' rate limited"
-        ),
-        ProviderErrorCode.AUTH_FAILED: (
-            f"Provider '{provider}' authentication failed"
-        ),
-        ProviderErrorCode.MODEL_UNAVAILABLE: (
-            f"Model not available for provider '{provider}'"
-        ),
+        ProviderErrorCode.UNREACHABLE: (f"Provider '{provider}' is unreachable"),
+        ProviderErrorCode.TIMEOUT: (f"Provider '{provider}' timed out"),
+        ProviderErrorCode.RATE_LIMITED: (f"Provider '{provider}' rate limited"),
+        ProviderErrorCode.AUTH_FAILED: (f"Provider '{provider}' authentication failed"),
+        ProviderErrorCode.MODEL_UNAVAILABLE: (f"Model not available for provider '{provider}'"),
         ProviderErrorCode.UNSUPPORTED_MODALITY: (
             f"Provider '{provider}' does not support modality: {safe_detail}"
         ),
@@ -80,7 +68,8 @@ def safe_provider_error_message(
             "Please configure a vision model (e.g., Gemini, Qwen-VL, vLLM)."
         ),
         ProviderErrorCode.UNKNOWN_ERROR: (
-            f"Provider '{provider}' error: {safe_detail}" if safe_detail
+            f"Provider '{provider}' error: {safe_detail}"
+            if safe_detail
             else f"Provider '{provider}' unknown error"
         ),
     }

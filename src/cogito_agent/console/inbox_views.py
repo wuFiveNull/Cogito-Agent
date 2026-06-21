@@ -9,6 +9,7 @@ from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from cogito_agent.application import InboxApplicationService
 from cogito_agent.storage import Database as _Database
 from cogito_agent.version import APP_VERSION
 
@@ -27,16 +28,27 @@ CONSOLE_WORKSPACE_ID = "default"
 
 def _get_db() -> _Database:
     from cogito_agent.api.app import get_db as _get_shared_db
+
     return _get_shared_db()
 
 
-def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
+def _inbox_commands() -> InboxApplicationService:
+    from cogito_agent.autonomy import FeedbackStore, Outbox
+    from cogito_agent.governance import AuditLogger
+
     db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+    audit = AuditLogger(db)
+    return InboxApplicationService(
+        Outbox(db),
+        FeedbackStore(db, audit_logger=audit),
+        audit,
+    )
+
+
+def _ensure_workspace(workspace_id: str) -> None:
+    from cogito_agent.application import WorkspaceApplicationService
+
+    WorkspaceApplicationService(_get_db()).ensure_workspace(workspace_id)
 
 
 def _redact_item(item: dict[str, object]) -> dict[str, object]:
@@ -84,6 +96,7 @@ async def inbox_list(
 
     if time_range and time_range != "all":
         from datetime import UTC, datetime, timedelta
+
         days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
         days = days_map.get(time_range, 0)
         if days:
@@ -107,6 +120,7 @@ async def inbox_list(
 
     if time_range and time_range != "all":
         from datetime import UTC, datetime, timedelta
+
         days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
         days = days_map.get(time_range, 0)
         if days:
@@ -154,8 +168,13 @@ async def inbox_list(
 
 def _build_inbox_stats(db: _Database) -> dict[str, int]:
     stats: dict[str, int] = {
-        "total": 0, "pending": 0, "sent": 0, "failed": 0,
-        "retrying": 0, "dead_letter": 0, "skipped": 0,
+        "total": 0,
+        "pending": 0,
+        "sent": 0,
+        "failed": 0,
+        "retrying": 0,
+        "dead_letter": 0,
+        "skipped": 0,
     }
     try:
         cur = db.connection.execute(
@@ -180,16 +199,12 @@ async def inbox_detail(request: Request, item_id: str) -> HTMLResponse:
 
     item = None
     source = "outbox"
-    cur = db.connection.execute(
-        "SELECT * FROM outbox_messages WHERE id = ?", (item_id,)
-    )
+    cur = db.connection.execute("SELECT * FROM outbox_messages WHERE id = ?", (item_id,))
     row = cur.fetchone()
     if row:
         item = dict(row)
     else:
-        cur = db.connection.execute(
-            "SELECT * FROM inbox_items WHERE id = ?", (item_id,)
-        )
+        cur = db.connection.execute("SELECT * FROM inbox_items WHERE id = ?", (item_id,))
         row = cur.fetchone()
         if row:
             item = dict(row)
@@ -229,14 +244,7 @@ async def inbox_detail(request: Request, item_id: str) -> HTMLResponse:
 @inbox_router.post("/{item_id}/read", include_in_schema=False)
 async def inbox_mark_read(request: Request, item_id: str) -> Response:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    from datetime import UTC, datetime
-    now = datetime.now(UTC).isoformat()
-    db.connection.execute(
-        "UPDATE outbox_messages SET read_at = ? WHERE id = ?",
-        (now, item_id),
-    )
-    db.connection.commit()
+    _inbox_commands().mark_read(item_id)
     referer = request.headers.get("referer", "/console/inbox")
     return RedirectResponse(url=referer, status_code=303)
 
@@ -247,22 +255,10 @@ async def inbox_mark_read(request: Request, item_id: str) -> Response:
 @inbox_router.post("/{item_id}/dismiss", include_in_schema=False)
 async def inbox_dismiss(request: Request, item_id: str) -> Response:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    from datetime import UTC, datetime
-    now = datetime.now(UTC).isoformat()
-    db.connection.execute(
-        "UPDATE outbox_messages SET dismissed_at = ?, status = 'skipped' WHERE id = ?",
-        (now, item_id),
-    )
-    db.connection.commit()
-    from cogito_agent.governance import AuditLogger
-    AuditLogger(db).log(
-        actor_id="user",
-        action="inbox.dismiss",
-        resource=f"outbox:{item_id}",
+    _inbox_commands().dismiss(
+        item_id,
         workspace_id=CONSOLE_WORKSPACE_ID,
-        decision="allow",
-        reason="User dismissed notification",
+        actor_id="user",
     )
     referer = request.headers.get("referer", "/console/inbox")
     return RedirectResponse(url=referer, status_code=303)
@@ -274,21 +270,10 @@ async def inbox_dismiss(request: Request, item_id: str) -> Response:
 @inbox_router.post("/{item_id}/retry", include_in_schema=False)
 async def inbox_retry(request: Request, item_id: str) -> Response:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-    db.connection.execute(
-        "UPDATE outbox_messages SET status = 'pending', last_error = NULL,"
-        " next_retry_at = NULL, delivery_attempts = 0 WHERE id = ?",
-        (item_id,),
-    )
-    db.connection.commit()
-    from cogito_agent.governance import AuditLogger
-    AuditLogger(db).log(
-        actor_id="user",
-        action="inbox.retry",
-        resource=f"outbox:{item_id}",
+    _inbox_commands().retry(
+        item_id,
         workspace_id=CONSOLE_WORKSPACE_ID,
-        decision="allow",
-        reason="User requested retry",
+        actor_id="user",
     )
     referer = request.headers.get("referer", "/console/inbox")
     return RedirectResponse(url=referer, status_code=303)
@@ -304,10 +289,14 @@ async def inbox_feedback(
     value: str = Form(...),
 ) -> Response:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
-    db = _get_db()
-
-    valid = ["useful", "not_useful", "too_many", "wrong_time", "irrelevant"]
-    if value not in valid:
+    try:
+        _inbox_commands().feedback(
+            item_id,
+            value,
+            workspace_id=CONSOLE_WORKSPACE_ID,
+        )
+    except ValueError:
+        valid = sorted(_inbox_commands().VALID_FEEDBACK)
         ctx: dict[str, object] = {
             "request": request,
             "title": "Invalid Feedback",
@@ -315,15 +304,5 @@ async def inbox_feedback(
             "menu": _menu_items(),
         }
         return templates.TemplateResponse(request, "console/error.html", ctx, status_code=422)
-
-    from cogito_agent.autonomy import FeedbackStore
-    from cogito_agent.governance import AuditLogger
-    fb = FeedbackStore(db, audit_logger=AuditLogger(db))
-    fb.record_feedback(
-        decision_id=item_id,
-        event_id="",
-        value=value,
-        workspace_id=CONSOLE_WORKSPACE_ID,
-    )
     referer = request.headers.get("referer", "/console/inbox")
     return RedirectResponse(url=referer, status_code=303)

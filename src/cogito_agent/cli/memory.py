@@ -2,14 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from cogito_agent.governance import AuditLogger
 from cogito_agent.memory import MemoryRetriever
 from cogito_agent.storage import Database
-from cogito_agent.storage.repositories import (
-    MemoryCandidateRepository,
-    MemoryEditRepository,
-    MemoryRepository,
-)
+from cogito_agent.storage.repositories import MemoryRepository
 
 
 def _get_app_svc(db: Database | None = None) -> Any:
@@ -108,20 +103,35 @@ def _run_memory_search(args: Any) -> None:
 
 def _run_memory_review(args: Any) -> None:
     ns = args
-    db = Database(ns.db_path)
+    from cogito_agent.storage import Database
+
+    db = Database()
     db.initialize()
-    repo = MemoryCandidateRepository(db)
-    candidates = repo.list_pending(ns.workspace_id)
-    if not candidates:
-        print("  No pending candidates.")
-    else:
-        print(f"  Pending candidates ({len(candidates)}):")
-        for c in candidates:
-            cid = str(c.get("id", ""))[:8]
-            text = str(c.get("text", ""))[:60]
-            mtype = str(c.get("type", "general"))
-            print(f"    [{mtype}] {cid}  {text}")
-    db.close()
+    try:
+        rows = db.connection.execute(
+            "SELECT id, summary, memory_type, reinforcement FROM memory_items"
+            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
+            " ORDER BY updated_at DESC LIMIT 50",
+            (ns.workspace_id,),
+        ).fetchall()
+        if not rows:
+            print("  No memories found.")
+        else:
+            print(f"  Memories ({len(rows)}):")
+            for r in rows:
+                text = str(r["summary"])[:60]
+                mtype = str(r["memory_type"])
+                cid = str(r["id"])[:8]
+                reinf = int(r["reinforcement"])
+                print(f"    [{mtype}] {cid}  (x{reinf}) {text}")
+    except Exception as e:
+        print(f"  Error: {e}")
+
+
+def _content_id(content: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 def _run_memory_accept(args: Any) -> None:
@@ -171,6 +181,7 @@ def _run_memory_pin(args: Any) -> None:
     db.initialize()
     db.migrate()
     from cogito_agent.storage.repositories import MemoryRepository
+
     repo = MemoryRepository(db)
     if repo.pin(ns.memory_id, ns.workspace_id):
         print(f"  Pinned memory: {ns.memory_id}")
@@ -196,7 +207,9 @@ def _run_memory_edit(args: Any) -> None:
     db.initialize()
     db.migrate()
     svc = _get_app_svc(db)
-    success = svc.memory_application.edit_memory(ns.memory_id, ns.workspace_id, ns.text, actor_id="cli")
+    success = svc.memory_application.edit_memory(
+        ns.memory_id, ns.workspace_id, ns.text, actor_id="cli"
+    )
     if success:
         print(f"  Edited memory: {ns.memory_id}")
     else:
@@ -210,7 +223,9 @@ def _run_memory_correct(args: Any) -> None:
     db.initialize()
     db.migrate()
     svc = _get_app_svc(db)
-    success = svc.memory_application.correct_memory(ns.memory_id, ns.workspace_id, ns.text, actor_id="cli")
+    success = svc.memory_application.correct_memory(
+        ns.memory_id, ns.workspace_id, ns.text, actor_id="cli"
+    )
     if success:
         print(f"  Corrected memory: {ns.memory_id}")
     else:
@@ -252,6 +267,7 @@ def _run_memory_unpin(args: Any) -> None:
     db.initialize()
     db.migrate()
     from cogito_agent.storage.repositories import MemoryRepository
+
     repo = MemoryRepository(db)
     success = repo.unpin(ns.memory_id, ns.workspace_id)
     if success:
@@ -267,7 +283,9 @@ def _run_memory_merge(args: Any) -> None:
     db.initialize()
     db.migrate()
     svc = _get_app_svc(db)
-    success = svc.memory_application.merge_memories(ns.source_memory_id, ns.target_memory_id, ns.workspace_id, actor_id="cli")
+    success = svc.memory_application.merge_memories(
+        ns.source_memory_id, ns.target_memory_id, ns.workspace_id, actor_id="cli"
+    )
     if success:
         print(f"  Merged {ns.source_memory_id} into {ns.target_memory_id}")
     else:
@@ -275,8 +293,9 @@ def _run_memory_merge(args: Any) -> None:
     db.close()
 
 
-def _get_provider(cfg):
+def _get_provider(cfg: Any) -> Any:
     from cogito_agent.embedding.service import create_embedding_provider_from_config
+
     return create_embedding_provider_from_config(cfg.memory.embedding)
 
 
@@ -328,6 +347,7 @@ def _run_embeddings_doctor(args: Any) -> None:
         print(f"  Secret name:     {es.api_key_secret_name}")
     if es.api_key_env:
         import os
+
         av = bool(os.environ.get(es.api_key_env))
         st = "available" if av else "unavailable"
         print(f"  API key env:     {es.api_key_env} -> {st}")
@@ -427,4 +447,47 @@ def _run_embeddings_purge_stale(args: Any) -> None:
     ws = ns.workspace_id or "default"
     count = svc.purge_stale(ws)
     print(f"  Purged {count} stale embedding(s)")
+    db.close()
+
+
+def _run_memory_optimize(args: Any) -> None:
+    ns = args
+    db = Database(ns.db_path)
+    db.initialize()
+    db.migrate()
+    from cogito_agent.application.runtime_factory import default_workspace_path
+    from cogito_agent.cli.config_manager import build_model_adapter_from_config
+    from cogito_agent.governance import AuditLogger
+    
+    from cogito_agent.memory.optimizer import MemoryOptimizer
+
+    ws_id = ns.workspace_id or "default"
+    workspace_path = ns.workspace_path or default_workspace_path(ws_id)
+
+
+    model = build_model_adapter_from_config()
+    if model is None:
+        print("  No model adapter configured (set model.provider)")
+        db.close()
+        return
+
+    audit = AuditLogger(db)
+
+    opt = MemoryOptimizer(
+        store=store,
+        model_adapter=model,
+        db=db,
+        chunk_index=chunk_index,
+        audit=audit,
+        workspace_id=ws_id,
+    )
+
+    result = opt.run()
+
+    if result["error"]:
+        print(f"  Error: {result['error']}")
+    else:
+        print(f"  Pending items merged: {result['pending_count']}")
+        print(f"  Memory changed: {result['memory_changed']}")
+        print(f"  Self changed: {result['self_changed']}")
     db.close()

@@ -7,11 +7,7 @@ Only analyze_meme / inspect_image may call VLM.
 from __future__ import annotations
 
 import io
-import json
-import os
 import uuid
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -24,12 +20,11 @@ from cogito_agent.capability.tools import (
     SEARCH_MEMES_MANIFEST,
     SEND_MEME_MANIFEST,
 )
-from cogito_agent.media import MediaProcessor, MemeAsset, MemeService
+from cogito_agent.media import MediaProcessor, MemeService
 from cogito_agent.media.meme_service import MemeAnalysisError, MemeDisabledError, MemeNotFoundError
 from cogito_agent.media.types import create_meme_id
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import AttachmentRepository, MemeAssetRepository
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,18 +42,22 @@ def _create_test_image(
 
 def _ensure_workspace(db: Database, wid: str = "ws1") -> None:
     db.connection.execute(
-        "INSERT OR IGNORE INTO workspaces (id, name) VALUES (?, ?)", (wid, wid),
+        "INSERT OR IGNORE INTO workspaces (id, name) VALUES (?, ?)",
+        (wid, wid),
     )
     db.connection.commit()
 
 
 def _store_attachment(db: Database, data: bytes, ws: str = "ws1") -> str:
     import hashlib
+
     _ensure_workspace(db, ws)
     content_hash = hashlib.sha256(data).hexdigest()
     att_id = f"att_{uuid.uuid4().hex[:24]}"
     db.connection.execute(
-        "INSERT INTO attachments (id, workspace_id, content_hash, media_type, original_filename, storage_path, size_bytes)"
+        "INSERT INTO attachments"
+        " (id, workspace_id, content_hash, media_type, original_filename,"
+        " storage_path, size_bytes)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
         (att_id, ws, content_hash, "image/png", "meme.png", f"/tmp/{att_id}.jpg", len(data)),
     )
@@ -77,10 +76,15 @@ class FakeVisionAdapter:
     def chat(self, messages: list[dict[str, object]], **kwargs: object) -> Any:
         self.call_count += 1
         from cogito_agent.models import ModelResponse
+
         return ModelResponse(
-            content=self.response_text or '{"name":"Test Meme","description":"A test meme","emotions":["happy"],"use_cases":["testing"]}',
-            provider="fake-vision", model="fake-vision-model",
-            input_tokens=50, output_tokens=20,
+            content=self.response_text
+            or '{"name":"Test Meme","description":"A test meme",'
+            '"emotions":["happy"],"use_cases":["testing"]}',
+            provider="fake-vision",
+            model="fake-vision-model",
+            input_tokens=50,
+            output_tokens=20,
         )
 
 
@@ -102,7 +106,8 @@ class FakeVisionService:
         self.call_count += 1
         self._adapter.call_count += 1
         return self._adapter.response_text or (
-            '{"name":"VLM Meme","description":"VLM analysis","emotions":["cool"],"use_cases":["demo"]}'
+            '{"name":"VLM Meme","description":"VLM analysis",'
+            '"emotions":["cool"],"use_cases":["demo"]}'
         )
 
 
@@ -180,8 +185,12 @@ class TestMemeAssetRepository:
         att_id = _store_attachment(db, _create_test_image())
         meme_id = create_meme_id()
         meme_repo.create(
-            meme_id=meme_id, workspace_id="ws1", attachment_id=att_id,
-            content_hash="abc123", name="Doge", description="Wow",
+            meme_id=meme_id,
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="abc123",
+            name="Doge",
+            description="Wow",
         )
         record = meme_repo.get(meme_id, "ws1")
         assert record is not None
@@ -191,8 +200,12 @@ class TestMemeAssetRepository:
         _ensure_workspace(db)
         att_id = _store_attachment(db, _create_test_image())
         meme_repo.create(
-            meme_id=create_meme_id(), workspace_id="ws1", attachment_id=att_id,
-            content_hash="abc", name="Test", description="test",
+            meme_id=create_meme_id(),
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="abc",
+            name="Test",
+            description="test",
         )
         found = meme_repo.get_by_attachment_id(att_id, "ws1")
         assert found is not None
@@ -202,8 +215,12 @@ class TestMemeAssetRepository:
         _ensure_workspace(db)
         att_id = _store_attachment(db, _create_test_image())
         meme_repo.create(
-            meme_id=create_meme_id(), workspace_id="ws1", attachment_id=att_id,
-            content_hash="hash123", name="Test", description="test",
+            meme_id=create_meme_id(),
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="hash123",
+            name="Test",
+            description="test",
         )
         results = meme_repo.find_by_content_hash("hash123", "ws1")
         assert len(results) >= 1
@@ -211,7 +228,14 @@ class TestMemeAssetRepository:
     def test_list_enabled(self, meme_repo: MemeAssetRepository, db: Database):
         _ensure_workspace(db)
         att_id = _store_attachment(db, _create_test_image())
-        meme_repo.create(meme_id=create_meme_id(), workspace_id="ws1", attachment_id=att_id, content_hash="a", name="A", description="a")
+        meme_repo.create(
+            meme_id=create_meme_id(),
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="a",
+            name="A",
+            description="a",
+        )
         results = meme_repo.list_enabled("ws1")
         assert len(results) >= 1
 
@@ -219,7 +243,14 @@ class TestMemeAssetRepository:
         _ensure_workspace(db)
         att_id = _store_attachment(db, _create_test_image())
         meme_id = create_meme_id()
-        meme_repo.create(meme_id=meme_id, workspace_id="ws1", attachment_id=att_id, content_hash="a", name="A", description="a")
+        meme_repo.create(
+            meme_id=meme_id,
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="a",
+            name="A",
+            description="a",
+        )
         meme_repo.record_use(meme_id, "ws1")
         record = meme_repo.get(meme_id, "ws1")
         assert record is not None
@@ -230,7 +261,14 @@ class TestMemeAssetRepository:
         _ensure_workspace(db)
         att_id = _store_attachment(db, _create_test_image())
         meme_id = create_meme_id()
-        meme_repo.create(meme_id=meme_id, workspace_id="ws1", attachment_id=att_id, content_hash="a", name="Old", description="old")
+        meme_repo.create(
+            meme_id=meme_id,
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="a",
+            name="Old",
+            description="old",
+        )
         meme_repo.update(meme_id, "ws1", name="New", description="new")
         record = meme_repo.get(meme_id, "ws1")
         assert record is not None
@@ -240,7 +278,14 @@ class TestMemeAssetRepository:
         _ensure_workspace(db)
         att_id = _store_attachment(db, _create_test_image())
         meme_id = create_meme_id()
-        meme_repo.create(meme_id=meme_id, workspace_id="ws1", attachment_id=att_id, content_hash="a", name="Del", description="del")
+        meme_repo.create(
+            meme_id=meme_id,
+            workspace_id="ws1",
+            attachment_id=att_id,
+            content_hash="a",
+            name="Del",
+            description="del",
+        )
         assert meme_repo.delete(meme_id, "ws1")
         assert meme_repo.get(meme_id, "ws1") is None
 
@@ -248,9 +293,16 @@ class TestMemeAssetRepository:
         _ensure_workspace(db, "ws1")
         _ensure_workspace(db, "ws2")
         att1 = _store_attachment(db, _create_test_image(), "ws1")
-        att2 = _store_attachment(db, _create_test_image(), "ws2")
+        _store_attachment(db, _create_test_image(), "ws2")
         mid = create_meme_id()
-        meme_repo.create(meme_id=mid, workspace_id="ws1", attachment_id=att1, content_hash="a", name="A", description="a")
+        meme_repo.create(
+            meme_id=mid,
+            workspace_id="ws1",
+            attachment_id=att1,
+            content_hash="a",
+            name="A",
+            description="a",
+        )
         assert meme_repo.get(mid, "ws2") is None
         assert meme_repo.get(mid, "ws1") is not None
 
@@ -278,7 +330,9 @@ class TestRegisterMeme:
         assert len(results) >= 1
         assert results[0]["name"] == "Doge"
 
-    def test_duplicate_attachment_no_duplicate(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_duplicate_attachment_no_duplicate(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         meme1 = meme_svc.register_meme(sample_att_id, "First", "desc", "ws1")
         meme2 = meme_svc.register_meme(sample_att_id, "Second", "desc2", "ws1")
@@ -297,7 +351,9 @@ class TestRegisterMeme:
         with pytest.raises((ValueError, RuntimeError)):
             meme_svc.register_meme("att_nonexistent", "Test", "desc", "ws1")
 
-    def test_cross_workspace_isolation(self, meme_svc: MemeService, db: Database, sample_png: bytes):
+    def test_cross_workspace_isolation(
+        self, meme_svc: MemeService, db: Database, sample_png: bytes
+    ):
         _ensure_workspace(db, "ws1")
         _ensure_workspace(db, "ws2")
         att = _store_attachment(db, sample_png, "ws1")
@@ -312,7 +368,9 @@ class TestRegisterMeme:
 
 
 class TestAnalyzeMeme:
-    def test_first_analyze_calls_vlm_once(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_first_analyze_calls_vlm_once(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
         fake_vs = FakeVisionService(fake_vlm)
@@ -321,7 +379,9 @@ class TestAnalyzeMeme:
         assert fake_vlm.call_count == 1
         assert meme.source == "vision"
 
-    def test_repeat_analyze_hits_existing(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_repeat_analyze_hits_existing(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
         fake_vs = FakeVisionService(fake_vlm)
@@ -330,7 +390,9 @@ class TestAnalyzeMeme:
         meme_svc.analyze_meme(sample_att_id, "ws1")  # repeat
         assert fake_vlm.call_count == 1  # VLM NOT called again
 
-    def test_force_refresh_calls_vlm_again(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_force_refresh_calls_vlm_again(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
         fake_vs = FakeVisionService(fake_vlm)
@@ -347,7 +409,9 @@ class TestAnalyzeMeme:
         with pytest.raises(MemeAnalysisError):
             meme_svc.analyze_meme(sample_att_id, "ws1")
 
-    def test_vlm_without_name_gets_default(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_vlm_without_name_gets_default(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter('{"description":"only desc"}')
         fake_vs = FakeVisionService(fake_vlm)
@@ -365,10 +429,14 @@ class TestAnalyzeMeme:
 class TestSearchMemes:
     def test_search_by_name(self, meme_svc: MemeService, db: Database, sample_att_id: str):
         _ensure_workspace(db)
-        meme_svc.register_meme(sample_att_id, "Confused Dog", "Dog looking confused", "ws1", emotions=["confused"])
+        meme_svc.register_meme(
+            sample_att_id, "Confused Dog", "Dog looking confused", "ws1", emotions=["confused"]
+        )
         results = meme_svc.search_memes("confused", "ws1")
         assert len(results) >= 1
-        assert "Confused Dog" in results[0]["name"] or "confused" in str(results[0].get("emotions", []))
+        assert "Confused Dog" in results[0]["name"] or "confused" in str(
+            results[0].get("emotions", [])
+        )
 
     def test_search_by_emotion(self, meme_svc: MemeService, db: Database, sample_png: bytes):
         _ensure_workspace(db)
@@ -381,7 +449,14 @@ class TestSearchMemes:
         _ensure_workspace(db)
         att = _store_attachment(db, _create_test_image())
         meme_id = create_meme_id()
-        meme_repo.create(meme_id=meme_id, workspace_id="ws1", attachment_id=att, content_hash="a", name="Hidden", description="hidden")
+        meme_repo.create(
+            meme_id=meme_id,
+            workspace_id="ws1",
+            attachment_id=att,
+            content_hash="a",
+            name="Hidden",
+            description="hidden",
+        )
         meme_repo.update(meme_id, "ws1", enabled=0)
         results = meme_repo.search("ws1", "Hidden")
         assert len(results) == 0
@@ -439,7 +514,9 @@ class TestSendMeme:
         assert record is not None
         assert record["use_count"] == 2
 
-    def test_disabled_meme_cannot_send(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_disabled_meme_cannot_send(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         meme = meme_svc.register_meme(sample_att_id, "Doge", "Wow", "ws1")
         meme_svc._meme_repo.update(meme.id, "ws1", enabled=0)
@@ -456,7 +533,9 @@ class TestSendMeme:
         result = meme_svc.send_meme(meme.id, "ws1", caption="Such caption")
         assert result["caption"] == "Such caption"
 
-    def test_send_no_storage_path_leak(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_send_no_storage_path_leak(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         meme = meme_svc.register_meme(sample_att_id, "Doge", "Wow", "ws1")
         result = meme_svc.send_meme(meme.id, "ws1")
@@ -471,7 +550,9 @@ class TestSendMeme:
 class TestEndToEndScenarios:
     """Four critical scenario tests from the spec."""
 
-    def test_scenario1_manual_send_no_vlm(self, meme_svc: MemeService, db: Database, sample_png: bytes):
+    def test_scenario1_manual_send_no_vlm(
+        self, meme_svc: MemeService, db: Database, sample_png: bytes
+    ):
         """Manual register + 10 sends = 0 VLM calls."""
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
@@ -485,7 +566,9 @@ class TestEndToEndScenarios:
         assert fake_vlm.call_count == 0
         # No exception means success
 
-    def test_scenario2_analyze_then_send(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_scenario2_analyze_then_send(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         """analyze_meme (1 VLM) + 10 sends (0 VLM) = 1 VLM total."""
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
@@ -498,25 +581,31 @@ class TestEndToEndScenarios:
             meme_svc.send_meme(meme.id, "ws1")
         assert fake_vlm.call_count == 1  # Still 1 — sends don't call VLM
 
-    def test_scenario3_inspect_image_for_new_detail(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_scenario3_inspect_image_for_new_detail(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         """User asks for new visual detail → inspect_image may be called."""
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
         fake_vs = FakeVisionService(fake_vlm)
         meme_svc.set_vision_service(fake_vs)
-        meme = meme_svc.analyze_meme(sample_att_id, "ws1")
+        meme_svc.analyze_meme(sample_att_id, "ws1")
         assert fake_vlm.call_count == 1
         # Simulate explicit inspect_image call
         fake_vs.inspect_image(sample_att_id, "What does the small text say?", "ws1")
         assert fake_vlm.call_count == 2  # Explicit inspect_image
 
-    def test_scenario4_search_then_send_no_vlm(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_scenario4_search_then_send_no_vlm(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         """User asks for 'confused meme' → search → send → 0 VLM."""
         _ensure_workspace(db)
         fake_vlm = FakeVisionAdapter()
         fake_vs = FakeVisionService(fake_vlm)
         meme_svc.set_vision_service(fake_vs)
-        meme_svc.register_meme(sample_att_id, "Confused Dog", "Shows confusion", "ws1", emotions=["confused"])
+        meme_svc.register_meme(
+            sample_att_id, "Confused Dog", "Shows confusion", "ws1", emotions=["confused"]
+        )
         results = meme_svc.search_memes("confused", "ws1")
         assert len(results) >= 1
         meme_id = results[0]["meme_id"]
@@ -554,13 +643,16 @@ class TestCapabilityManifests:
             manifest = cap_reg.get_manifest(name)
             assert manifest is not None, f"{name} not registered"
 
-    def test_register_meme_by_capability(self, meme_svc: MemeService, db: Database, sample_att_id: str):
+    def test_register_meme_by_capability(
+        self, meme_svc: MemeService, db: Database, sample_att_id: str
+    ):
         _ensure_workspace(db)
         cap_reg = CapabilityRegistry()
         meme_svc.register_with_capability_registry(cap_reg)
         meme_svc.set_current_context(workspace_id="ws1")
-        result = cap_reg.invoke("register_meme",
-            attachment_id=sample_att_id, name="CapMeme", description="via reg")
+        result = cap_reg.invoke(
+            "register_meme", attachment_id=sample_att_id, name="CapMeme", description="via reg"
+        )
         assert result is not None, f"Expected ok result, got: {result}"
         if result.status != "ok":
             assert False, f"Expected ok, got {result.status}: {result.summary} {result.error}"
@@ -589,15 +681,20 @@ class TestCapabilityManifests:
 class TestMemeAPI:
     def test_create_meme_model(self):
         from cogito_agent.api.app import CreateMemeRequest
+
         req = CreateMemeRequest(
-            attachment_id="att_xxx", name="Test", description="test",
-            emotions=["happy"], aliases=["joy"],
+            attachment_id="att_xxx",
+            name="Test",
+            description="test",
+            emotions=["happy"],
+            aliases=["joy"],
         )
         assert req.name == "Test"
         assert req.emotions == ["happy"]
 
     def test_update_meme_model(self):
         from cogito_agent.api.app import UpdateMemeRequest
+
         req = UpdateMemeRequest(name="New", enabled=False)
         assert req.name == "New"
         assert req.enabled is False

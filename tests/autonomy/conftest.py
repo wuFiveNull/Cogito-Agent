@@ -37,16 +37,20 @@ def wid(db: Database) -> str:
 
 @pytest.fixture
 def permissive_policy() -> PolicyEngine:
-    return PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.allow),
-    ])
+    return PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.allow),
+        ]
+    )
 
 
 @pytest.fixture
 def deny_policy() -> PolicyEngine:
-    return PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.deny),
-    ])
+    return PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.deny),
+        ]
+    )
 
 
 @pytest.fixture

@@ -25,9 +25,7 @@ def test_redact_key_value_pattern_replacement() -> None:
 def test_redact_multiple_secrets_in_single_string() -> None:
     r = RedactionHelper()
     input_str = (
-        "URL: https://user:pass@host.com, "
-        "Header: Authorization: Bearer tok123, "
-        "Cookie: session=abc"
+        "URL: https://user:pass@host.com, Header: Authorization: Bearer tok123, Cookie: session=abc"
     )
     result = r.redact(input_str)
     assert "https://[REDACTED]@" in result

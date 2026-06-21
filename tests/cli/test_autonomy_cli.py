@@ -1,4 +1,5 @@
 """Tests for autonomy CLI commands."""
+
 from __future__ import annotations
 
 import os
@@ -23,21 +24,23 @@ def test_autonomy_emit_via_cli():
         db_path = f.name
     _init_db(db_path)
     try:
-        ns = type("NS", (), {
-            "db_path": db_path,
-            "title": "cli test",
-            "body": "hello",
-            "source": "cli",
-            "priority": "normal",
-            "workspace_id": "*",
-            "category": "test",
-        })()
+        ns = type(
+            "NS",
+            (),
+            {
+                "db_path": db_path,
+                "title": "cli test",
+                "body": "hello",
+                "source": "cli",
+                "priority": "normal",
+                "workspace_id": "*",
+                "category": "test",
+            },
+        )()
         run_autonomy_emit(ns)
         db = Database(db_path)
         db.initialize()
-        cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM notification_decisions"
-        )
+        cur = db.connection.execute("SELECT COUNT(*) AS cnt FROM notification_decisions")
         assert cur.fetchone()["cnt"] >= 1
         db.close()
     finally:
@@ -54,11 +57,15 @@ def test_autonomy_decisions_empty():
         db_path = f.name
     _init_db(db_path)
     try:
-        ns = type("NS", (), {
-            "db_path": db_path,
-            "workspace_id": "*",
-            "limit": 50,
-        })()
+        ns = type(
+            "NS",
+            (),
+            {
+                "db_path": db_path,
+                "workspace_id": "*",
+                "limit": 50,
+            },
+        )()
         run_autonomy_decisions(ns)
     finally:
         try:
@@ -74,11 +81,15 @@ def test_autonomy_outbox_empty():
         db_path = f.name
     _init_db(db_path)
     try:
-        ns = type("NS", (), {
-            "db_path": db_path,
-            "workspace_id": "*",
-            "limit": 50,
-        })()
+        ns = type(
+            "NS",
+            (),
+            {
+                "db_path": db_path,
+                "workspace_id": "*",
+                "limit": 50,
+            },
+        )()
         run_autonomy_outbox(ns)
     finally:
         try:
@@ -96,6 +107,7 @@ def test_autonomy_feedback_via_cli():
     try:
         # need a decision first
         from cogito_agent.autonomy import DecisionStore
+
         db = Database(db_path)
         db.initialize()
         store = DecisionStore(db)
@@ -116,13 +128,17 @@ def test_autonomy_feedback_via_cli():
         )
         db.close()
 
-        ns = type("NS", (), {
-            "db_path": db_path,
-            "decision_id": "d-cli-fb",
-            "value": "useful",
-            "comment": "nice",
-            "workspace_id": "*",
-        })()
+        ns = type(
+            "NS",
+            (),
+            {
+                "db_path": db_path,
+                "decision_id": "d-cli-fb",
+                "value": "useful",
+                "comment": "nice",
+                "workspace_id": "*",
+            },
+        )()
         run_autonomy_feedback(ns)
     finally:
         try:

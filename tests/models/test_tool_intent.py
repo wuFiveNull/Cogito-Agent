@@ -1,4 +1,5 @@
 """Tests: ToolIntent parsing and ModelResponse backward compatibility."""
+
 from __future__ import annotations
 
 from cogito_agent.models import ModelResponse, ToolIntent

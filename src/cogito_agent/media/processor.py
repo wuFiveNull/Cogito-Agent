@@ -25,15 +25,22 @@ MAX_EDGE = 4096
 MAX_PIXELS = 40_000_000
 
 # Supported MIME types
-SUPPORTED_IMAGE_TYPES: frozenset[str] = frozenset({
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-})
+SUPPORTED_IMAGE_TYPES: frozenset[str] = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    }
+)
 
-SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({
-    ".jpg", ".jpeg", ".png", ".webp",
-})
+SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+    }
+)
 
 # Magic bytes for MIME detection
 _MAGIC_BYTES: dict[bytes, str] = {

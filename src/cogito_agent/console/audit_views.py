@@ -36,13 +36,9 @@ def _get_db() -> _Database:
 
 
 def _ensure_workspace(workspace_id: str) -> None:
-    from cogito_agent.storage.repositories import WorkspaceRepository
+    from cogito_agent.application import WorkspaceApplicationService
 
-    db = _get_db()
-    repo = WorkspaceRepository(db)
-    ws = repo.get_by_id(workspace_id)
-    if ws is None:
-        repo.create(workspace_id, workspace_id)
+    WorkspaceApplicationService(_get_db()).ensure_workspace(workspace_id)
 
 
 def _list_audit(
@@ -91,11 +87,7 @@ def _list_audit(
     if where_clauses:
         where = "WHERE " + " AND ".join(where_clauses)
 
-    sql = (
-        "SELECT al.* FROM audit_logs al"
-        f" {where}"
-        " ORDER BY al.created_at DESC LIMIT ?"
-    )
+    sql = f"SELECT al.* FROM audit_logs al {where} ORDER BY al.created_at DESC LIMIT ?"
     params.append(limit)
     rows = db.connection.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
@@ -158,9 +150,7 @@ async def audit_page(
 async def audit_detail(request: Request, audit_id: str) -> HTMLResponse:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
-    cur = db.connection.execute(
-        "SELECT * FROM audit_logs WHERE id=?", (audit_id,)
-    )
+    cur = db.connection.execute("SELECT * FROM audit_logs WHERE id=?", (audit_id,))
     row = cur.fetchone()
     if row is None:
         error_ctx: dict[str, object] = {

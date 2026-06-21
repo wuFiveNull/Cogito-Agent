@@ -1,12 +1,10 @@
 """Tests for SpanKind, migration, and redaction in autonomy context."""
 
-import pytest
-
 from cogito_agent.autonomy import ProactiveLoop
 from cogito_agent.autonomy.events import AutonomyEvent
 from cogito_agent.shared import SpanKind
 from cogito_agent.storage import Database
-from cogito_agent.trace import RedactionHelper, Tracer
+from cogito_agent.trace import RedactionHelper
 
 
 def test_spankind_autonomous_exists():
@@ -15,7 +13,9 @@ def test_spankind_autonomous_exists():
 
 
 def test_proactive_loop_uses_autonomous_kind(
-    db, wid: str, proactive_loop: ProactiveLoop,
+    db,
+    wid: str,
+    proactive_loop: ProactiveLoop,
 ):
     event = AutonomyEvent(title="span kind test", workspace_id=wid)
     decision = proactive_loop.process_event(event)
@@ -58,7 +58,9 @@ def test_redaction_in_autonomy_output():
 
 
 def test_autonomy_event_title_no_secret_leak_in_audit(
-    db, wid: str, proactive_loop: ProactiveLoop,
+    db,
+    wid: str,
+    proactive_loop: ProactiveLoop,
 ):
     event = AutonomyEvent(title="test with api_key=sk-123", workspace_id=wid)
     decision = proactive_loop.process_event(event)

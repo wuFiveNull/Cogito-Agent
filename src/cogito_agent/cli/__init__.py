@@ -26,6 +26,7 @@ def _run_migrate(args: argparse.Namespace) -> None:
 
 def _run_chat(args: argparse.Namespace) -> None:
     from .chat import run_cli
+
     run_cli(db_path=args.db_path)
 
 
@@ -86,15 +87,14 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Name:        {skill['name']}")
             print(f"  Version:     {skill['version']}")
             print(f"  Description: {skill.get('description', '')}")
-            manifest = SkillManifest.model_validate_json(
-                str(skill.get("manifest_json", "{}"))
-            )
+            manifest = SkillManifest.model_validate_json(str(skill.get("manifest_json", "{}")))
             print(f"  Risk Level:  {manifest.risk_level.value}")
             print(f"  Steps:       {len(manifest.steps)}")
             for step in manifest.steps:
                 print(f"    - {step.id}: {step.kind.value} ({step.name})")
     elif action == "validate":
         import json as _json
+
         try:
             with open(args.skill_file, encoding="utf-8") as f:
                 data = _json.load(f)
@@ -105,6 +105,7 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Invalid skill: {e}")
     elif action == "import":
         import json as _json
+
         try:
             with open(args.skill_file, encoding="utf-8") as f:
                 data = _json.load(f)
@@ -120,9 +121,8 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Skill '{args.skill_name}' not found.")
         else:
             import json as _json
-            manifest = SkillManifest.model_validate_json(
-                str(skill.get("manifest_json", "{}"))
-            )
+
+            manifest = SkillManifest.model_validate_json(str(skill.get("manifest_json", "{}")))
             output = manifest.model_dump_json(indent=2)
             if args.output_path:
                 with open(args.output_path, "w", encoding="utf-8") as f:
@@ -136,15 +136,14 @@ def _run_skill(args: argparse.Namespace) -> None:
             print(f"  Skill '{args.skill_name}' not found.")
             db.close()
             return
-        manifest = SkillManifest.model_validate_json(
-            str(skill.get("manifest_json", "{}"))
-        )
+        manifest = SkillManifest.model_validate_json(str(skill.get("manifest_json", "{}")))
         ws_skill = WorkspaceSkill(db)
         ws_skills = ws_skill.list_by_workspace("*")
         ws_id = str(ws_skills[0]["workspace_id"]) if ws_skills else "default"
         inputs: dict[str, str] = {}
         if args.input_path:
             import json as _json
+
             with open(args.input_path, encoding="utf-8") as f:
                 inputs = _json.load(f)
         runner = SkillRunner(db)
@@ -187,9 +186,12 @@ def _run_maintenance(args: argparse.Namespace) -> None:
     if dec.decision == DecisionType.deny:
         print(f"Policy denied: {dec.reason}")
         audit.log(
-            actor_id="maintenance", action="maintenance_denied",
+            actor_id="maintenance",
+            action="maintenance_denied",
             resource=f"maintenance.{task}",
-            workspace_id="*", decision="deny", reason=dec.reason,
+            workspace_id="*",
+            decision="deny",
+            reason=dec.reason,
         )
         return
 
@@ -227,8 +229,10 @@ def _run_maintenance(args: argparse.Namespace) -> None:
     tracer.end_trace(trace)
 
     audit.log(
-        actor_id="maintenance", action=f"maintenance.{task}",
-        resource="database", workspace_id=args.workspace_id or "*",
+        actor_id="maintenance",
+        action=f"maintenance.{task}",
+        resource="database",
+        workspace_id=args.workspace_id or "*",
         trace_id=trace.id,
         decision="error" if error else "allow",
         reason=error or "ok",
@@ -248,21 +252,24 @@ def run_cli() -> None:
     migrate_parser = sub.add_parser("migrate", help="Initialize or migrate the database")
     migrate_parser.set_defaults(db_path=None)
     migrate_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
 
     chat_parser = sub.add_parser("chat", help="Start an interactive chat session")
     chat_parser.set_defaults(db_path=None)
     chat_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
 
     replay_parser = sub.add_parser("replay", help="Inspect past traces")
     replay_parser.set_defaults(db_path=None)
     replay_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     replay_sub = replay_parser.add_subparsers(dest="action", help="Replay command")
@@ -273,15 +280,20 @@ def run_cli() -> None:
     maint_parser = sub.add_parser("maintenance", help="Run maintenance tasks")
     maint_parser.set_defaults(db_path=None)
     maint_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     maint_parser.add_argument(
-        "--workspace-id", dest="workspace_id", default=None,
+        "--workspace-id",
+        dest="workspace_id",
+        default=None,
         help="Scope to a specific workspace",
     )
     maint_parser.add_argument(
-        "--days", type=int, default=30,
+        "--days",
+        type=int,
+        default=30,
         help="Age threshold in days (for archive/cleanup)",
     )
     maint_parser.add_argument(
@@ -307,13 +319,21 @@ def run_cli() -> None:
     backup_create = backup_sub.add_parser("create", help="Create a system backup")
     backup_create.add_argument("--out", dest="out_path", default="", help="Output ZIP path")
     backup_create.add_argument("--db", dest="db_path", default="", help="SQLite database path")
-    backup_create.add_argument("--include-secrets", dest="include_secrets", action="store_true",
-                               help="Include secrets in backup (EXPLICIT FLAG REQUIRED)")
+    backup_create.add_argument(
+        "--include-secrets",
+        dest="include_secrets",
+        action="store_true",
+        help="Include secrets in backup (EXPLICIT FLAG REQUIRED)",
+    )
     restore_create = backup_sub.add_parser("restore", help="Restore from a backup")
     restore_create.add_argument("backup_path", help="Backup ZIP path")
     restore_create.add_argument("--db", dest="db_path", default="", help="SQLite database path")
-    restore_create.add_argument("--dry-run", dest="dry_run", action="store_true",
-                                help="Preflight validation without restoring")
+    restore_create.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Preflight validation without restoring",
+    )
 
     diagnostics_parser = sub.add_parser(
         "diagnostics", help="Create a redacted local diagnostic bundle"
@@ -327,31 +347,44 @@ def run_cli() -> None:
     export_parser = sub.add_parser("export", help="Export workspace data or specific sections")
     export_parser.set_defaults(db_path=None)
     export_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     export_parser.add_argument(
-        "--out", dest="output_path", default=None,
+        "--out",
+        dest="output_path",
+        default=None,
         help="Output file path (default: stdout)",
     )
     export_sub = export_parser.add_subparsers(dest="export_action", help="Export type")
     export_data_parser = export_sub.add_parser("data", help="Export full workspace data")
     export_data_parser.add_argument(
-        "--workspace", dest="workspace_name", default="default",
+        "--workspace",
+        dest="workspace_name",
+        default="default",
         help="Workspace name or ID to export (default: default)",
     )
     export_data_parser.add_argument(
-        "--format", dest="export_format", default="json",
+        "--format",
+        dest="export_format",
+        default="json",
         choices=["json"],
         help="Output format (default: json)",
     )
     export_data_parser.add_argument(
-        "--include", dest="include", action="append", default=[],
+        "--include",
+        dest="include",
+        action="append",
+        default=[],
         choices=["traces", "memories", "audit"],
         help="Sections to include (repeatable, default: all)",
     )
     export_data_parser.add_argument(
-        "--no-redact", dest="redact", action="store_false", default=True,
+        "--no-redact",
+        dest="redact",
+        action="store_false",
+        default=True,
         help="Disable secret redaction",
     )
     export_memories_parser = export_sub.add_parser("memories", help="Export memories")
@@ -389,11 +422,14 @@ def run_cli() -> None:
     inbox_parser = sub.add_parser("inbox", help="Manage inbox items")
     inbox_parser.set_defaults(db_path=None)
     inbox_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     inbox_parser.add_argument(
-        "--workspace-id", dest="workspace_id", default="*",
+        "--workspace-id",
+        dest="workspace_id",
+        default="*",
         help="Scope to a specific workspace",
     )
     inbox_sub = inbox_parser.add_subparsers(dest="inbox_action", help="Inbox command")
@@ -407,7 +443,8 @@ def run_cli() -> None:
     skill_parser = sub.add_parser("skill", help="Manage skills")
     skill_parser.set_defaults(db_path=None)
     skill_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     skill_sub = skill_parser.add_subparsers(dest="skill_action", help="Skill command")
@@ -418,12 +455,12 @@ def run_cli() -> None:
     skill_validate.add_argument("skill_file", help="Path to skill manifest JSON file")
     skill_import_cmd = skill_sub.add_parser("import", help="Import a skill from file")
     skill_import_cmd.add_argument("skill_file", help="Path to skill manifest JSON file")
-    skill_export_cmd = skill_sub.add_parser(
-        "export", help="Export a skill to file"
-    )
+    skill_export_cmd = skill_sub.add_parser("export", help="Export a skill to file")
     skill_export_cmd.add_argument("skill_name", help="Skill name")
     skill_export_cmd.add_argument(
-        "--out", dest="output_path", default=None,
+        "--out",
+        dest="output_path",
+        default=None,
         help="Output file path",
     )
     skill_run_cmd = skill_sub.add_parser("run", help="Run a skill")
@@ -434,14 +471,16 @@ def run_cli() -> None:
     approval_parser = sub.add_parser("approval", help="Manage approvals")
     approval_parser.set_defaults(db_path=None)
     approval_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     approval_sub = approval_parser.add_subparsers(dest="approval_action", help="Approval command")
 
     approval_list = approval_sub.add_parser("list", help="List approvals")
     approval_list.add_argument(
-        "--status", default="pending",
+        "--status",
+        default="pending",
         choices=["pending", "approved", "rejected", "all"],
         help="Filter by status (default: pending)",
     )
@@ -453,19 +492,22 @@ def run_cli() -> None:
     approval_approve = approval_sub.add_parser("approve", help="Approve a pending approval")
     approval_approve.add_argument("approval_id", help="Approval ID")
     approval_approve.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Force approve even if already resolved",
     )
 
     approval_reject = approval_sub.add_parser("reject", help="Reject a pending approval")
     approval_reject.add_argument("approval_id", help="Approval ID")
     approval_reject.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Force reject even if already resolved",
     )
 
     approval_resume = approval_sub.add_parser(
-        "resume", help="Resume a pending skill run after approval",
+        "resume",
+        help="Resume a pending skill run after approval",
     )
     approval_resume.add_argument("skill_run_id", help="Skill run ID to resume")
 
@@ -475,26 +517,36 @@ def run_cli() -> None:
     maint_choices = ["consolidate", "archive", "refresh_fts", "cleanup_traces", "usage"]
     sched_maint = schedule_sub.add_parser("maintenance", help="Schedule a maintenance task")
     sched_maint.add_argument("task", choices=maint_choices, help="Maintenance task")
-    sched_maint.add_argument("--daily", dest="daily", type=str, default="",
-                             help="Run daily at HH:MM (e.g. 03:00)")
-    sched_maint.add_argument("--weekly", dest="weekly", type=str, default="",
-                             help="Run weekly (e.g. sun 03:00)")
+    sched_maint.add_argument(
+        "--daily", dest="daily", type=str, default="", help="Run daily at HH:MM (e.g. 03:00)"
+    )
+    sched_maint.add_argument(
+        "--weekly", dest="weekly", type=str, default="", help="Run weekly (e.g. sun 03:00)"
+    )
 
     traces_parser = sub.add_parser("traces", help="View traces")
     traces_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     traces_parser.add_argument(
-        "--workspace", dest="ws_id", default="*",
+        "--workspace",
+        dest="ws_id",
+        default="*",
         help="Workspace ID filter (default: *)",
     )
     traces_parser.add_argument(
-        "--status", dest="filter_status", default="",
+        "--status",
+        dest="filter_status",
+        default="",
         help="Filter by status (e.g. completed, failed)",
     )
     traces_parser.add_argument(
-        "--days", dest="filter_days", type=int, default=0,
+        "--days",
+        dest="filter_days",
+        type=int,
+        default=0,
         help="Show traces from last N days",
     )
     traces_sub = traces_parser.add_subparsers(dest="traces_action")
@@ -504,11 +556,14 @@ def run_cli() -> None:
 
     audit_parser = sub.add_parser("audit", help="View audit logs")
     audit_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     audit_parser.add_argument(
-        "--workspace", dest="ws_id", default="*",
+        "--workspace",
+        dest="ws_id",
+        default="*",
         help="Workspace ID filter (default: *)",
     )
     audit_sub = audit_parser.add_subparsers(dest="audit_action")
@@ -518,22 +573,29 @@ def run_cli() -> None:
 
     usage_parser = sub.add_parser("usage", help="Show usage summary")
     usage_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     usage_parser.add_argument(
-        "--last", dest="last_period", type=str, default="7d",
+        "--last",
+        dest="last_period",
+        type=str,
+        default="7d",
         help="Time period (e.g. 7d, 30d, 1d)",
     )
 
     mem_parser = sub.add_parser("memory", help="Manage memories")
     mem_parser.set_defaults(db_path=None)
     mem_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     mem_parser.add_argument(
-        "--workspace-id", dest="workspace_id", default=None,
+        "--workspace-id",
+        dest="workspace_id",
+        default=None,
         help="Scope to a specific workspace",
     )
     mem_sub = mem_parser.add_subparsers(dest="memory_action", help="Memory command")
@@ -566,6 +628,13 @@ def run_cli() -> None:
     mem_merge.add_argument("source_memory_id", help="Source memory ID (will be archived)")
     mem_merge.add_argument("target_memory_id", help="Target memory ID (receives merged text)")
     mem_sub.add_parser("consolidate", help="Deduplicate memories")
+    mem_optimize = mem_sub.add_parser("optimize", help="Merge PENDING.md into MEMORY.md via LLM")
+    mem_optimize.add_argument(
+        "--workspace-path",
+        dest="workspace_path",
+        default=None,
+        help="Workspace filesystem path (default: ~/.cogito/workspace/<workspace-id>)",
+    )
 
     # Embeddings subcommands
     mem_emb = mem_sub.add_parser("embeddings", help="Manage memory embeddings")
@@ -573,40 +642,63 @@ def run_cli() -> None:
     mem_emb_sub.add_parser("status", help="Show embedding status")
     mem_emb_sub.add_parser("doctor", help="Check embedding health")
     mem_emb_rebuild = mem_emb_sub.add_parser("rebuild", help="Rebuild embeddings")
-    mem_emb_rebuild.add_argument("--workspace", dest="workspace_id", default="default", help="Workspace ID")
-    mem_emb_rebuild.add_argument("--batch-size", dest="batch_size", type=int, default=32, help="Batch size")
+    mem_emb_rebuild.add_argument(
+        "--workspace", dest="workspace_id", default="default", help="Workspace ID"
+    )
+    mem_emb_rebuild.add_argument(
+        "--batch-size", dest="batch_size", type=int, default=32, help="Batch size"
+    )
     mem_emb_rebuild.add_argument("--force", action="store_true", help="Force rebuild all")
     mem_emb_retry = mem_emb_sub.add_parser("retry-failed", help="Retry failed embeddings")
-    mem_emb_retry.add_argument("--workspace", dest="workspace_id", default="default", help="Workspace ID")
+    mem_emb_retry.add_argument(
+        "--workspace", dest="workspace_id", default="default", help="Workspace ID"
+    )
     mem_emb_purge = mem_emb_sub.add_parser("purge-stale", help="Purge stale embeddings")
-    mem_emb_purge.add_argument("--workspace", dest="workspace_id", default="default", help="Workspace ID")
+    mem_emb_purge.add_argument(
+        "--workspace", dest="workspace_id", default="default", help="Workspace ID"
+    )
 
     secrets_parser = sub.add_parser("secrets", help="Manage secrets")
     secrets_parser.set_defaults(db_path=None)
     secrets_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
     secrets_sub = secrets_parser.add_subparsers(dest="secret_action", help="Secret command")
     secrets_sub.add_parser("list", help="List secrets")
     secrets_show = secrets_sub.add_parser("show", help="Show secret metadata")
     secrets_show.add_argument("secret_name", help="Secret name")
-    secrets_show.add_argument("--metadata", dest="show_metadata", action="store_true",
-                              help="Show metadata (created/updated/last_used)")
+    secrets_show.add_argument(
+        "--metadata",
+        dest="show_metadata",
+        action="store_true",
+        help="Show metadata (created/updated/last_used)",
+    )
     secrets_set = secrets_sub.add_parser("set", help="Set a secret value")
     secrets_set.add_argument("secret_name", help="Secret name")
-    secrets_set.add_argument("--stdin", dest="stdin", action="store_true",
-                             help="Read secret from stdin (pipe)")
-    secrets_set.add_argument("--value", dest="value", default="",
-                             help="[UNSAFE] Secret as CLI argument (visible in process list)")
+    secrets_set.add_argument(
+        "--stdin", dest="stdin", action="store_true", help="Read secret from stdin (pipe)"
+    )
+    secrets_set.add_argument(
+        "--value",
+        dest="value",
+        default="",
+        help="[UNSAFE] Secret as CLI argument (visible in process list)",
+    )
     secrets_delete = secrets_sub.add_parser("delete", help="Delete a secret")
     secrets_delete.add_argument("secret_name", help="Secret name")
     secrets_rotate = secrets_sub.add_parser("rotate", help="Rotate a secret value")
     secrets_rotate.add_argument("secret_name", help="Secret name")
-    secrets_rotate.add_argument("--stdin", dest="stdin", action="store_true",
-                                help="Read secret from stdin (pipe)")
-    secrets_rotate.add_argument("--value", dest="value", default="",
-                                help="[UNSAFE] Secret as CLI argument (visible in process list)")
+    secrets_rotate.add_argument(
+        "--stdin", dest="stdin", action="store_true", help="Read secret from stdin (pipe)"
+    )
+    secrets_rotate.add_argument(
+        "--value",
+        dest="value",
+        default="",
+        help="[UNSAFE] Secret as CLI argument (visible in process list)",
+    )
     secrets_test = secrets_sub.add_parser("test", help="Test a secret is available")
     secrets_test.add_argument("secret_name", help="Secret name")
 
@@ -618,51 +710,64 @@ def run_cli() -> None:
     provider_sub.add_parser("doctor", help="Check current provider configuration")
     provider_test_cmd = provider_sub.add_parser("test", help="Test provider configuration")
     provider_test_cmd.add_argument("provider_name", help="Provider name")
-    provider_test_cmd.add_argument("--live", dest="live", action="store_true",
-                                   help="Execute real network request (may incur cost)")
+    provider_test_cmd.add_argument(
+        "--live",
+        dest="live",
+        action="store_true",
+        help="Execute real network request (may incur cost)",
+    )
 
     autonomy_parser = sub.add_parser("autonomy", help="Manage autonomous notifications")
     autonomy_parser.set_defaults(db_path=None)
     autonomy_parser.add_argument(
-        "--db", dest="db_path",
+        "--db",
+        dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
     )
-    autonomy_sub = autonomy_parser.add_subparsers(
-        dest="autonomy_action", help="Autonomy command"
-    )
+    autonomy_sub = autonomy_parser.add_subparsers(dest="autonomy_action", help="Autonomy command")
     autonomy_emit = autonomy_sub.add_parser("emit", help="Emit an autonomy event")
     autonomy_emit.add_argument("--title", dest="title", required=True, help="Event title")
     autonomy_emit.add_argument("--body", dest="body", default="", help="Event body")
     autonomy_emit.add_argument("--source", dest="source", default="cli", help="Source name")
-    autonomy_emit.add_argument("--priority", dest="priority", default="normal",
-                               choices=["low", "normal", "high", "urgent"], help="Priority")
-    autonomy_emit.add_argument("--workspace-id", dest="workspace_id", default="*",
-                               help="Workspace ID")
+    autonomy_emit.add_argument(
+        "--priority",
+        dest="priority",
+        default="normal",
+        choices=["low", "normal", "high", "urgent"],
+        help="Priority",
+    )
+    autonomy_emit.add_argument(
+        "--workspace-id", dest="workspace_id", default="*", help="Workspace ID"
+    )
     autonomy_emit.add_argument("--category", dest="category", default="", help="Category")
 
-    autonomy_decisions = autonomy_sub.add_parser(
-        "decisions", help="List notification decisions"
+    autonomy_decisions = autonomy_sub.add_parser("decisions", help="List notification decisions")
+    autonomy_decisions.add_argument(
+        "--workspace-id", dest="workspace_id", default="*", help="Workspace ID filter"
     )
-    autonomy_decisions.add_argument("--workspace-id", dest="workspace_id", default="*",
-                                    help="Workspace ID filter")
-    autonomy_decisions.add_argument("--limit", dest="limit", type=int, default=50,
-                                    help="Max results")
+    autonomy_decisions.add_argument(
+        "--limit", dest="limit", type=int, default=50, help="Max results"
+    )
 
     autonomy_outbox = autonomy_sub.add_parser("outbox", help="List outbox messages")
-    autonomy_outbox.add_argument("--workspace-id", dest="workspace_id", default="*",
-                                 help="Workspace ID filter")
-    autonomy_outbox.add_argument("--limit", dest="limit", type=int, default=50,
-                                 help="Max results")
+    autonomy_outbox.add_argument(
+        "--workspace-id", dest="workspace_id", default="*", help="Workspace ID filter"
+    )
+    autonomy_outbox.add_argument("--limit", dest="limit", type=int, default=50, help="Max results")
 
     autonomy_feedback = autonomy_sub.add_parser("feedback", help="Record feedback")
     autonomy_feedback.add_argument("decision_id", help="Decision ID")
-    autonomy_feedback.add_argument("--value", dest="value", required=True,
-                                   choices=["useful", "not_useful", "too_many",
-                                            "wrong_time", "irrelevant"],
-                                   help="Feedback value")
+    autonomy_feedback.add_argument(
+        "--value",
+        dest="value",
+        required=True,
+        choices=["useful", "not_useful", "too_many", "wrong_time", "irrelevant"],
+        help="Feedback value",
+    )
     autonomy_feedback.add_argument("--comment", dest="comment", default="", help="Comment")
-    autonomy_feedback.add_argument("--workspace-id", dest="workspace_id", default="*",
-                                   help="Workspace ID")
+    autonomy_feedback.add_argument(
+        "--workspace-id", dest="workspace_id", default="*", help="Workspace ID"
+    )
 
     args = parser.parse_args()
 
@@ -673,14 +778,22 @@ def run_cli() -> None:
     elif args.command == "chat":
         _run_chat(argparse.Namespace(db_path=db_path))
     elif args.command == "replay":
-        _run_replay(argparse.Namespace(
-            db_path=db_path, action=args.action, trace_id=getattr(args, "trace_id", ""),
-        ))
+        _run_replay(
+            argparse.Namespace(
+                db_path=db_path,
+                action=args.action,
+                trace_id=getattr(args, "trace_id", ""),
+            )
+        )
     elif args.command == "maintenance":
-        _run_maintenance(argparse.Namespace(
-            db_path=db_path, task=args.task,
-            workspace_id=args.workspace_id, days=args.days,
-        ))
+        _run_maintenance(
+            argparse.Namespace(
+                db_path=db_path,
+                task=args.task,
+                workspace_id=args.workspace_id,
+                days=args.days,
+            )
+        )
     elif args.command == "backup":
         from cogito_agent.cli.backup import create_backup, restore_backup
         from cogito_agent.governance import AuditLogger
@@ -696,7 +809,8 @@ def run_cli() -> None:
                 include_secrets=args.include_secrets,
             )
             _aaudit.log(
-                actor_id="cli", action="backup.create",
+                actor_id="cli",
+                action="backup.create",
                 resource=f"backup:{manifest.get('path', '')}",
                 workspace_id="*",
                 decision="allow",
@@ -717,7 +831,8 @@ def run_cli() -> None:
                 dry_run=args.dry_run,
             )
             _aaudit.log(
-                actor_id="cli", action="backup.restore",
+                actor_id="cli",
+                action="backup.restore",
                 resource=f"backup:{args.backup_path}",
                 workspace_id="*",
                 decision="allow" if not result.get("errors") else "error",
@@ -761,24 +876,30 @@ def run_cli() -> None:
         _eaudit = AuditLogger(Database(args.db_path or db_path))
         if export_action == "memories":
             from cogito_agent.cli.backup import export_data
+
             out = args.memories_out or "memories_export.json"
             result = export_data(out, db_path=args.db_path or db_path, sections=["memories"])
             _eaudit.log(
-                actor_id="cli", action="export.memories",
+                actor_id="cli",
+                action="export.memories",
                 resource=f"file:{out}",
-                workspace_id="*", decision="allow",
+                workspace_id="*",
+                decision="allow",
                 reason=f"count={len(result.get('sections', {}).get('memories', []))}",
             )
-            mem_cnt = len(result.get('sections', {}).get('memories', []))
+            mem_cnt = len(result.get("sections", {}).get("memories", []))
             print(f"Exported {mem_cnt} memories to {out}")
         elif export_action == "traces":
             from cogito_agent.cli.backup import export_data
+
             out = args.traces_out or "traces_export.json"
             result = export_data(out, db_path=args.db_path or db_path, sections=["traces"])
             _eaudit.log(
-                actor_id="cli", action="export.traces",
+                actor_id="cli",
+                action="export.traces",
                 resource=f"file:{out}",
-                workspace_id="*", decision="allow",
+                workspace_id="*",
+                decision="allow",
                 reason=f"count={len(result.get('sections', {}).get('traces', []))}",
             )
             print(f"Exported {len(result.get('sections', {}).get('traces', []))} traces to {out}")
@@ -810,7 +931,8 @@ def run_cli() -> None:
             include_audit = not args.include or "audit" in args.include
 
             data = export_workspace(
-                edb, ws_id,
+                edb,
+                ws_id,
                 include_traces=include_traces,
                 include_memories=include_memories,
                 include_audit=include_audit,
@@ -824,9 +946,11 @@ def run_cli() -> None:
             else:
                 print(output)
             _eaudit.log(
-                actor_id="cli", action="export.data",
+                actor_id="cli",
+                action="export.data",
                 resource=f"workspace:{ws_id}",
-                workspace_id=ws_id, decision="allow",
+                workspace_id=ws_id,
+                decision="allow",
                 reason=f"sections={include_traces},{include_memories},{include_audit}",
             )
             edb.close()
@@ -853,18 +977,26 @@ def run_cli() -> None:
         _policy = PolicyEngine()
         _gate = NotificationGate(_db_instance, policy_engine=_policy, audit_logger=_audit)
         _sched = SchedulerEngine(
-            _db_instance, tracer=_tracer, audit_logger=_audit,
-            policy_engine=_policy, notification_gate=_gate,
+            _db_instance,
+            tracer=_tracer,
+            audit_logger=_audit,
+            policy_engine=_policy,
+            notification_gate=_gate,
         )
         _dstore = DecisionStore(_db_instance)
         _outbox = Outbox(_db_instance)
         _fb_store = FeedbackStore(_db_instance, audit_logger=_audit)
         _loop = ProactiveLoop(
-            scheduler=_sched, notification_gate=_gate,
-            decision_store=_dstore, outbox=_outbox,
-            feedback_store=_fb_store, tracer=_tracer,
-            audit_logger=_audit, policy_engine=_policy,
-            db=_db_instance, tick_interval=30.0,
+            scheduler=_sched,
+            notification_gate=_gate,
+            decision_store=_dstore,
+            outbox=_outbox,
+            feedback_store=_fb_store,
+            tracer=_tracer,
+            audit_logger=_audit,
+            policy_engine=_policy,
+            db=_db_instance,
+            tick_interval=30.0,
         )
 
         if args.daemon_action == "once":
@@ -895,6 +1027,7 @@ def run_cli() -> None:
             print("  Notification gate: active")
         elif args.daemon_action == "stop":
             from datetime import UTC, datetime
+
             stopped = datetime.now(UTC).isoformat()
             _db_instance.connection.execute(
                 "INSERT INTO daemon_state"
@@ -990,10 +1123,11 @@ def run_cli() -> None:
                 print(f"  Scheduled jobs ({len(jobs)}):")
                 for j in jobs:
                     nxt = j.next_run_at or "-"
-                    print(f"    {j.name} ({j.id[:8]}): {j.status.value}"
-                          f" enabled={j.enabled} next={nxt}")
+                    print(
+                        f"    {j.name} ({j.id[:8]}): {j.status.value}"
+                        f" enabled={j.enabled} next={nxt}"
+                    )
         elif args.schedule_action == "maintenance":
-
             now = datetime.now(UTC)
             next_run: str | None = None
             schedule_type = "one_shot"
@@ -1053,6 +1187,7 @@ def run_cli() -> None:
                 traces = [t for t in traces if t.get("status") == status_filter]
             if days_filter > 0:
                 from datetime import UTC, datetime, timedelta
+
                 cutoff = (datetime.now(UTC) - timedelta(days=days_filter)).isoformat()
                 traces = [t for t in traces if str(t.get("started_at", "")) >= cutoff]
             if not traces:
@@ -1105,9 +1240,7 @@ def run_cli() -> None:
                     created = str(r["created_at"])[:19]
                     print(f"    {rid}  {actor}/{action}  [{decision}]  {created}")
         elif args.audit_action == "show":
-            cur = _adb.connection.execute(
-                "SELECT * FROM audit_logs WHERE id = ?", (args.audit_id,)
-            )
+            cur = _adb.connection.execute("SELECT * FROM audit_logs WHERE id = ?", (args.audit_id,))
             row = cur.fetchone()
             if row is None:
                 print(f"  Audit log '{args.audit_id}' not found.")
@@ -1127,6 +1260,7 @@ def run_cli() -> None:
         elif args.last_period.endswith("h"):
             days = 0
         from datetime import UTC, datetime, timedelta
+
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
         cur = _udb.connection.execute(
@@ -1175,6 +1309,7 @@ def run_cli() -> None:
         mem_ns = argparse.Namespace(
             db_path=db_path,
             workspace_id=ws_id,
+            workspace_path=getattr(args, "workspace_path", None),
             query=getattr(args, "query", ""),
             candidate_id=getattr(args, "candidate_id", ""),
             memory_id=getattr(args, "memory_id", ""),
@@ -1197,6 +1332,7 @@ def run_cli() -> None:
             _run_memory_edit,
             _run_memory_list,
             _run_memory_merge,
+            _run_memory_optimize,
             _run_memory_pin,
             _run_memory_reject,
             _run_memory_review,
@@ -1204,6 +1340,7 @@ def run_cli() -> None:
             _run_memory_unarchive,
             _run_memory_unpin,
         )
+
         dispatch = {
             "list": _run_memory_list,
             "search": _run_memory_search,
@@ -1219,6 +1356,7 @@ def run_cli() -> None:
             "unpin": _run_memory_unpin,
             "merge": _run_memory_merge,
             "consolidate": _run_memory_consolidate,
+            "optimize": _run_memory_optimize,
         }
         if args.memory_action == "embeddings":
             emb_ns = argparse.Namespace(
@@ -1238,7 +1376,9 @@ def run_cli() -> None:
             if emb_handler:
                 emb_handler(emb_ns)
             else:
-                print("Usage: cogito memory embeddings status|doctor|rebuild|retry-failed|purge-stale")
+                print(
+                    "Usage: cogito memory embeddings status|doctor|rebuild|retry-failed|purge-stale"
+                )
         else:
             handler = dispatch.get(args.memory_action)
             if handler:
@@ -1247,7 +1387,7 @@ def run_cli() -> None:
                 print(
                     "Usage: cogito memory"
                     " list|search|review|accept|reject|delete|pin|edit|correct"
-                    "|archive|unarchive|unpin|merge|consolidate"
+                    "|archive|unarchive|unpin|merge|consolidate|optimize"
                 )
     elif args.command == "secrets":
         from .secrets import (
@@ -1258,6 +1398,7 @@ def run_cli() -> None:
             _show_secret,
             _test_secret,
         )
+
         sec_ns = argparse.Namespace(
             db_path=db_path,
             secret_name=getattr(args, "secret_name", ""),
@@ -1280,6 +1421,7 @@ def run_cli() -> None:
             print("Usage: cogito secrets list|show|set|delete|rotate|test")
     elif args.command == "provider":
         from .provider_cli import provider_doctor, provider_list, provider_show, provider_test
+
         pv_ns = argparse.Namespace(
             provider_name=getattr(args, "provider_name", ""),
             live=getattr(args, "live", False),
@@ -1302,6 +1444,7 @@ def run_cli() -> None:
             run_autonomy_feedback,
             run_autonomy_outbox,
         )
+
         auto_ns = argparse.Namespace(
             db_path=db_path,
             title=getattr(args, "title", ""),
@@ -1326,14 +1469,16 @@ def run_cli() -> None:
         else:
             print("Usage: cogito autonomy emit|decisions|outbox|feedback")
     elif args.command == "skill":
-        _run_skill(argparse.Namespace(
-            db_path=db_path,
-            skill_action=args.skill_action,
-            skill_name=getattr(args, "skill_name", ""),
-            skill_file=getattr(args, "skill_file", ""),
-            output_path=getattr(args, "output_path", None),
-            input_path=getattr(args, "input_path", None),
-        ))
+        _run_skill(
+            argparse.Namespace(
+                db_path=db_path,
+                skill_action=args.skill_action,
+                skill_name=getattr(args, "skill_name", ""),
+                skill_file=getattr(args, "skill_file", ""),
+                output_path=getattr(args, "output_path", None),
+                input_path=getattr(args, "input_path", None),
+            )
+        )
     elif args.command == "approval":
         from .approval import (
             _run_approval_approve,
@@ -1342,6 +1487,7 @@ def run_cli() -> None:
             _run_approval_resume,
             _run_approval_show,
         )
+
         approval_dispatch = {
             "list": _run_approval_list,
             "show": _run_approval_show,
@@ -1351,14 +1497,16 @@ def run_cli() -> None:
         }
         handler = approval_dispatch.get(args.approval_action)
         if handler:
-            handler(argparse.Namespace(
-                db_path=db_path,
-                approval_id=getattr(args, "approval_id", ""),
-                skill_run_id=getattr(args, "skill_run_id", ""),
-                status=getattr(args, "status", "pending"),
-                workspace_id=getattr(args, "workspace_id", "*"),
-                force=getattr(args, "force", False),
-            ))
+            handler(
+                argparse.Namespace(
+                    db_path=db_path,
+                    approval_id=getattr(args, "approval_id", ""),
+                    skill_run_id=getattr(args, "skill_run_id", ""),
+                    status=getattr(args, "status", "pending"),
+                    workspace_id=getattr(args, "workspace_id", "*"),
+                    force=getattr(args, "force", False),
+                )
+            )
         else:
             print("Usage: cogito approval list|show|approve|reject|resume")
     elif args.command == "config":

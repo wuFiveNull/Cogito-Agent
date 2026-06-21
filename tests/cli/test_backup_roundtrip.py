@@ -33,9 +33,7 @@ def test_backup_restore_roundtrip_and_safety_copy(tmp_path: Path) -> None:
     _create_database(destination, "before-restore")
 
     manifest = create_backup(str(archive), str(source), data_dir=str(tmp_path))
-    result = restore_backup(
-        str(archive), str(destination), data_dir=str(tmp_path)
-    )
+    result = restore_backup(str(archive), str(destination), data_dir=str(tmp_path))
 
     assert manifest["checksums"]["cogito.db"]
     assert result["errors"] == []
@@ -52,7 +50,9 @@ def test_restore_dry_run_performs_integrity_preflight(tmp_path: Path) -> None:
     create_backup(str(archive), str(source), data_dir=str(tmp_path))
 
     result = restore_backup(
-        str(archive), str(tmp_path / "restored.db"), dry_run=True,
+        str(archive),
+        str(tmp_path / "restored.db"),
+        dry_run=True,
         data_dir=str(tmp_path),
     )
 

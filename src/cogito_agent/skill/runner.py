@@ -7,8 +7,14 @@ import uuid
 from typing import Any
 
 from cogito_agent.capability import CapabilityRegistry, _validate_json_schema
+from cogito_agent.execution import (
+    CapabilityExecutionRequest,
+    GovernedCapabilityExecutor,
+    default_guardians,
+)
 from cogito_agent.governance import AuditLogger, PolicyEngine
 from cogito_agent.models import ModelAdapter
+from cogito_agent.runs import RunRepository
 from cogito_agent.shared import PolicyRequest, SpanKind
 from cogito_agent.shared.skill import (
     OnError,
@@ -18,14 +24,23 @@ from cogito_agent.shared.skill import (
     StepKind,
 )
 from cogito_agent.storage import Database
+from cogito_agent.storage.repositories import ApprovalRepository
 from cogito_agent.trace import Tracer
+from cogito_agent.workspace.artifacts import ArtifactService
 
 
 class SkillRunLog:
-    def __init__(self, trace_id: str, skill_id: str, status: str):
+    def __init__(
+        self,
+        trace_id: str,
+        skill_id: str,
+        status: str,
+        run_id: str = "",
+    ):
         self.trace_id = trace_id
         self.skill_id = skill_id
         self.status = status
+        self.run_id = run_id
         self.step_logs: list[dict[str, object]] = []
         self.outputs: dict[str, str] = {}
         self.artifact_ids: list[str] = []
@@ -53,10 +68,26 @@ class SkillRunner:
         model_adapter: ModelAdapter | None = None,
     ) -> None:
         self._db = db
+        # Durable skill execution requires the run tables introduced by the
+        # current migration set. Direct library callers historically invoked
+        # only ``initialize()``, so make the runner boundary self-sufficient.
+        self._db.migrate()
         self._cap_reg = capability_registry or CapabilityRegistry()
         self._policy = policy_engine or PolicyEngine()
         self._model_adapter = model_adapter
         self._tracer = Tracer(db)
+        self._audit = AuditLogger(db)
+        self._runs = RunRepository(db)
+        self._worker_id = f"skill-runner:{uuid.uuid4()}"
+        self._cap_executor = GovernedCapabilityExecutor(
+            self._cap_reg,
+            self._policy,
+            approvals=ApprovalRepository(db),
+            audit=self._audit,
+            tracer=self._tracer,
+            guardians=default_guardians(),
+            artifact_writer=ArtifactService(db),
+        )
 
     def run(
         self,
@@ -64,36 +95,71 @@ class SkillRunner:
         workspace_id: str,
         session_id: str = "",
         inputs: dict[str, str] | None = None,
+        *,
+        durable_run_id: str | None = None,
     ) -> SkillRunLog:
+        # Registry and policy are replaceable extension points. Rebind the
+        # executor at the run boundary so a newly loaded capability set cannot
+        # bypass governance or leave the executor pointing at stale objects.
+        self._cap_executor = GovernedCapabilityExecutor(
+            self._cap_reg,
+            self._policy,
+            approvals=ApprovalRepository(self._db),
+            audit=self._audit,
+            tracer=self._tracer,
+            guardians=default_guardians(),
+            artifact_writer=ArtifactService(self._db),
+        )
+        if durable_run_id is None:
+            durable = self._runs.create(
+                run_type="skill",
+                workspace_id=workspace_id,
+                definition_id=manifest.name,
+                max_attempts=2,
+                input_data={"session_id": session_id, "inputs": inputs or {}},
+            )
+            durable_run_id = str(durable["id"])
+        if not self._runs.claim(durable_run_id, worker_id=self._worker_id):
+            raise RuntimeError(f"Could not claim skill run {durable_run_id}")
+
         trace = self._tracer.create_trace(
             workspace_id=workspace_id,
             root_event_id=f"skill_{manifest.name}",
             session_id=session_id,
         )
-        log = SkillRunLog(trace.id, manifest.name, "running")
-        audit = AuditLogger(self._db)
+        log = SkillRunLog(trace.id, manifest.name, "running", durable_run_id)
+        self._runs.set_trace_id(durable_run_id, trace.id)
+        audit = self._audit
 
         total_cost: float = 0.0
         executed_steps: list[SkillStep] = []
         step_context: dict[str, dict[str, str]] = {}
 
-        self._preflight_all(manifest, workspace_id)
-        self._check_semver(manifest)
+        try:
+            self._preflight_all(manifest, workspace_id)
+            self._check_semver(manifest)
+        except Exception as exc:
+            log.status = "failed"
+            log.step_logs.append({"step_id": "preflight", "status": "error", "error": str(exc)})
+            self._tracer.end_trace(trace, "failed")
+            self._persist_run_log(log, workspace_id, manifest.name)
+            self._finish_durable_run(log)
+            raise
 
         for step_idx, step in enumerate(manifest.steps):
             if step.trace_required:
-                span = self._tracer.create_span(
-                    trace.id, f"step_{step.id}", SpanKind.runtime
-                )
+                span = self._tracer.create_span(trace.id, f"step_{step.id}", SpanKind.runtime)
 
             cfg = step.execution
             if cfg.max_budget_cost is not None and total_cost >= cfg.max_budget_cost:
                 log.status = "failed"
-                log.step_logs.append({
-                    "step_id": step.id,
-                    "status": "error",
-                    "error": f"Budget exhausted ({total_cost}/{cfg.max_budget_cost})",
-                })
+                log.step_logs.append(
+                    {
+                        "step_id": step.id,
+                        "status": "error",
+                        "error": f"Budget exhausted ({total_cost}/{cfg.max_budget_cost})",
+                    }
+                )
                 break
 
             decision = "allow"
@@ -113,7 +179,10 @@ class SkillRunner:
 
             try:
                 result = self._execute_step_with_controls(
-                    step, workspace_id, inputs or {}, step_context,
+                    step,
+                    workspace_id,
+                    inputs or {},
+                    step_context,
                     session_id=session_id,
                 )
                 executed_steps.append(step)
@@ -133,14 +202,17 @@ class SkillRunner:
                     step_output = str(result.get("approval_id", ""))
                     if step_status == "pending_approval":
                         log.status = "pending_approval"
-                        log.step_logs.append({
-                            "step_id": step.id,
-                            "status": "pending_approval",
-                            "output": step_output,
-                            "artifacts": self._extract_artifacts(result),
-                            "lineage": self._extract_lineage(result),
-                        })
+                        log.step_logs.append(
+                            {
+                                "step_id": step.id,
+                                "status": "pending_approval",
+                                "output": step_output,
+                                "artifacts": self._extract_artifacts(result),
+                                "lineage": self._extract_lineage(result),
+                            }
+                        )
                         resume_data: dict[str, Any] = {
+                            "durable_run_id": durable_run_id,
                             "manifest": manifest.model_dump(),
                             "step_index": step_idx,
                             "step_context": step_context,
@@ -151,6 +223,11 @@ class SkillRunner:
                             "inputs": inputs or {},
                         }
                         self._persist_run_log(log, workspace_id, manifest.name, resume_data)
+                        self._record_run_outputs(log)
+                        self._runs.pause_for_approval(
+                            durable_run_id,
+                            step_output,
+                        )
                         if step.trace_required:
                             self._tracer.end_span(span)
                         self._tracer.end_trace(trace)
@@ -158,19 +235,23 @@ class SkillRunner:
                 elif step.kind == StepKind.condition:
                     step_status = "ok"
 
-                log.step_logs.append({
-                    "step_id": step.id,
-                    "status": step_status,
-                    "output": step_output,
-                    "artifacts": self._extract_artifacts(result),
-                    "lineage": self._extract_lineage(result),
-                })
+                log.step_logs.append(
+                    {
+                        "step_id": step.id,
+                        "status": step_status,
+                        "output": step_output,
+                        "artifacts": self._extract_artifacts(result),
+                        "lineage": self._extract_lineage(result),
+                    }
+                )
             except Exception as e:
-                log.step_logs.append({
-                    "step_id": step.id,
-                    "status": "error",
-                    "error": str(e),
-                })
+                log.step_logs.append(
+                    {
+                        "step_id": step.id,
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
                 failure = step.on_error
                 if failure == OnError.stop:
                     log.status = "failed"
@@ -190,6 +271,7 @@ class SkillRunner:
             log.status = "completed"
         self._tracer.end_trace(trace)
         self._persist_run_log(log, workspace_id, manifest.name)
+        self._finish_durable_run(log)
         return log
 
     def resume(self, run_log_id: str, approval_id: str) -> SkillRunLog | None:
@@ -219,6 +301,7 @@ class SkillRunner:
         ]
 
         from cogito_agent.storage.repositories import ApprovalRepository
+
         repo = ApprovalRepository(self._db)
         resolved = repo.get_by_id(approval_id)
         if resolved is None:
@@ -228,7 +311,8 @@ class SkillRunner:
         trace_id = str(row_dict["trace_id"])
         if not trace_id:
             return None
-        log = SkillRunLog(trace_id, manifest.name, "running")
+        durable_run_id = str(resume_data.get("durable_run_id", ""))
+        log = SkillRunLog(trace_id, manifest.name, "running", durable_run_id)
         payload = json.loads(str(row_dict["step_logs_json"]))
         log.step_logs = payload.get("step_logs", []) if isinstance(payload, dict) else []
         log.outputs = payload.get("outputs", {}) if isinstance(payload, dict) else {}
@@ -242,6 +326,11 @@ class SkillRunner:
         approval_step = manifest.steps[step_index]
 
         if decision == "approved":
+            if durable_run_id and not self._runs.resume_waiting(
+                durable_run_id,
+                worker_id=self._worker_id,
+            ):
+                return None
             for entry in log.step_logs:
                 if entry.get("step_id") == approval_step.id:
                     entry["status"] = "approved"
@@ -262,7 +351,7 @@ class SkillRunner:
                 reason=f"Approval step '{approval_step.name}' approved, resuming",
             )
 
-            remaining = manifest.steps[step_index + 1:]
+            remaining = manifest.steps[step_index + 1 :]
             for step in remaining:
                 if step.trace_required:
                     span = self._tracer.create_span(
@@ -272,11 +361,13 @@ class SkillRunner:
                 cfg = step.execution
                 if cfg.max_budget_cost is not None and total_cost >= cfg.max_budget_cost:
                     log.status = "failed"
-                    log.step_logs.append({
-                        "step_id": step.id,
-                        "status": "error",
-                        "error": f"Budget exhausted ({total_cost}/{cfg.max_budget_cost})",
-                    })
+                    log.step_logs.append(
+                        {
+                            "step_id": step.id,
+                            "status": "error",
+                            "error": f"Budget exhausted ({total_cost}/{cfg.max_budget_cost})",
+                        }
+                    )
                     break
 
                 audit.log(
@@ -292,7 +383,10 @@ class SkillRunner:
 
                 try:
                     result = self._execute_step_with_controls(
-                        step, workspace_id, inputs, step_context,
+                        step,
+                        workspace_id,
+                        inputs,
+                        step_context,
                         session_id=session_id,
                     )
                     executed_steps.append(step)
@@ -313,19 +407,23 @@ class SkillRunner:
                     elif step.kind == StepKind.condition:
                         step_status = "ok"
 
-                    log.step_logs.append({
-                        "step_id": step.id,
-                        "status": step_status,
-                        "output": step_output,
-                        "artifacts": self._extract_artifacts(result),
-                        "lineage": self._extract_lineage(result),
-                    })
+                    log.step_logs.append(
+                        {
+                            "step_id": step.id,
+                            "status": step_status,
+                            "output": step_output,
+                            "artifacts": self._extract_artifacts(result),
+                            "lineage": self._extract_lineage(result),
+                        }
+                    )
                 except Exception as e:
-                    log.step_logs.append({
-                        "step_id": step.id,
-                        "status": "error",
-                        "error": str(e),
-                    })
+                    log.step_logs.append(
+                        {
+                            "step_id": step.id,
+                            "status": "error",
+                            "error": str(e),
+                        }
+                    )
                     failure = step.on_error
                     if failure == OnError.stop:
                         log.status = "failed"
@@ -355,6 +453,7 @@ class SkillRunner:
                 reason=f"Skill '{manifest.name}' resume completed with status {log.status}",
             )
             self._persist_run_log(log, workspace_id, manifest.name)
+            self._finish_durable_run(log)
             return log
 
         else:
@@ -375,6 +474,7 @@ class SkillRunner:
                 reason=f"Approval step '{approval_step.name}' rejected",
             )
             self._persist_run_log(log, workspace_id, manifest.name)
+            self._finish_durable_run(log)
             return log
 
     # ── M.4 Semver enforcement ──────────────────────────────────────────
@@ -407,9 +507,11 @@ class SkillRunner:
 
     def _preflight_all(self, manifest: SkillManifest, workspace_id: str) -> None:
         for step in manifest.steps:
-            if (step.kind == StepKind.capability
-                    and step.uses_capability
-                    and self._cap_reg.get_manifest(step.uses_capability) is not None):
+            if (
+                step.kind == StepKind.capability
+                and step.uses_capability
+                and self._cap_reg.get_manifest(step.uses_capability) is not None
+            ):
                 req = PolicyRequest(
                     actor_id="skill",
                     capability_name=step.uses_capability,
@@ -419,9 +521,7 @@ class SkillRunner:
                 )
                 decision = self._policy.evaluate(req)
                 if decision.decision.value == "deny":
-                    raise PermissionError(
-                        f"Policy denied step '{step.id}': {step.uses_capability}"
-                    )
+                    raise PermissionError(f"Policy denied step '{step.id}': {step.uses_capability}")
 
     # ── M.1 Rollback compensation ─────────────────────────────────────
 
@@ -434,7 +534,25 @@ class SkillRunner:
         for rollback_step in reversed(manifest.rollback):
             cap_name = rollback_step.get("uses_capability", "")
             if cap_name:
-                self._cap_reg.invoke(cap_name, workspace_id=workspace_id)
+                execution = self._cap_executor.execute(
+                    CapabilityExecutionRequest(
+                        capability_name=cap_name,
+                        arguments={"workspace_id": workspace_id},
+                        actor_id="skill",
+                        source="interactive",
+                        workspace_id=workspace_id,
+                        operation="tool",
+                    )
+                )
+                if not execution.succeeded:
+                    self._audit.log(
+                        actor_id="skill",
+                        action="skill.rollback.failed",
+                        resource=f"capability:{cap_name}",
+                        workspace_id=workspace_id,
+                        decision="deny",
+                        reason=execution.reason,
+                    )
 
     # ── M.3 Output normalization ─────────────────────────────────────
 
@@ -476,22 +594,41 @@ class SkillRunner:
         if step.kind == StepKind.transform:
             return self._apply_mapping(step, inputs, step_context)
         if step.kind == StepKind.capability and step.uses_capability:
-            mapped = self._apply_mapping(step, inputs, step_context)
-            result = self._cap_reg.invoke(step.uses_capability, **mapped)
-            if result is None:
-                raise RuntimeError(
-                    f"Capability '{step.uses_capability}' not registered"
+            mapped: dict[str, object] = dict(self._apply_mapping(step, inputs, step_context))
+            execution = self._cap_executor.execute(
+                CapabilityExecutionRequest(
+                    capability_name=step.uses_capability,
+                    arguments=mapped,
+                    actor_id="skill",
+                    source="interactive",
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    operation="tool",
                 )
+            )
+            if execution.status == "approval_required":
+                raise PermissionError(
+                    f"Capability '{step.uses_capability}' requires approval "
+                    f"({execution.approval_id})"
+                )
+            if execution.status in {"denied", "not_found"}:
+                raise PermissionError(
+                    f"Capability '{step.uses_capability}' denied: {execution.reason}"
+                )
+            result = execution.tool_result
+            if result is None:
+                raise RuntimeError(f"Capability '{step.uses_capability}' not registered")
             return result
         if step.kind == StepKind.llm:
             return self._execute_llm_step(step, inputs, step_context)
         if step.kind == StepKind.condition:
-            return self._evaluate_condition(
-                step.condition_expression, inputs, step_context
-            )
+            return self._evaluate_condition(step.condition_expression, inputs, step_context)
         if step.kind == StepKind.approval:
             return self._execute_approval_step(
-                step, workspace_id, step_context, session_id=session_id,
+                step,
+                workspace_id,
+                step_context,
+                session_id=session_id,
             )
         return None
 
@@ -512,7 +649,10 @@ class SkillRunner:
             start = _time.monotonic()
             try:
                 result = self._execute_step(
-                    step, workspace_id, inputs, step_context,
+                    step,
+                    workspace_id,
+                    inputs,
+                    step_context,
                     session_id=session_id,
                 )
                 elapsed = _time.monotonic() - start
@@ -525,8 +665,7 @@ class SkillRunner:
                 output_error = self._validate_output(result, step.output_schema)
                 if output_error:
                     raise ValueError(
-                        "Output validation failed for step"
-                        f" '{step.id}': {output_error}"
+                        f"Output validation failed for step '{step.id}': {output_error}"
                     )
 
                 return result
@@ -536,9 +675,7 @@ class SkillRunner:
                 if step.failure_policy == OnError.skip or step.on_error == OnError.skip:
                     return None
                 if step.failure_policy == OnError.rollback or step.on_error == OnError.rollback:
-                    raise RuntimeError(
-                        f"Step '{step.id}' failed with rollback: {e}"
-                    ) from e
+                    raise RuntimeError(f"Step '{step.id}' failed with rollback: {e}") from e
                 raise
 
         raise RuntimeError("Unreachable")
@@ -552,7 +689,7 @@ class SkillRunner:
         if not expression:
             return True
         resolved = expression
-        for match in re.finditer(r'\$(\w+)\.([\w.]+)', expression):
+        for match in re.finditer(r"\$(\w+)\.([\w.]+)", expression):
             prefix = match.group(1)
             path = match.group(2)
             parts = path.split(".")
@@ -603,9 +740,7 @@ class SkillRunner:
         return {"status": "pending_approval", "approval_id": str(approval.get("id", ""))}
 
     @staticmethod
-    def _validate_output(
-        output: object, output_schema: dict[str, object]
-    ) -> str | None:
+    def _validate_output(output: object, output_schema: dict[str, object]) -> str | None:
         if not output_schema:
             return None
         if isinstance(output, str):
@@ -701,3 +836,41 @@ class SkillRunner:
             ),
         )
         self._db.connection.commit()
+
+    def _record_run_outputs(self, log: SkillRunLog) -> None:
+        if not log.run_id:
+            return
+        for output_type, references in (
+            ("artifact", log.artifact_ids),
+            ("inbox", log.inbox_item_ids),
+            ("proposal", log.proposal_ids),
+        ):
+            for reference_id in references:
+                self._runs.add_output(log.run_id, output_type, reference_id)
+
+    def _finish_durable_run(self, log: SkillRunLog) -> None:
+        if not log.run_id:
+            return
+        self._record_run_outputs(log)
+        status = "succeeded" if log.status == "completed" else "failed"
+        if log.status == "rejected":
+            status = "cancelled"
+        error_message = ""
+        if status == "failed":
+            errors = [
+                str(entry.get("error", ""))
+                for entry in log.step_logs
+                if entry.get("status") == "error"
+            ]
+            error_message = "; ".join(filter(None, errors))
+        self._runs.finish(
+            log.run_id,
+            status=status,
+            result_data={
+                "skill_id": log.skill_id,
+                "status": log.status,
+                "output_types": log.output_types,
+            },
+            error_code="skill_failed" if status == "failed" else "",
+            error_message=error_message,
+        )

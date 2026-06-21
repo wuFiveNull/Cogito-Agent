@@ -28,8 +28,7 @@ def db() -> Database:
 @pytest.fixture
 def db_with_data(db: Database) -> Database:
     db.connection.execute(
-        "INSERT INTO sessions (id, workspace_id, title)"
-        " VALUES (?, ?, ?)",
+        "INSERT INTO sessions (id, workspace_id, title) VALUES (?, ?, ?)",
         (str(uuid.uuid4()), "default", "Test Session"),
     )
     for i in range(3):
@@ -37,10 +36,13 @@ def db_with_data(db: Database) -> Database:
             "INSERT INTO memories (id, workspace_id, type, text, confidence,"
             " created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (str(uuid.uuid4()), "default",
-             "task" if i < 2 else "general",
-             f"Test task memory {i}" if i < 2 else f"General memory {i}",
-             0.5 + i * 0.1),
+            (
+                str(uuid.uuid4()),
+                "default",
+                "task" if i < 2 else "general",
+                f"Test task memory {i}" if i < 2 else f"General memory {i}",
+                0.5 + i * 0.1,
+            ),
         )
     for i in range(2):
         db.connection.execute(
@@ -53,8 +55,7 @@ def db_with_data(db: Database) -> Database:
             "INSERT INTO artifacts (id, workspace_id, source_type, source_id,"
             " title, artifact_type, content_json, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (str(uuid.uuid4()), "default", "test", "test",
-             f"Artifact {i}", "text", "{}"),
+            (str(uuid.uuid4()), "default", "test", "test", f"Artifact {i}", "text", "{}"),
         )
     for i in range(2):
         root_id = str(uuid.uuid4())
@@ -69,8 +70,7 @@ def db_with_data(db: Database) -> Database:
             "INSERT INTO workspace_files (id, workspace_id, root_id, relative_path,"
             " file_name, mime_type, status, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'))",
-            (fid, "default", root_id, f"test_{i}.md",
-             f"test_{i}.md", "text/markdown"),
+            (fid, "default", root_id, f"test_{i}.md", f"test_{i}.md", "text/markdown"),
         )
         db.connection.execute(
             "INSERT INTO file_chunks (id, workspace_file_id, workspace_id,"
@@ -92,7 +92,9 @@ class TestDailyBrief:
 
     def test_daily_brief_with_custom_date(self, db_with_data: Database) -> None:
         result = run_daily_brief(
-            db_with_data, workspace_id="default", date="2026-06-18",
+            db_with_data,
+            workspace_id="default",
+            date="2026-06-18",
         )
         assert result["status"] == "completed"
 
@@ -133,8 +135,7 @@ class TestMemoryConsolidation:
                 "INSERT INTO memories (id, workspace_id, type, text, confidence,"
                 " created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-                (str(uuid.uuid4()), "default", "general",
-                 "Duplicate text to merge", 0.5),
+                (str(uuid.uuid4()), "default", "general", "Duplicate text to merge", 0.5),
             )
         db.connection.commit()
         result = run_memory_consolidation(db, workspace_id="default")
@@ -154,16 +155,16 @@ class TestMemoryConsolidation:
         )
         db.connection.commit()
         run_memory_consolidation(db, workspace_id="default")
-        row = db.connection.execute(
-            "SELECT * FROM memories WHERE id = ?", (mid,)
-        ).fetchone()
+        row = db.connection.execute("SELECT * FROM memories WHERE id = ?", (mid,)).fetchone()
         assert row is not None, "memory must NOT be deleted"
         assert str(row["text"]) == "Test memory", "memory text must NOT change"
         assert str(row["status"]) == "active", "memory status must NOT change"
-        row_count = int(db.connection.execute(
-            "SELECT COUNT(*) as cnt FROM memories WHERE id = ? AND deleted_at IS NULL",
-            (mid,),
-        ).fetchone()["cnt"])
+        row_count = int(
+            db.connection.execute(
+                "SELECT COUNT(*) as cnt FROM memories WHERE id = ? AND deleted_at IS NULL",
+                (mid,),
+            ).fetchone()["cnt"]
+        )
         assert row_count == 1, "memory must still exist (not soft-deleted)"
 
     def test_memory_consolidation_artifact(self, db: Database) -> None:
@@ -322,16 +323,16 @@ class TestInboxDigest:
                 (str(uuid.uuid4()), "default", f"Item {i}", f"Body {i}", "test"),
             )
         db.connection.commit()
-        before = int(db.connection.execute(
-            "SELECT COUNT(*) as cnt FROM inbox_items"
-        ).fetchone()["cnt"])
+        before = int(
+            db.connection.execute("SELECT COUNT(*) as cnt FROM inbox_items").fetchone()["cnt"]
+        )
         assert before == 5
 
         run_inbox_digest(db, workspace_id="default")
 
-        after = int(db.connection.execute(
-            "SELECT COUNT(*) as cnt FROM inbox_items"
-        ).fetchone()["cnt"])
+        after = int(
+            db.connection.execute("SELECT COUNT(*) as cnt FROM inbox_items").fetchone()["cnt"]
+        )
         assert after == before, "inbox_digest must NOT create inbox items (recursive spam)"
 
     def test_inbox_digest_identifies_noisy_sources(self, db: Database) -> None:

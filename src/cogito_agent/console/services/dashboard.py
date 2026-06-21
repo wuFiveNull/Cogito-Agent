@@ -56,9 +56,7 @@ class DashboardService(BaseConsoleService):
     def _build_workspace_summary(self) -> WorkspaceSummary:
         return {"id": "default", "name": "Default Workspace"}
 
-    def _build_system_status_summary(
-        self, status_data: dict[str, Any]
-    ) -> SystemStatusSummary:
+    def _build_system_status_summary(self, status_data: dict[str, Any]) -> SystemStatusSummary:
         db_info = status_data.get("db", {})
         model_info = status_data.get("model", {})
         secrets_info = status_data.get("secrets", {})

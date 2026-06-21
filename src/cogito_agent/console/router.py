@@ -16,13 +16,16 @@ from .approval import approval_router as _approval_router
 from .artifact_views import artifact_router as _artifact_router
 from .audit_views import audit_router as _audit_router
 from .autonomy_views import autonomy_router as _autonomy_router
+from .backup_views import backup_router as _backup_router
 from .chat_sessions import router as _chat_sessions_router
 from .config_views import config_router as _config_router
 from .doctor_views import doctor_router as _doctor_router
 from .drift_views import drift_router as _drift_router
 from .inbox_views import inbox_router as _inbox_router
+from .mcp_views import mcp_router as _mcp_router
 from .memory import memory_router as _memory_router
 from .redaction import redact_html
+from .run_views import run_router as _run_router
 from .services import ConsoleOverviewService, DashboardService
 from .static_version import STATIC_VERSION
 from .trace_views import trace_router as _trace_router
@@ -50,13 +53,16 @@ def _ensure_console_session() -> str:
     repo = SessionRepository(db)
     sess = repo.get_by_id(CONSOLE_SESSION_ID, CONSOLE_WORKSPACE_ID)
     if sess is None:
-        from cogito_agent.storage.repositories import WorkspaceRepository
+        from cogito_agent.application import WorkspaceApplicationService
 
-        ws_repo = WorkspaceRepository(db)
-        ws = ws_repo.get_by_id(CONSOLE_WORKSPACE_ID)
-        if ws is None:
-            ws = ws_repo.create(CONSOLE_WORKSPACE_ID, CONSOLE_WORKSPACE_ID)
-        repo.create(CONSOLE_SESSION_ID, CONSOLE_WORKSPACE_ID, "Console Chat")
+        service = WorkspaceApplicationService(db)
+        service.ensure_workspace(CONSOLE_WORKSPACE_ID)
+        service.create_session(
+            CONSOLE_WORKSPACE_ID,
+            "Console Chat",
+            session_id=CONSOLE_SESSION_ID,
+            actor_id="console",
+        )
     return CONSOLE_SESSION_ID
 
 
@@ -136,7 +142,7 @@ async def chat_send(
     session_id: str = Form(CONSOLE_SESSION_ID),
     workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
 ) -> HTMLResponse:
-    from cogito_agent.api.app import get_db, get_kernel
+    from cogito_agent.api.app import get_chat_service, get_db
     from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -155,19 +161,23 @@ async def chat_send(
 
     try:
         db = get_db()
-        kernel = get_kernel()
+        chat_service = get_chat_service()
 
-        from cogito_agent.storage.repositories import SessionRepository, WorkspaceRepository
+        from cogito_agent.application import WorkspaceApplicationService
+        from cogito_agent.storage.repositories import SessionRepository
 
-        ws_repo = WorkspaceRepository(db)
-        ws = ws_repo.get_by_id(workspace_id)
-        if ws is None:
-            ws = ws_repo.create(workspace_id, workspace_id)
+        workspace_service = WorkspaceApplicationService(db)
+        workspace_service.ensure_workspace(workspace_id)
 
         sess_repo = SessionRepository(db)
         sess = sess_repo.get_by_id(session_id, workspace_id)
         if sess is None:
-            sess = sess_repo.create(session_id, workspace_id, "Console Chat")
+            workspace_service.create_session(
+                workspace_id,
+                "Console Chat",
+                session_id=session_id,
+                actor_id="console",
+            )
 
         event = RuntimeEvent(
             workspace_id=workspace_id,
@@ -178,7 +188,7 @@ async def chat_send(
             payload={"text": message, "_request_id": rid},
         )
 
-        result = kernel.process(event)
+        result = chat_service.process(event)
         from cogito_agent.console.markdown import render_safe_markdown
 
         output = redact_html(result.output or "")
@@ -228,7 +238,7 @@ async def chat_stream_route(
     session_id: str = Form(CONSOLE_SESSION_ID),
     workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
 ) -> StreamingResponse:
-    from cogito_agent.api.app import get_db, get_kernel
+    from cogito_agent.api.app import get_chat_service, get_db
     from cogito_agent.cli.config_manager import get_config
     from cogito_agent.shared import EventSource, EventType, RuntimeEvent, StreamEventType
     from cogito_agent.trace.redaction import RedactionHelper
@@ -240,19 +250,23 @@ async def chat_stream_route(
     def event_stream() -> Any:
         try:
             db = get_db()
-            kernel = get_kernel()
+            chat_service = get_chat_service()
 
-            from cogito_agent.storage.repositories import SessionRepository, WorkspaceRepository
+            from cogito_agent.application import WorkspaceApplicationService
+            from cogito_agent.storage.repositories import SessionRepository
 
-            ws_repo = WorkspaceRepository(db)
-            ws = ws_repo.get_by_id(workspace_id)
-            if ws is None:
-                ws = ws_repo.create(workspace_id, workspace_id)
+            workspace_service = WorkspaceApplicationService(db)
+            workspace_service.ensure_workspace(workspace_id)
 
             sess_repo = SessionRepository(db)
             sess = sess_repo.get_by_id(session_id, workspace_id)
             if sess is None:
-                sess = sess_repo.create(session_id, workspace_id, "Console Chat")
+                workspace_service.create_session(
+                    workspace_id,
+                    "Console Chat",
+                    session_id=session_id,
+                    actor_id="console",
+                )
 
             event = RuntimeEvent(
                 workspace_id=workspace_id,
@@ -267,7 +281,7 @@ async def chat_stream_route(
             streaming_enabled = cfg.get("model.streaming_enabled", "true").lower() == "true"
             max_retries = int(cfg.get("model.max_retries", "2"))
 
-            for sev in kernel.process_stream(
+            for sev in chat_service.process_stream(
                 event,
                 request_id=rid,
                 streaming_enabled=streaming_enabled,
@@ -291,14 +305,16 @@ async def chat_stream_route(
 
         except Exception:
             logger.exception("chat_stream_route error")
-            err_data = json.dumps({
-                "error": {
-                    "code": "STREAM_ERROR",
-                    "message": "Stream error occurred",
-                    "request_id": rid,
-                    "retryable": False,
+            err_data = json.dumps(
+                {
+                    "error": {
+                        "code": "STREAM_ERROR",
+                        "message": "Stream error occurred",
+                        "request_id": rid,
+                        "retryable": False,
+                    }
                 }
-            })
+            )
             yield f"event: error\ndata: {err_data}\n\n"
 
     return StreamingResponse(
@@ -310,6 +326,9 @@ async def chat_stream_route(
 
 console_router.include_router(_memory_router, prefix="/memory")
 console_router.include_router(_approval_router, prefix="/approval")
+console_router.include_router(_run_router, prefix="/runs")
+console_router.include_router(_mcp_router, prefix="/mcp")
+console_router.include_router(_backup_router, prefix="/backups")
 console_router.include_router(_chat_sessions_router, prefix="")
 console_router.include_router(_trace_router, prefix="/traces")
 console_router.include_router(_audit_router, prefix="/audit")

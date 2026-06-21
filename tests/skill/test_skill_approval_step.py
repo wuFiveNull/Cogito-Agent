@@ -18,7 +18,9 @@ def test_approval_step_creates_pending_approval_record(db_runner: SkillRunner) -
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],
@@ -48,7 +50,9 @@ def test_approval_step_returns_pending_approval_status(db_runner: SkillRunner) -
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],
@@ -69,7 +73,9 @@ def test_approval_step_logs_audit_entry(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],
@@ -97,7 +103,9 @@ def test_approval_step_records_id_in_output(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="a1", name="approve-me", kind=StepKind.approval,
+                id="a1",
+                name="approve-me",
+                kind=StepKind.approval,
             ),
         ],
         permissions=[],

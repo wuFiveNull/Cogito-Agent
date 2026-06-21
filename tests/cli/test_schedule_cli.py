@@ -132,7 +132,7 @@ def test_schedule_duplicate_prevention() -> None:
     engine = ProactiveEngine(sched, gate)
 
     engine.run_once()
-    results = engine.run_once()
+    engine.run_once()
     sched_job = sched.get_job("sched_job_test")
     assert sched_job is not None
     assert sched_job.status in (JobStatus.completed, JobStatus.skipped)

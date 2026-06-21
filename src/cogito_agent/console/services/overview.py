@@ -15,13 +15,16 @@ from cogito_agent.console.status import build_status
 from cogito_agent.console.utils import csrf_token_input
 from cogito_agent.console.utils import menu_items as _menu_items
 from cogito_agent.storage import Database
-from cogito_agent.storage.repositories import (
-    ApprovalRepository,
-    MemoryCandidateRepository,
-)
+from cogito_agent.storage.repositories import ApprovalRepository
 from cogito_agent.version import APP_VERSION
 
 from .base import BaseConsoleService
+
+
+def _content_id(content: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 class ConsoleOverviewService(BaseConsoleService):
@@ -117,8 +120,18 @@ class ConsoleOverviewService(BaseConsoleService):
             failed_delivery_items = []
 
         try:
-            candidate_repo = MemoryCandidateRepository(db)
-            pending_candidates = candidate_repo.list_pending("default")
+            from cogito_agent.storage import Database
+            db = Database()
+            rows = db.connection.execute(
+                "SELECT id, summary, memory_type FROM memory_items"
+                " WHERE status='active' AND memory_type != '_recent_context'"
+                " ORDER BY updated_at DESC LIMIT 10"
+            ).fetchall()
+            pending_candidates = [{
+                "id": str(r["id"])[:16],
+                "text": str(r["summary"]),
+                "type": str(r["memory_type"]),
+            } for r in rows]
         except Exception:
             pending_candidates = []
 
@@ -145,10 +158,7 @@ class ConsoleOverviewService(BaseConsoleService):
             failed_drift_items = []
 
         total_issues = (
-            len(pending_approvals)
-            + failed_deliveries
-            + len(pending_candidates)
-            + failed_drift_runs
+            len(pending_approvals) + failed_deliveries + len(pending_candidates) + failed_drift_runs
         )
 
         return {
@@ -173,9 +183,7 @@ class ConsoleOverviewService(BaseConsoleService):
         drift_msg = "Drift runtime not available"
         try:
             db = self._get_db()
-            cur = db.connection.execute(
-                "SELECT enabled FROM drift_state WHERE id='main'"
-            )
+            cur = db.connection.execute("SELECT enabled FROM drift_state WHERE id='main'")
             row = cur.fetchone()
             if row is not None:
                 drift_ok = True
@@ -205,14 +213,16 @@ class ConsoleOverviewService(BaseConsoleService):
                 "SELECT id, status, started_at FROM traces ORDER BY started_at DESC LIMIT 10"
             )
             for row in cur.fetchall():
-                events.append({
-                    "type": "trace",
-                    "id": row["id"],
-                    "status": row["status"],
-                    "timestamp": row["started_at"],
-                    "summary": f"Trace {row['status']}",
-                    "url": f"/console/traces/{row['id']}",
-                })
+                events.append(
+                    {
+                        "type": "trace",
+                        "id": row["id"],
+                        "status": row["status"],
+                        "timestamp": row["started_at"],
+                        "summary": f"Trace {row['status']}",
+                        "url": f"/console/traces/{row['id']}",
+                    }
+                )
         except Exception:
             pass
 
@@ -222,14 +232,16 @@ class ConsoleOverviewService(BaseConsoleService):
                 "ORDER BY created_at DESC LIMIT 5"
             )
             for row in cur.fetchall():
-                events.append({
-                    "type": "drift",
-                    "id": row["id"],
-                    "status": row["status"],
-                    "timestamp": row["created_at"],
-                    "summary": f"Drift: {row['skill_name']} ({row['status']})",
-                    "url": f"/console/drift/runs/{row['id']}",
-                })
+                events.append(
+                    {
+                        "type": "drift",
+                        "id": row["id"],
+                        "status": row["status"],
+                        "timestamp": row["created_at"],
+                        "summary": f"Drift: {row['skill_name']} ({row['status']})",
+                        "url": f"/console/drift/runs/{row['id']}",
+                    }
+                )
         except Exception:
             pass
 
@@ -239,14 +251,16 @@ class ConsoleOverviewService(BaseConsoleService):
             store = DecisionStore(db)
             decisions = store.list_decisions(workspace_id="*", limit=5)
             for dec in decisions:
-                events.append({
-                    "type": "decision",
-                    "id": dec["id"],
-                    "status": dec.get("action", ""),
-                    "timestamp": dec.get("created_at", ""),
-                    "summary": f"Decision: {dec.get('action', 'unknown')}",
-                    "url": f"/console/autonomy/decisions/{dec['id']}",
-                })
+                events.append(
+                    {
+                        "type": "decision",
+                        "id": dec["id"],
+                        "status": dec.get("action", ""),
+                        "timestamp": dec.get("created_at", ""),
+                        "summary": f"Decision: {dec.get('action', 'unknown')}",
+                        "url": f"/console/autonomy/decisions/{dec['id']}",
+                    }
+                )
         except Exception:
             pass
 
@@ -254,18 +268,18 @@ class ConsoleOverviewService(BaseConsoleService):
             from cogito_agent.workspace.artifacts import ArtifactService
 
             artifact_service = ArtifactService(db)
-            artifacts = artifact_service.list_artifacts(
-                workspace_id="default", limit=5
-            )
+            artifacts = artifact_service.list_artifacts(workspace_id="default", limit=5)
             for art in artifacts:
-                events.append({
-                    "type": "artifact",
-                    "id": art["id"],
-                    "status": "created",
-                    "timestamp": art.get("created_at", ""),
-                    "summary": f"Artifact: {art.get('title', 'untitled')}",
-                    "url": f"/console/artifacts/{art['id']}",
-                })
+                events.append(
+                    {
+                        "type": "artifact",
+                        "id": art["id"],
+                        "status": "created",
+                        "timestamp": art.get("created_at", ""),
+                        "summary": f"Artifact: {art.get('title', 'untitled')}",
+                        "url": f"/console/artifacts/{art['id']}",
+                    }
+                )
         except Exception:
             pass
 
@@ -377,9 +391,7 @@ class ConsoleOverviewService(BaseConsoleService):
             row = cur.fetchone()
             failed = row["cnt"] if row else 0
             failure_rate_24h = (
-                round(failed / total_traces_24h * 100, 1)
-                if total_traces_24h > 0
-                else 0.0
+                round(failed / total_traces_24h * 100, 1) if total_traces_24h > 0 else 0.0
             )
         except Exception:
             pass
@@ -438,9 +450,7 @@ class ConsoleOverviewService(BaseConsoleService):
     def _build_menu(self, active_label: str | None = None) -> list[MenuItem]:
         return _menu_items()
 
-    def _build_system_status_summary(
-        self, status_data: dict[str, Any]
-    ) -> SystemStatusSummary:
+    def _build_system_status_summary(self, status_data: dict[str, Any]) -> SystemStatusSummary:
         db_info = status_data.get("db", {})
         model_info = status_data.get("model", {})
         secrets_info = status_data.get("secrets", {})

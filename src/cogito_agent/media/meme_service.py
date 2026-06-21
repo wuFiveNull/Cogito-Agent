@@ -82,14 +82,23 @@ class MemeService:
             self._tracer.end_span(span)
 
     def _log_audit(
-        self, actor: str, action: str, meme_id: str, ws: str, details: str = "",
+        self,
+        actor: str,
+        action: str,
+        meme_id: str,
+        ws: str,
+        details: str = "",
         redact: bool = True,
     ) -> None:
         if self._audit is None:
             return
         self._audit.log(
-            actor_id=actor, action=action, resource=f"meme:{meme_id}",
-            workspace_id=ws, details=details, redact_details=redact,
+            actor_id=actor,
+            action=action,
+            resource=f"meme:{meme_id}",
+            workspace_id=ws,
+            details=details,
+            redact_details=redact,
         )
 
     # ── Internal helpers ─────────────────────────────────────────────
@@ -114,6 +123,7 @@ class MemeService:
 
     def _to_meme_asset(self, record: dict[str, object]) -> MemeAsset:
         import unicodedata
+
         def _parse_json_list(val: object) -> list[str]:
             if isinstance(val, list):
                 return [str(v) for v in val]
@@ -126,6 +136,7 @@ class MemeService:
                 except (json.JSONDecodeError, TypeError):
                     pass
             return []
+
         name = unicodedata.normalize("NFKC", str(record.get("name", "")))
         return MemeAsset(
             id=str(record["id"]),
@@ -133,7 +144,10 @@ class MemeService:
             attachment_id=str(record["attachment_id"]),
             content_hash=str(record["content_hash"]),
             name=name,
-            aliases=[unicodedata.normalize("NFKC", str(a)) for a in _parse_json_list(record.get("aliases_json"))],
+            aliases=[
+                unicodedata.normalize("NFKC", str(a))
+                for a in _parse_json_list(record.get("aliases_json"))
+            ],
             description=str(record.get("description", "")),
             emotions=_parse_json_list(record.get("emotions_json")),
             use_cases=_parse_json_list(record.get("use_cases_json")),
@@ -142,7 +156,9 @@ class MemeService:
             source=str(record.get("source", "manual")),
             enabled=bool(record.get("enabled", 1)),
             use_count=int(str(record.get("use_count", 0))),
-            last_used_at=datetime.fromisoformat(str(record["last_used_at"])) if record.get("last_used_at") else None,
+            last_used_at=datetime.fromisoformat(str(record["last_used_at"]))
+            if record.get("last_used_at")
+            else None,
             created_at=datetime.fromisoformat(str(record["created_at"])),
             updated_at=datetime.fromisoformat(str(record["updated_at"])),
         )
@@ -168,14 +184,18 @@ class MemeService:
         existing = self._meme_repo.get_by_attachment_id(attachment_id, workspace_id)
         if existing:
             meme = self._to_meme_asset(existing)
-            self._log_span(trace_id, "meme.register", f"attachment={attachment_id}", "already_exists")
+            self._log_span(
+                trace_id, "meme.register", f"attachment={attachment_id}", "already_exists"
+            )
             return meme
 
         content_hash = attachment.content_hash
         same_hash = self._meme_repo.find_by_content_hash(content_hash, workspace_id)
         if same_hash:
             meme = self._to_meme_asset(same_hash[0])
-            self._log_span(trace_id, "meme.register", f"attachment={attachment_id}", "reused_by_hash")
+            self._log_span(
+                trace_id, "meme.register", f"attachment={attachment_id}", "reused_by_hash"
+            )
             return meme
 
         meme_id = create_meme_id()
@@ -193,9 +213,16 @@ class MemeService:
             avoid_cases=avoid_cases,
             text_on_image=text_on_image,
         )
-        self._log_span(trace_id, "meme.register", f"attachment={attachment_id}", f"meme_id={meme_id}")
-        self._log_audit(actor_id, "meme.register", meme_id, workspace_id,
-                        json.dumps({"source": "manual", "name": name}))
+        self._log_span(
+            trace_id, "meme.register", f"attachment={attachment_id}", f"meme_id={meme_id}"
+        )
+        self._log_audit(
+            actor_id,
+            "meme.register",
+            meme_id,
+            workspace_id,
+            json.dumps({"source": "manual", "name": name}),
+        )
         return self._to_meme_asset(record)
 
     # ── analyze_meme ────────────────────────────────────────────────
@@ -215,14 +242,18 @@ class MemeService:
 
         existing = self._meme_repo.get_by_attachment_id(attachment_id, workspace_id)
         if existing and not force_refresh:
-            self._log_span(trace_id, "meme.analyze", f"attachment={attachment_id}", "already_exists")
+            self._log_span(
+                trace_id, "meme.analyze", f"attachment={attachment_id}", "already_exists"
+            )
             return self._to_meme_asset(existing)
 
         content_hash = attachment.content_hash
         if not force_refresh:
             same_hash = self._meme_repo.find_by_content_hash(content_hash, workspace_id)
             if same_hash:
-                self._log_span(trace_id, "meme.analyze", f"attachment={attachment_id}", "reused_by_hash")
+                self._log_span(
+                    trace_id, "meme.analyze", f"attachment={attachment_id}", "reused_by_hash"
+                )
                 return self._to_meme_asset(same_hash[0])
 
         result_text = self._vision_service.inspect_image(
@@ -262,9 +293,16 @@ class MemeService:
             avoid_cases=avoid_cases,
             text_on_image=text_on_image,
         )
-        self._log_span(trace_id, "meme.analyze", f"attachment={attachment_id}", f"meme_id={meme_id}")
-        self._log_audit(actor_id, "meme.analyze", meme_id, workspace_id,
-                        json.dumps({"source": "vision", "name": name}))
+        self._log_span(
+            trace_id, "meme.analyze", f"attachment={attachment_id}", f"meme_id={meme_id}"
+        )
+        self._log_audit(
+            actor_id,
+            "meme.analyze",
+            meme_id,
+            workspace_id,
+            json.dumps({"source": "vision", "name": name}),
+        )
         return self._to_meme_asset(record)
 
     def _parse_analysis_json(self, text: str) -> dict[str, Any]:
@@ -293,26 +331,30 @@ class MemeService:
                 return result
         except json.JSONDecodeError:
             pass
-        raise MemeAnalysisError(
-            f"VLM output is not valid JSON. Raw: {text[:300]}"
-        )
+        raise MemeAnalysisError(f"VLM output is not valid JSON. Raw: {text[:300]}")
 
     # ── search_memes ────────────────────────────────────────────────
 
     def search_memes(
-        self, query: str, workspace_id: str, limit: int = 5,
-        trace_id: str = "", actor_id: str = "system",
+        self,
+        query: str,
+        workspace_id: str,
+        limit: int = 5,
+        trace_id: str = "",
+        actor_id: str = "system",
     ) -> list[dict[str, object]]:
         results = self._meme_repo.search(workspace_id, query, limit)
         safe = []
         for r in results:
-            safe.append({
-                "meme_id": r["id"],
-                "name": r.get("name", ""),
-                "description": r.get("description", ""),
-                "emotions": r.get("emotions_json", []),
-                "use_cases": r.get("use_cases_json", []),
-            })
+            safe.append(
+                {
+                    "meme_id": r["id"],
+                    "name": r.get("name", ""),
+                    "description": r.get("description", ""),
+                    "emotions": r.get("emotions_json", []),
+                    "use_cases": r.get("use_cases_json", []),
+                }
+            )
         self._log_span(trace_id, "meme.search", f"query={query}", f"count={len(safe)}")
         return safe
 
@@ -346,17 +388,26 @@ class MemeService:
             "vision_model_called": False,
         }
 
-        self._log_span(trace_id, "meme.send",
-                       f"meme_id={meme_id} caption={caption[:50]}",
-                       "vision_model_called=false")
-        self._log_audit(actor_id, "meme.send", meme_id, workspace_id,
-                        json.dumps({"caption": caption[:100], "vision_model_called": False}))
+        self._log_span(
+            trace_id,
+            "meme.send",
+            f"meme_id={meme_id} caption={caption[:50]}",
+            "vision_model_called=false",
+        )
+        self._log_audit(
+            actor_id,
+            "meme.send",
+            meme_id,
+            workspace_id,
+            json.dumps({"caption": caption[:100], "vision_model_called": False}),
+        )
         return result
 
     # ── Capability registration ─────────────────────────────────────
 
     def register_with_capability_registry(
-        self, cap_reg: CapabilityRegistry,
+        self,
+        cap_reg: CapabilityRegistry,
     ) -> None:
         from cogito_agent.capability.tools import (
             ANALYZE_MEME_MANIFEST,
@@ -366,7 +417,9 @@ class MemeService:
         )
 
         def _register_meme_fn(
-            attachment_id: str, name: str, description: str,
+            attachment_id: str,
+            name: str,
+            description: str,
             aliases: list[str] | None = None,
             emotions: list[str] | None = None,
             use_cases: list[str] | None = None,
@@ -379,32 +432,51 @@ class MemeService:
                 trace = str(_kwargs.get("trace_id") or self._current_trace_id or "")
                 actor = str(_kwargs.get("actor_id") or "system")
                 meme = self.register_meme(
-                    attachment_id=attachment_id, name=name, description=description,
-                    workspace_id=ws, aliases=aliases, emotions=emotions,
-                    use_cases=use_cases, avoid_cases=avoid_cases,
-                    text_on_image=text_on_image, trace_id=trace, actor_id=actor,
+                    attachment_id=attachment_id,
+                    name=name,
+                    description=description,
+                    workspace_id=ws,
+                    aliases=aliases,
+                    emotions=emotions,
+                    use_cases=use_cases,
+                    avoid_cases=avoid_cases,
+                    text_on_image=text_on_image,
+                    trace_id=trace,
+                    actor_id=actor,
                 )
-                return ToolResult(status="ok", summary=f"Registered meme '{meme.name}' (id={meme.id})")
+                return ToolResult(
+                    status="ok", summary=f"Registered meme '{meme.name}' (id={meme.id})"
+                )
             except (MemeNotFoundError, ValueError) as e:
                 return ToolResult(status="error", summary=str(e))
 
         def _analyze_meme_fn(
-            attachment_id: str, force_refresh: bool = False, **_kwargs: object,
+            attachment_id: str,
+            force_refresh: bool = False,
+            **_kwargs: object,
         ) -> ToolResult:
             try:
                 ws = str(_kwargs.get("workspace_id") or self._current_workspace_id or "")
                 trace = str(_kwargs.get("trace_id") or self._current_trace_id or "")
                 actor = str(_kwargs.get("actor_id") or "system")
                 meme = self.analyze_meme(
-                    attachment_id=attachment_id, workspace_id=ws,
-                    force_refresh=force_refresh, trace_id=trace, actor_id=actor,
+                    attachment_id=attachment_id,
+                    workspace_id=ws,
+                    force_refresh=force_refresh,
+                    trace_id=trace,
+                    actor_id=actor,
                 )
-                return ToolResult(status="ok", summary=f"Analyzed meme '{meme.name}' (id={meme.id}, source={meme.source})")
+                return ToolResult(
+                    status="ok",
+                    summary=f"Analyzed meme '{meme.name}' (id={meme.id}, source={meme.source})",
+                )
             except (MemeNotFoundError, MemeAnalysisError, ValueError) as e:
                 return ToolResult(status="error", summary=str(e))
 
         def _search_memes_fn(
-            query: str, limit: int = 5, **_kwargs: object,
+            query: str,
+            limit: int = 5,
+            **_kwargs: object,
         ) -> ToolResult:
             try:
                 ws = str(_kwargs.get("workspace_id") or self._current_workspace_id or "")

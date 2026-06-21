@@ -11,21 +11,21 @@ class TestTraceAuditIntegration:
     def test_chat_message_template_uses_detail_link(self) -> None:
         """Chat template should use /console/traces/{trace_id} not query param."""
         import uuid
-        from cogito_agent.api.app import app
-        from fastapi.testclient import TestClient
 
         # Render the template directly to verify the link pattern
         tid = str(uuid.uuid4())
         from pathlib import Path
+
         from fastapi.templating import Jinja2Templates
 
-        HERE = Path("src/cogito_agent/console").resolve()
-        templates = Jinja2Templates(directory=str(HERE / "templates"))
+        here = Path("src/cogito_agent/console").resolve()
+        templates = Jinja2Templates(directory=str(here / "templates"))
         from unittest.mock import MagicMock
 
         request = MagicMock()
         html = templates.TemplateResponse(
-            request, "console/components/chat_message.html",
+            request,
+            "console/components/chat_message.html",
             {
                 "request": request,
                 "user_message": "hi",

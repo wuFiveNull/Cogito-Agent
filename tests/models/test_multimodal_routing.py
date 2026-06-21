@@ -8,30 +8,28 @@ from cogito_agent.models import (
     ModelAdapter,
     ModelCandidate,
     ModelResponse,
-    ModelRole,
     ModelRouter,
     ModelRouteRequest,
     RoutedModelAdapter,
+    TaskKind,
+    TaskOrchestrator,
     UnsupportedModalityError,
     VisionObservation,
     render_observation_as_text,
-    TaskOrchestrator,
-    ExecutionStep,
-    TaskKind,
 )
 from cogito_agent.models.codec import (
-    TextOnlyCodec,
-    OpenAICompatibleCodec,
     GeminiCodec,
+    OpenAICompatibleCodec,
+    TextOnlyCodec,
     get_codec_for_provider,
 )
-from cogito_agent.models.provider_errors import ProviderErrorCode
 from cogito_agent.models.messages import (
     ChatMessage,
     ImagePart,
     MessageRole,
     TextPart,
 )
+from cogito_agent.models.provider_errors import ProviderErrorCode
 
 
 class FakeAdapter:
@@ -43,17 +41,13 @@ class FakeAdapter:
         self.provider = "fake"
         self.model = "fake-model"
 
-    def chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> ModelResponse:
+    def chat(self, messages: list[dict[str, object]], **kwargs: object) -> ModelResponse:
         del messages, kwargs
         if self.error:
             raise self.error
         return ModelResponse(content=self.content)
 
-    def stream_chat(
-        self, messages: list[dict[str, object]], **kwargs: object
-    ) -> Iterator[str]:
+    def stream_chat(self, messages: list[dict[str, object]], **kwargs: object) -> Iterator[str]:
         del messages, kwargs
         if self.error:
             raise self.error
@@ -83,7 +77,8 @@ def _candidate(
 
 def test_pure_text_does_not_select_vision_model() -> None:
     vision = _candidate(
-        "gemini", "vision",
+        "gemini",
+        "vision",
         capabilities={"chat", "vision", "json"},
         roles=frozenset({"vision_worker"}),
         modalities=frozenset({"text", "image"}),
@@ -108,7 +103,8 @@ def test_pure_text_does_not_select_vision_model() -> None:
 
 def test_image_request_requires_vision_model() -> None:
     vision = _candidate(
-        "gemini", "vision",
+        "gemini",
+        "vision",
         capabilities={"chat", "vision", "json"},
         modalities=frozenset({"text", "image"}),
     )
@@ -130,12 +126,14 @@ def test_image_request_requires_vision_model() -> None:
 
 def test_image_request_never_routes_to_deepseek_text() -> None:
     deepseek = _candidate(
-        "deepseek", "deepseek-chat",
+        "deepseek",
+        "deepseek-chat",
         capabilities={"chat", "reasoning", "code"},
         modalities=frozenset({"text"}),
     )
     vision = _candidate(
-        "gemini", "vision",
+        "gemini",
+        "vision",
         capabilities={"chat", "vision", "json"},
         modalities=frozenset({"text", "image"}),
     )
@@ -157,20 +155,40 @@ def test_image_request_never_routes_to_deepseek_text() -> None:
 
 
 def test_vision_model_fallback_to_another_vision_model() -> None:
-    router = ModelRouter([
-        _candidate("gemini", "v1", capabilities={"chat", "vision"}, modalities=frozenset({"text", "image"}), priority=1),
-        _candidate("vllm", "v2", capabilities={"chat", "vision"}, modalities=frozenset({"text", "image"}), priority=2),
-    ])
+    router = ModelRouter(
+        [
+            _candidate(
+                "gemini",
+                "v1",
+                capabilities={"chat", "vision"},
+                modalities=frozenset({"text", "image"}),
+                priority=1,
+            ),
+            _candidate(
+                "vllm",
+                "v2",
+                capabilities={"chat", "vision"},
+                modalities=frozenset({"text", "image"}),
+                priority=2,
+            ),
+        ]
+    )
     adapters = {
         "gemini:v1": FakeAdapter(error=ConnectionError("offline")),
         "vllm:v2": FakeAdapter(content="vision result"),
     }
+
     def resolve(c: ModelCandidate) -> ModelAdapter:
         return adapters[c.id]
 
     routed = RoutedModelAdapter(router, resolve)
     resp = routed.chat(
-        [{"role": "user", "content": [{"type": "image", "uri": "file://img.png", "mime_type": "image/png"}]}]
+        [
+            {
+                "role": "user",
+                "content": [{"type": "image", "uri": "file://img.png", "mime_type": "image/png"}],
+            }
+        ]
     )
     assert resp.content == "vision result"
     assert resp.provider == "vllm"
@@ -180,19 +198,34 @@ def test_vision_model_fallback_to_another_vision_model() -> None:
 
 
 def test_all_vision_models_fail_returns_error() -> None:
-    router = ModelRouter([
-        _candidate("gemini", "v1", capabilities={"chat", "vision"}, modalities=frozenset({"text", "image"})),
-    ])
+    router = ModelRouter(
+        [
+            _candidate(
+                "gemini",
+                "v1",
+                capabilities={"chat", "vision"},
+                modalities=frozenset({"text", "image"}),
+            ),
+        ]
+    )
     adapters = {
         "gemini:v1": FakeAdapter(error=ConnectionError("offline")),
     }
+
     def resolve(c: ModelCandidate) -> ModelAdapter:
         return adapters[c.id]
 
     routed = RoutedModelAdapter(router, resolve)
     with pytest.raises(RuntimeError, match="All routed model candidates failed"):
         routed.chat(
-            [{"role": "user", "content": [{"type": "image", "uri": "file://img.png", "mime_type": "image/png"}]}]
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "uri": "file://img.png", "mime_type": "image/png"}
+                    ],
+                }
+            ]
         )
 
 
@@ -204,7 +237,10 @@ def test_deepseek_codec_rejects_images() -> None:
     msgs = [
         ChatMessage(
             role=MessageRole.user,
-            content=[TextPart(text="hello"), ImagePart(uri="data:image/png;base64,abc", mime_type="image/png")],
+            content=[
+                TextPart(text="hello"),
+                ImagePart(uri="data:image/png;base64,abc", mime_type="image/png"),
+            ],
         )
     ]
     with pytest.raises(UnsupportedModalityError) as excinfo:
@@ -282,7 +318,6 @@ def test_tools_required_when_tools_present() -> None:
 
 
 def test_router_circuit_breaker_still_works() -> None:
-    import time as _time
     fake_time = [100.0]
     primary = _candidate("primary", "m")
     fallback = _candidate("fallback", "m")
@@ -373,10 +408,17 @@ def test_orchestrator_plain_text() -> None:
 
 
 def test_orchestrator_with_image() -> None:
-    router = ModelRouter([
-        _candidate("gemini", "v", capabilities={"chat", "vision"}, modalities=frozenset({"text", "image"})),
-        _candidate("deepseek", "m", capabilities={"chat"}),
-    ])
+    router = ModelRouter(
+        [
+            _candidate(
+                "gemini",
+                "v",
+                capabilities={"chat", "vision"},
+                modalities=frozenset({"text", "image"}),
+            ),
+            _candidate("deepseek", "m", capabilities={"chat"}),
+        ]
+    )
     orch = TaskOrchestrator(router)
     plan = orch.plan(
         message="What error is this?",
@@ -396,9 +438,11 @@ def test_orchestrator_coding_query() -> None:
 
 
 def test_orchestrator_high_risk_triggers_review() -> None:
-    router = ModelRouter([
-        _candidate("deepseek", "m", capabilities={"chat", "code", "reasoning"}),
-    ])
+    router = ModelRouter(
+        [
+            _candidate("deepseek", "m", capabilities={"chat", "code", "reasoning"}),
+        ]
+    )
     orch = TaskOrchestrator(router)
     plan = orch.plan(message="Delete all files in the production directory")
     assert plan.needs_review
@@ -431,12 +475,14 @@ def test_route_preferred_candidates() -> None:
 
 def test_role_filtering() -> None:
     planner = _candidate(
-        "deepseek", "planner",
+        "deepseek",
+        "planner",
         capabilities={"chat", "reasoning"},
         roles=frozenset({"planner"}),
     )
     coder = _candidate(
-        "deepseek", "coder",
+        "deepseek",
+        "coder",
         capabilities={"chat", "code"},
         roles=frozenset({"coder"}),
     )
@@ -456,6 +502,7 @@ def test_role_filtering() -> None:
 
 def test_subagent_result_structured() -> None:
     from cogito_agent.runtime.subagent import SubagentResult
+
     result = SubagentResult(
         status="completed",
         summary="Analysis complete",
@@ -504,7 +551,8 @@ def test_chat_message_legacy_text_only() -> None:
 def test_streaming_routes_multimodal() -> None:
     """Streaming should work with multimodal contents."""
     vision = _candidate(
-        "gemini", "vision",
+        "gemini",
+        "vision",
         capabilities={"chat", "vision"},
         modalities=frozenset({"text", "image"}),
     )
@@ -515,8 +563,17 @@ def test_streaming_routes_multimodal() -> None:
         return adapters[c.id]
 
     routed = RoutedModelAdapter(router, resolve)
-    chunks = list(routed.stream_chat(
-        [{"role": "user", "content": [{"type": "image", "uri": "file://img.png", "mime_type": "image/png"}]}]
-    ))
+    chunks = list(
+        routed.stream_chat(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "uri": "file://img.png", "mime_type": "image/png"}
+                    ],
+                }
+            ]
+        )
+    )
     assert len(chunks) == 1
     assert "vision" in chunks[0]

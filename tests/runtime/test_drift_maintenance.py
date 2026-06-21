@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from cogito_agent.runtime import DriftMaintenance
-from cogito_agent.storage import Database, MemoryEditRepository
+from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
     MemoryRepository,
     MessageRepository,
@@ -55,9 +55,7 @@ def test_archive_stale_memories(db: Database) -> None:
     maint = DriftMaintenance(db)
     archived = maint.archive_stale_memories(days=30)
     assert archived >= 1
-    cur = db.connection.execute(
-        "SELECT status FROM memories WHERE id = ?", (mid,)
-    )
+    cur = db.connection.execute("SELECT status FROM memories WHERE id = ?", (mid,))
     row = cur.fetchone()
     assert row is not None
 

@@ -90,6 +90,15 @@ class TestArtifactDetail:
         content = svc.get_artifact_content(str(art["id"]))
         assert "Hello World" in content
 
+    def test_workspace_scoped_lookup_rejects_other_workspace(
+        self,
+        db: Database,
+        ws: str,
+        svc: ArtifactService,
+    ) -> None:
+        art = svc.create_artifact(ws, "test", "Private", content="private")
+        assert svc.get_artifact_by_id(str(art["id"]), "other-workspace") is None
+
 
 class TestArtifactDelete:
     def test_delete_artifact(self, db: Database, ws: str, svc: ArtifactService) -> None:
@@ -101,6 +110,17 @@ class TestArtifactDelete:
     def test_delete_nonexistent(self, db: Database, ws: str, svc: ArtifactService) -> None:
         assert svc.delete_artifact("nonexistent") is False
 
+    def test_workspace_scoped_delete_rejects_other_workspace(
+        self,
+        db: Database,
+        ws: str,
+        svc: ArtifactService,
+    ) -> None:
+        art = svc.create_artifact(ws, "test", "Keep Me", content="safe")
+        aid = str(art["id"])
+        assert svc.delete_artifact(aid, "other-workspace") is False
+        assert svc.get_artifact_by_id(aid, ws) is not None
+
 
 class TestArtifactRender:
     def test_render_markdown(self, db: Database, ws: str, svc: ArtifactService) -> None:
@@ -109,6 +129,8 @@ class TestArtifactRender:
         assert "<h1>" in html or "H1" in html
 
     def test_render_json(self, db: Database, ws: str, svc: ArtifactService) -> None:
-        art = svc.create_artifact(ws, "test", "JSON Render", artifact_type="json", content='{"a":1}')
+        art = svc.create_artifact(
+            ws, "test", "JSON Render", artifact_type="json", content='{"a":1}'
+        )
         html = svc.render_artifact_html(str(art["id"]))
         assert "a" in html

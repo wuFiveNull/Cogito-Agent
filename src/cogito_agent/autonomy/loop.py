@@ -55,12 +55,15 @@ class ProactiveEngine:
             if row and row["status"] == "running":
                 print("[daemon] WARNING: Previous instance may have crashed")
                 self._update_state(
-                    status="running", started_at=started_iso,
-                    last_heartbeat=started_iso, crash_marker="recovered",
+                    status="running",
+                    started_at=started_iso,
+                    last_heartbeat=started_iso,
+                    crash_marker="recovered",
                 )
             else:
                 self._update_state(
-                    status="running", started_at=started_iso,
+                    status="running",
+                    started_at=started_iso,
                     last_heartbeat=started_iso,
                 )
 
@@ -72,18 +75,13 @@ class ProactiveEngine:
                     processed = self._scheduler.tick()
                     if processed:
                         for job in processed:
-                            print(
-                                f"[daemon] Job '{job.name}' "
-                                f"({job.id[:8]}): {job.status.value}"
-                            )
+                            print(f"[daemon] Job '{job.name}' ({job.id[:8]}): {job.status.value}")
                 except Exception as exc:
                     print(f"[daemon] Tick error: {exc}")
 
                 heartbeat_counter += 1
                 if heartbeat_counter % 10 == 0 and self._db is not None:
-                    self._update_state(
-                        last_heartbeat=datetime.now(UTC).isoformat()
-                    )
+                    self._update_state(last_heartbeat=datetime.now(UTC).isoformat())
 
                 elapsed = time.time() - tick_start
                 sleep_time = max(0.1, self._tick_interval - elapsed)
@@ -92,14 +90,17 @@ class ProactiveEngine:
             if self._db is not None:
                 stopped = datetime.now(UTC).isoformat()
                 self._update_state(
-                    status="stopped", stopped_at=stopped, crash_marker="crash",
+                    status="stopped",
+                    stopped_at=stopped,
+                    crash_marker="crash",
                 )
             raise
         finally:
             if self._db is not None:
                 stopped = datetime.now(UTC).isoformat()
                 self._update_state(
-                    status="stopped", stopped_at=stopped,
+                    status="stopped",
+                    stopped_at=stopped,
                     graceful_shutdown_marker="true",
                 )
             print("[daemon] Proactive engine stopped.")
@@ -113,9 +114,7 @@ class ProactiveEngine:
 
     @staticmethod
     def load_status(db: Database) -> dict[str, Any]:
-        cur = db.connection.execute(
-            "SELECT * FROM daemon_state WHERE id = 'main'"
-        )
+        cur = db.connection.execute("SELECT * FROM daemon_state WHERE id = 'main'")
         row = cur.fetchone()
         if row is None:
             return {"status": "stopped", "started_at": None, "last_heartbeat": None}

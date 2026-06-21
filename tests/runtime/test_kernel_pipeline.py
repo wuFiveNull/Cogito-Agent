@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.capability import CapabilityRegistry, ToolResult
-from cogito_agent.memory import CandidateExtractor, MemoryRetriever
+from cogito_agent.memory import MemoryRetriever
 from cogito_agent.models import ModelAdapter, ModelResponse
-from cogito_agent.runtime import RuntimeKernel, TurnBudget
+from cogito_agent.runtime import TurnBudget
 from cogito_agent.shared import (
     CapabilityManifest,
     CapabilityType,
@@ -78,7 +79,9 @@ def test_budget_exceeded_tool_call(db: Database) -> None:
         tool_intents=[{"name": "test_tool", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, budget=budget, model_adapter=mock_adapter,
+        db,
+        budget=budget,
+        model_adapter=mock_adapter,
         capability_registry=cap_reg,
     )
     result = kernel.process(_make_event())
@@ -93,9 +96,7 @@ def test_policy_denied_model_call(db: Database) -> None:
     _setup(db)
     policy = PolicyEngine(rules=[])
     policy.evaluate = MagicMock(
-        return_value=PolicyDecision(
-            decision=DecisionType.deny, reason="test deny"
-        )
+        return_value=PolicyDecision(decision=DecisionType.deny, reason="test deny")
     )
     kernel = RuntimeKernel(db, policy_engine=policy)
     result = kernel.process(_make_event())
@@ -110,20 +111,6 @@ def test_pipeline_success_with_memory_retrieval(db: Database) -> None:
     result = kernel.process(_make_event("hello"))
     assert result.state == TurnState.completed
     assert result.output == "You said: hello"
-
-
-def test_pipeline_with_candidate_extraction(db: Database) -> None:
-    _setup(db)
-    cand_ext = CandidateExtractor(db)
-    kernel = RuntimeKernel(db, candidate_extractor=cand_ext)
-    result = kernel.process(_make_event("test candidate"))
-    assert result.state == TurnState.completed
-    cur = db.connection.execute(
-        "SELECT * FROM memory_candidates WHERE workspace_id = ?",
-        ("ws-1",),
-    )
-    rows = cur.fetchall()
-    assert len(rows) >= 1
 
 
 def test_pipeline_tool_result_summaries(db: Database) -> None:
@@ -153,7 +140,9 @@ def test_pipeline_tool_result_summaries(db: Database) -> None:
         tool_intents=[{"name": "greet", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=mock_adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=mock_adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=1,
     )
     result = kernel.process(_make_event("hi"))
@@ -172,7 +161,9 @@ def test_pipeline_tool_not_found(db: Database) -> None:
         tool_intents=[{"name": "nonexistent_tool", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=mock_adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=mock_adapter,
+        capability_registry=cap_reg,
     )
     result = kernel.process(_make_event("run tool"))
     assert result.state == TurnState.completed
@@ -205,7 +196,9 @@ def test_pipeline_approval_required(db: Database) -> None:
         tool_intents=[{"name": "write_file", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=mock_adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=mock_adapter,
+        capability_registry=cap_reg,
     )
     result = kernel.process(_make_event("write a file"))
     assert result.state == TurnState.waiting_approval
@@ -272,7 +265,8 @@ def test_tool_retry_on_failure(db: Database) -> None:
     cap_reg.register(
         "flaky_tool",
         CapabilityManifest(
-            name="flaky_tool", version="1.0.0",
+            name="flaky_tool",
+            version="1.0.0",
             type=CapabilityType.tool,
             description="",
             input_schema={"type": "object", "properties": {}, "required": []},
@@ -288,10 +282,13 @@ def test_tool_retry_on_failure(db: Database) -> None:
     )
     adapter = MagicMock(spec=ModelAdapter)
     adapter.chat.return_value = ModelResponse(
-        content="", tool_intents=[{"name": "flaky_tool", "arguments": {}}],
+        content="",
+        tool_intents=[{"name": "flaky_tool", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
         max_tool_rounds=1,
     )
     result = kernel.process(_make_event())
@@ -311,7 +308,8 @@ def test_tool_retry_not_idempotent_skipped(db: Database) -> None:
     cap_reg.register(
         "non_idempotent_tool",
         CapabilityManifest(
-            name="non_idempotent_tool", version="1.0.0",
+            name="non_idempotent_tool",
+            version="1.0.0",
             type=CapabilityType.tool,
             description="",
             input_schema={"type": "object", "properties": {}, "required": []},
@@ -331,7 +329,9 @@ def test_tool_retry_not_idempotent_skipped(db: Database) -> None:
         tool_intents=[{"name": "non_idempotent_tool", "arguments": {}}],
     )
     kernel = RuntimeKernel(
-        db, model_adapter=adapter, capability_registry=cap_reg,
+        db,
+        model_adapter=adapter,
+        capability_registry=cap_reg,
     )
     result = kernel.process(_make_event())
     # Should fail without retry (only 1 attempt since not idempotent)

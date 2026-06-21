@@ -43,6 +43,14 @@ class WorkspaceRepository:
         )
         return _rows_to_dicts(cur.fetchall())
 
+    def rename(self, wid: str, name: str) -> bool:
+        cursor = self._db.connection.execute(
+            "UPDATE workspaces SET name=? WHERE id=? AND deleted_at IS NULL",
+            (name, wid),
+        )
+        self._db.connection.commit()
+        return cursor.rowcount == 1
+
     def soft_delete(self, wid: str) -> None:
         self._db.connection.execute(
             "UPDATE workspaces SET deleted_at = datetime('now') WHERE id = ?",
@@ -51,31 +59,39 @@ class WorkspaceRepository:
         self._db.connection.commit()
 
     def hard_delete(self, wid: str) -> bool:
-        cur = self._db.connection.execute(
-            "SELECT id FROM workspaces WHERE id = ?", (wid,)
-        )
+        cur = self._db.connection.execute("SELECT id FROM workspaces WHERE id = ?", (wid,))
         if cur.fetchone() is None:
             return False
         tables = [
-            "notifications", "scheduled_jobs", "approval_records",
-            "workspace_settings", "context_items", "source_lineage",
-            "audit_logs", "model_calls", "tool_calls", "spans", "traces",
-            "workspace_skills", "skill_run_logs",
-            "memory_candidates", "file_artifacts",
-            "file_chunk_embeddings", "file_chunks", "artifacts",
-            "workspace_files", "workspace_roots",
-            "vision_observations", "message_attachments", "attachments",
+            "notifications",
+            "scheduled_jobs",
+            "approval_records",
+            "workspace_settings",
+            "context_items",
+            "source_lineage",
+            "audit_logs",
+            "model_calls",
+            "tool_calls",
+            "spans",
+            "traces",
+            "workspace_skills",
+            "skill_run_logs",
+            "file_artifacts",
+            "file_chunk_embeddings",
+            "file_chunks",
+            "artifacts",
+            "workspace_files",
+            "workspace_roots",
+            "vision_observations",
+            "message_attachments",
+            "attachments",
         ]
-        msgs = self._db.connection.execute(
-            "SELECT id FROM messages WHERE workspace_id = ?", (wid,)
-        )
+        msgs = self._db.connection.execute("SELECT id FROM messages WHERE workspace_id = ?", (wid,))
         for row in msgs.fetchall():
             self._db.connection.execute(
                 "DELETE FROM source_lineage WHERE source_id = ?", (row["id"],)
             )
-        self._db.connection.execute(
-            "DELETE FROM messages WHERE workspace_id = ?", (wid,)
-        )
+        self._db.connection.execute("DELETE FROM messages WHERE workspace_id = ?", (wid,))
         sessions = self._db.connection.execute(
             "SELECT id FROM sessions WHERE workspace_id = ?", (wid,)
         )
@@ -83,49 +99,38 @@ class WorkspaceRepository:
             sid = row["id"]
             self._db.connection.execute(
                 "DELETE FROM source_lineage WHERE trace_id IN"
-                " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
+                " (SELECT id FROM traces WHERE session_id = ?)",
+                (sid,),
             )
-            self._db.connection.execute(
-                "DELETE FROM traces WHERE session_id = ?", (sid,)
-            )
-        self._db.connection.execute(
-            "DELETE FROM sessions WHERE workspace_id = ?", (wid,)
-        )
+            self._db.connection.execute("DELETE FROM traces WHERE session_id = ?", (sid,))
+        self._db.connection.execute("DELETE FROM sessions WHERE workspace_id = ?", (wid,))
         memories = self._db.connection.execute(
             "SELECT id FROM memories WHERE workspace_id = ?", (wid,)
         )
         for row in memories.fetchall():
             mid = row["id"]
-            self._db.connection.execute(
-                "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
-            )
             try:
                 self._db.connection.execute(
                     "DELETE FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
                 )
             except Exception:
                 pass
-            cur2 = self._db.connection.execute(
-                "SELECT rowid FROM memories WHERE id = ?", (mid,)
-            )
+            cur2 = self._db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,))
             r = cur2.fetchone()
             if r:
                 self._db.connection.execute(
                     "DELETE FROM memories_fts WHERE rowid = ?", (r["rowid"],)
                 )
-        self._db.connection.execute(
-            "DELETE FROM memories WHERE workspace_id = ?", (wid,)
-        )
+        self._db.connection.execute("DELETE FROM memories WHERE workspace_id = ?", (wid,))
         for table in tables:
             try:
                 self._db.connection.execute(
-                    f"DELETE FROM {table} WHERE workspace_id = ?", (wid,)  # noqa: S608
+                    f"DELETE FROM {table} WHERE workspace_id = ?",
+                    (wid,),  # noqa: S608
                 )
             except Exception:
                 pass
-        self._db.connection.execute(
-            "DELETE FROM workspaces WHERE id = ?", (wid,)
-        )
+        self._db.connection.execute("DELETE FROM workspaces WHERE id = ?", (wid,))
         self._db.connection.commit()
         return True
 
@@ -134,9 +139,7 @@ class SessionRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def create(
-        self, sid: str, workspace_id: str, title: str = ""
-    ) -> dict[str, object]:
+    def create(self, sid: str, workspace_id: str, title: str = "") -> dict[str, object]:
         self._db.connection.execute(
             "INSERT INTO sessions (id, workspace_id, title) VALUES (?, ?, ?)",
             (sid, workspace_id, title),
@@ -146,18 +149,14 @@ class SessionRepository:
         assert result is not None
         return result
 
-    def get_by_id(
-        self, sid: str, workspace_id: str
-    ) -> dict[str, object] | None:
+    def get_by_id(self, sid: str, workspace_id: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
             "SELECT * FROM sessions WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (sid, workspace_id),
         )
         return _row_to_dict(cur.fetchone())
 
-    def list_by_workspace(
-        self, workspace_id: str
-    ) -> list[dict[str, object]]:
+    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
         sql = (
             "SELECT * FROM sessions WHERE workspace_id = ?"
             " AND deleted_at IS NULL ORDER BY updated_at DESC"
@@ -167,8 +166,7 @@ class SessionRepository:
 
     def soft_delete(self, sid: str, workspace_id: str) -> None:
         self._db.connection.execute(
-            "UPDATE sessions SET deleted_at = datetime('now')"
-            " WHERE id = ? AND workspace_id = ?",
+            "UPDATE sessions SET deleted_at = datetime('now') WHERE id = ? AND workspace_id = ?",
             (sid, workspace_id),
         )
         self._db.connection.commit()
@@ -185,16 +183,15 @@ class SessionRepository:
             (sid, workspace_id),
         )
         self._db.connection.execute(
-            "DELETE FROM spans WHERE trace_id IN"
-            " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
+            "DELETE FROM spans WHERE trace_id IN (SELECT id FROM traces WHERE session_id = ?)",
+            (sid,),
         )
         self._db.connection.execute(
             "DELETE FROM source_lineage WHERE trace_id IN"
-            " (SELECT id FROM traces WHERE session_id = ?)", (sid,)
+            " (SELECT id FROM traces WHERE session_id = ?)",
+            (sid,),
         )
-        self._db.connection.execute(
-            "DELETE FROM traces WHERE session_id = ?", (sid,)
-        )
+        self._db.connection.execute("DELETE FROM traces WHERE session_id = ?", (sid,))
         self._db.connection.execute(
             "DELETE FROM sessions WHERE id = ? AND workspace_id = ?",
             (sid, workspace_id),
@@ -230,19 +227,14 @@ class MessageRepository:
         assert result is not None
         return result
 
-    def get_by_id(
-        self, mid: str, workspace_id: str
-    ) -> dict[str, object] | None:
+    def get_by_id(self, mid: str, workspace_id: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
-            "SELECT * FROM messages WHERE id = ?"
-            " AND workspace_id = ? AND deleted_at IS NULL",
+            "SELECT * FROM messages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (mid, workspace_id),
         )
         return _row_to_dict(cur.fetchone())
 
-    def list_by_session(
-        self, session_id: str, workspace_id: str
-    ) -> list[dict[str, object]]:
+    def list_by_session(self, session_id: str, workspace_id: str) -> list[dict[str, object]]:
         sql = (
             "SELECT * FROM messages WHERE session_id = ?"
             " AND workspace_id = ? AND deleted_at IS NULL"
@@ -259,9 +251,7 @@ class MessageRepository:
         self._db.connection.execute(sql, (session_id, workspace_id))
         self._db.connection.commit()
 
-    def hard_delete_by_session(
-        self, session_id: str, workspace_id: str
-    ) -> int:
+    def hard_delete_by_session(self, session_id: str, workspace_id: str) -> int:
         cur = self._db.connection.execute(
             "DELETE FROM messages WHERE session_id = ? AND workspace_id = ?",
             (session_id, workspace_id),
@@ -282,9 +272,7 @@ class MemoryRepository:
             (mid, workspace_id, text, type),
         )
         self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT rowid FROM memories WHERE id = ?", (mid,)
-        )
+        cur = self._db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,))
         row = cur.fetchone()
         if row:
             self._db.connection.execute(
@@ -300,14 +288,16 @@ class MemoryRepository:
     def _try_create_embedding(self, mid: str, text: str) -> None:
         try:
             from cogito_agent.memory.vector import EmbeddingService, _pack_embedding
+
             svc = EmbeddingService()
             vec = svc.encode(text)
             blob = _pack_embedding(vec)
             self._db.connection.execute(
-                "INSERT OR REPLACE INTO memory_embeddings"
-                " (memory_id, embedding, model_name)"
-                " VALUES (?, ?, ?)",
-                (mid, blob, svc.model_name),
+                "INSERT OR REPLACE INTO memory_embeddings_v2"
+                " (memory_id, workspace_id, provider_name, model_name, dimension,"
+                " embedding, content_hash, embedding_version, status, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', datetime('now'), datetime('now'))",
+                (mid, "", "", svc.model_name, svc.dimension, blob, "", "2"),
             )
             self._db.connection.commit()
         except Exception:
@@ -322,7 +312,7 @@ class MemoryRepository:
             for row in cur.fetchall():
                 mid, text = row["id"], row["text"]
                 existing = self._db.connection.execute(
-                    "SELECT 1 FROM memory_embeddings WHERE memory_id = ?", (mid,)
+                    "SELECT 1 FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
                 )
                 if existing.fetchone() is None:
                     self._try_create_embedding(mid, text)
@@ -331,19 +321,14 @@ class MemoryRepository:
             pass
         return count
 
-    def get_by_id(
-        self, mid: str, workspace_id: str
-    ) -> dict[str, object] | None:
+    def get_by_id(self, mid: str, workspace_id: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
-            "SELECT * FROM memories WHERE id = ?"
-            " AND workspace_id = ? AND deleted_at IS NULL",
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (mid, workspace_id),
         )
         return _row_to_dict(cur.fetchone())
 
-    def list_by_workspace(
-        self, workspace_id: str
-    ) -> list[dict[str, object]]:
+    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
         sql = (
             "SELECT * FROM memories WHERE workspace_id = ?"
             " AND deleted_at IS NULL ORDER BY created_at DESC"
@@ -353,6 +338,7 @@ class MemoryRepository:
 
     def pin(self, mid: str, workspace_id: str) -> bool:
         from datetime import UTC, datetime
+
         cur = self._db.connection.execute(
             "UPDATE memories SET pinned_at = ?"
             " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
@@ -372,22 +358,16 @@ class MemoryRepository:
 
     def soft_delete(self, mid: str, workspace_id: str) -> None:
         self._db.connection.execute(
-            "UPDATE memories SET deleted_at = datetime('now')"
-            " WHERE id = ? AND workspace_id = ?",
+            "UPDATE memories SET deleted_at = datetime('now') WHERE id = ? AND workspace_id = ?",
             (mid, workspace_id),
         )
-        cur = self._db.connection.execute(
-            "SELECT rowid FROM memories WHERE id = ?", (mid,)
-        )
+        cur = self._db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,))
         row = cur.fetchone()
         if row:
             self._db.connection.execute(
                 "DELETE FROM memories_fts WHERE rowid = ?",
                 (row["rowid"],),
             )
-        self._db.connection.execute(
-            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
-        )
         try:
             self._db.connection.execute(
                 "DELETE FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
@@ -433,8 +413,7 @@ class MemoryRepository:
         target_text = str(target["text"])
         merged_text = target_text + "\n\n---\n\n" + source_text
         self._db.connection.execute(
-            "UPDATE memories SET text = ?, updated_at = datetime('now')"
-            " WHERE id = ?",
+            "UPDATE memories SET text = ?, updated_at = datetime('now') WHERE id = ?",
             (merged_text, target_mid),
         )
         cur_ft = self._db.connection.execute(
@@ -443,9 +422,7 @@ class MemoryRepository:
         row_ft = cur_ft.fetchone()
         if row_ft:
             rowid = row_ft["rowid"]
-            self._db.connection.execute(
-                "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
-            )
+            self._db.connection.execute("DELETE FROM memories_fts WHERE rowid = ?", (rowid,))
             self._db.connection.execute(
                 "INSERT INTO memories_fts(rowid, text, summary) VALUES (?, ?, ?)",
                 (rowid, merged_text, str(target["summary"] or "")),
@@ -464,23 +441,6 @@ class MemoryRepository:
             self._db.connection.execute(
                 "DELETE FROM memories_fts WHERE rowid = ?", (row_sf["rowid"],)
             )
-        self._db.connection.execute(
-            "DELETE FROM memory_embeddings WHERE memory_id = ?", (source_mid,)
-        )
-        log_id1 = str(uuid.uuid4())
-        self._db.connection.execute(
-            "INSERT INTO memory_edit_log"
-            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
-            " VALUES (?, ?, ?, ?, ?, 'merge_source_archived', ?)",
-            (log_id1, source_mid, workspace_id, source_text, merged_text, "cli"),
-        )
-        log_id2 = str(uuid.uuid4())
-        self._db.connection.execute(
-            "INSERT INTO memory_edit_log"
-            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
-            " VALUES (?, ?, ?, ?, ?, 'merge_target_updated', ?)",
-            (log_id2, target_mid, workspace_id, target_text, merged_text, "cli"),
-        )
         self._db.connection.commit()
         return True
 
@@ -501,42 +461,40 @@ class MemoryRepository:
             " (id, workspace_id, type, status, text, summary,"
             " confidence, sensitivity, source_id, created_at, updated_at)"
             " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (version_id, workspace_id, str(old["type"]), old_text, str(old["summary"] or ""),
-             float(old["confidence"] or 0.5), str(old["sensitivity"] or "normal"), mid),
+            (
+                version_id,
+                workspace_id,
+                str(old["type"]),
+                old_text,
+                str(old["summary"] or ""),
+                float(old["confidence"] or 0.5),
+                str(old["sensitivity"] or "normal"),
+                mid,
+            ),
         )
         self._db.connection.execute(
             "UPDATE memories SET text = ?, updated_at = datetime('now')"
             " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (new_text, mid, workspace_id),
         )
-        cur_ft = self._db.connection.execute(
-            "SELECT rowid FROM memories WHERE id = ?", (mid,)
-        )
+        cur_ft = self._db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,))
         row = cur_ft.fetchone()
         if row:
             rowid = row["rowid"]
-            self._db.connection.execute(
-                "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
-            )
+            self._db.connection.execute("DELETE FROM memories_fts WHERE rowid = ?", (rowid,))
             self._db.connection.execute(
                 "INSERT INTO memories_fts(rowid, text, summary) VALUES (?, ?, ?)",
                 (rowid, new_text, str(old["summary"] or "")),
             )
-        self._db.connection.execute(
-            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
-        )
-        log_id = str(uuid.uuid4())
-        self._db.connection.execute(
-            "INSERT INTO memory_edit_log"
-            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
-            " VALUES (?, ?, ?, ?, ?, 'edit', ?)",
-            (log_id, mid, workspace_id, old_text, new_text, actor_id),
-        )
         self._db.connection.commit()
         return True
 
     def correct_text(
-        self, mid: str, workspace_id: str, new_text: str, actor_id: str = "cli",
+        self,
+        mid: str,
+        workspace_id: str,
+        new_text: str,
+        actor_id: str = "cli",
     ) -> bool:
         cur = self._db.connection.execute(
             "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
@@ -554,37 +512,31 @@ class MemoryRepository:
             " (id, workspace_id, type, status, text, summary,"
             " confidence, sensitivity, source_id, created_at, updated_at)"
             " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (version_id, workspace_id, str(old["type"]), old_text, str(old["summary"] or ""),
-             float(old["confidence"] or 0.5), str(old["sensitivity"] or "normal"), mid),
+            (
+                version_id,
+                workspace_id,
+                str(old["type"]),
+                old_text,
+                str(old["summary"] or ""),
+                float(old["confidence"] or 0.5),
+                str(old["sensitivity"] or "normal"),
+                mid,
+            ),
         )
         self._db.connection.execute(
             "UPDATE memories SET text = ?, updated_at = datetime('now')"
             " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (new_text, mid, workspace_id),
         )
-        cur_ft = self._db.connection.execute(
-            "SELECT rowid FROM memories WHERE id = ?", (mid,)
-        )
+        cur_ft = self._db.connection.execute("SELECT rowid FROM memories WHERE id = ?", (mid,))
         row = cur_ft.fetchone()
         if row:
             rowid = row["rowid"]
-            self._db.connection.execute(
-                "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
-            )
+            self._db.connection.execute("DELETE FROM memories_fts WHERE rowid = ?", (rowid,))
             self._db.connection.execute(
                 "INSERT INTO memories_fts(rowid, text, summary) VALUES (?, ?, ?)",
                 (rowid, new_text, str(old["summary"] or "")),
             )
-        self._db.connection.execute(
-            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
-        )
-        log_id = str(uuid.uuid4())
-        self._db.connection.execute(
-            "INSERT INTO memory_edit_log"
-            " (id, memory_id, workspace_id, old_text, new_text, operation, actor_id)"
-            " VALUES (?, ?, ?, ?, ?, 'correct', ?)",
-            (log_id, mid, workspace_id, old_text, new_text, actor_id),
-        )
         self._db.connection.commit()
         return True
 
@@ -601,85 +553,6 @@ class MemoryRepository:
             (workspace_id,),
         )
         return _rows_to_dicts(cur.fetchall())
-
-
-class MemoryCandidateRepository:
-    def __init__(self, db: Database) -> None:
-        self._db = db
-
-    def create(
-        self,
-        workspace_id: str,
-        text: str,
-        type: str = "general",
-        reason: str = "",
-        confidence: float = 0.5,
-        session_id: str = "",
-        source_message_id: str = "",
-    ) -> dict[str, object]:
-        import uuid
-
-        cid = str(uuid.uuid4())
-        self._db.connection.execute(
-            "INSERT INTO memory_candidates"
-            " (id, workspace_id, session_id, text, type, reason, confidence, source_message_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (cid, workspace_id, session_id, text, type, reason, confidence, source_message_id),
-        )
-        self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE id = ?", (cid,)
-        )
-        return dict(cur.fetchone())
-
-    def accept(self, cid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE id = ?", (cid,)
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        cand = dict(row)
-        self._db.connection.execute(
-            "UPDATE memory_candidates SET status = 'accepted' WHERE id = ?", (cid,)
-        )
-        mem_repo = MemoryRepository(self._db)
-        mem_repo.create(
-            mid=str(uuid.uuid4()),
-            workspace_id=cand["workspace_id"],
-            text=cand["text"],
-            type=cand["type"],
-        )
-        self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE id = ?", (cid,)
-        )
-        return dict(cur.fetchone())
-
-    def reject(self, cid: str) -> dict[str, object] | None:
-        self._db.connection.execute(
-            "UPDATE memory_candidates SET status = 'rejected' WHERE id = ?", (cid,)
-        )
-        self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE id = ?", (cid,)
-        )
-        result = cur.fetchone()
-        return dict(result) if result else None
-
-    def get_by_id(self, cid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE id = ?", (cid,)
-        )
-        return _row_to_dict(cur.fetchone())
-
-    def list_pending(self, workspace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM memory_candidates WHERE workspace_id = ?"
-            " AND status = 'pending' ORDER BY created_at DESC",
-            (workspace_id,),
-        )
-        return [dict(r) for r in cur.fetchall()]
 
 
 class FileArtifactRepository:
@@ -700,29 +573,24 @@ class FileArtifactRepository:
             " VALUES (?, ?, ?, ?, ?)"
         )
         self._db.connection.execute(
-            sql, (fid, workspace_id, path, mime_type, sha256),
+            sql,
+            (fid, workspace_id, path, mime_type, sha256),
         )
         self._db.connection.commit()
         result = self.get_by_id(fid, workspace_id)
         assert result is not None
         return result
 
-    def get_by_id(
-        self, fid: str, workspace_id: str
-    ) -> dict[str, object] | None:
+    def get_by_id(self, fid: str, workspace_id: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
-            "SELECT * FROM file_artifacts WHERE id = ?"
-            " AND workspace_id = ? AND deleted_at IS NULL",
+            "SELECT * FROM file_artifacts WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (fid, workspace_id),
         )
         return _row_to_dict(cur.fetchone())
 
-    def list_by_workspace(
-        self, workspace_id: str
-    ) -> list[dict[str, object]]:
+    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
-            "SELECT * FROM file_artifacts WHERE workspace_id = ?"
-            " AND deleted_at IS NULL",
+            "SELECT * FROM file_artifacts WHERE workspace_id = ? AND deleted_at IS NULL",
             (workspace_id,),
         )
         return _rows_to_dicts(cur.fetchall())
@@ -750,8 +618,7 @@ class MemoryEditRepository:
 
     def update_text(self, mid: str, workspace_id: str, text: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
-            "SELECT * FROM memories WHERE id = ? AND workspace_id = ?"
-            " AND deleted_at IS NULL",
+            "SELECT * FROM memories WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
             (mid, workspace_id),
         )
         old = cur.fetchone()
@@ -767,9 +634,13 @@ class MemoryEditRepository:
                 " VALUES (?, ?, ?, 'stale', ?, ?, ?, ?, ?,"
                 " datetime('now'), datetime('now'))",
                 (
-                    version_id, workspace_id, old["type"],
-                    old_text, old["summary"],
-                    old["confidence"], old["sensitivity"],
+                    version_id,
+                    workspace_id,
+                    old["type"],
+                    old_text,
+                    old["summary"],
+                    old["confidence"],
+                    old["sensitivity"],
                     mid,
                 ),
             )
@@ -779,9 +650,7 @@ class MemoryEditRepository:
             (text, mid, workspace_id),
         )
         self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM memories WHERE id = ?", (mid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM memories WHERE id = ?", (mid,))
         row = cur.fetchone()
         return dict(row) if row else None
 
@@ -794,12 +663,7 @@ class MemoryEditRepository:
         if row is None:
             return False
         rowid = row["rowid"]
-        self._db.connection.execute(
-            "DELETE FROM memories_fts WHERE rowid = ?", (rowid,)
-        )
-        self._db.connection.execute(
-            "DELETE FROM memory_embeddings WHERE memory_id = ?", (mid,)
-        )
+        self._db.connection.execute("DELETE FROM memories_fts WHERE rowid = ?", (rowid,))
         try:
             self._db.connection.execute(
                 "DELETE FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
@@ -847,8 +711,17 @@ class ApprovalRepository:
                 " (id, workspace_id, session_id, actor_id, capability_name,"
                 " operation, resource, reason, status, tool_call_json)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
-                (aid, workspace_id, session_id, actor_id, capability_name,
-                 operation, resource, reason, tool_call_json),
+                (
+                    aid,
+                    workspace_id,
+                    session_id,
+                    actor_id,
+                    capability_name,
+                    operation,
+                    resource,
+                    reason,
+                    tool_call_json,
+                ),
             )
         except Exception:
             self._db.connection.execute(
@@ -856,26 +729,29 @@ class ApprovalRepository:
                 " (id, workspace_id, session_id, actor_id, capability_name,"
                 " operation, resource, reason, status)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
-                (aid, workspace_id, session_id, actor_id, capability_name,
-                 operation, resource, reason),
+                (
+                    aid,
+                    workspace_id,
+                    session_id,
+                    actor_id,
+                    capability_name,
+                    operation,
+                    resource,
+                    reason,
+                ),
             )
         self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM approval_records WHERE id = ?", (aid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM approval_records WHERE id = ?", (aid,))
         return dict(cur.fetchone())
 
     def get_by_id(self, aid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM approval_records WHERE id = ?", (aid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM approval_records WHERE id = ?", (aid,))
         return _row_to_dict(cur.fetchone())
 
     def get_pending_tool_call(self, aid: str) -> str | None:
         try:
             cur = self._db.connection.execute(
-                "SELECT tool_call_json FROM approval_records"
-                " WHERE id = ? AND status = 'pending'",
+                "SELECT tool_call_json FROM approval_records WHERE id = ? AND status = 'pending'",
                 (aid,),
             )
             row = cur.fetchone()
@@ -886,9 +762,7 @@ class ApprovalRepository:
             pass
         return None
 
-    def resolve(
-        self, aid: str, decision: str, decided_by: str = ""
-    ) -> dict[str, object] | None:
+    def resolve(self, aid: str, decision: str, decided_by: str = "") -> dict[str, object] | None:
         from datetime import UTC, datetime
 
         now = datetime.now(UTC).isoformat()
@@ -901,9 +775,7 @@ class ApprovalRepository:
         self._db.connection.commit()
         if cur.rowcount == 0:
             return None
-        cur = self._db.connection.execute(
-            "SELECT * FROM approval_records WHERE id = ?", (aid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM approval_records WHERE id = ?", (aid,))
         row = cur.fetchone()
         return dict(row) if row else None
 
@@ -916,9 +788,7 @@ class ApprovalRepository:
         )
         return _rows_to_dicts(cur.fetchall())
 
-    def list_by_workspace(
-        self, workspace_id: str, limit: int = 50
-    ) -> list[dict[str, object]]:
+    def list_by_workspace(self, workspace_id: str, limit: int = 50) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
             "SELECT * FROM approval_records"
             " WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
@@ -949,8 +819,18 @@ class AttachmentRepository:
             " (id, workspace_id, session_id, content_hash, media_type,"
             " original_filename, storage_path, size_bytes, width, height)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (att_id, workspace_id, session_id, content_hash, media_type,
-             original_filename, storage_path, size_bytes, width, height),
+            (
+                att_id,
+                workspace_id,
+                session_id,
+                content_hash,
+                media_type,
+                original_filename,
+                storage_path,
+                size_bytes,
+                width,
+                height,
+            ),
         )
         self._db.connection.commit()
         result = self.get_by_id(att_id, workspace_id)
@@ -966,7 +846,8 @@ class AttachmentRepository:
 
     def get_by_hash(self, content_hash: str, workspace_id: str) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
-            "SELECT * FROM attachments WHERE content_hash = ? AND workspace_id = ? AND deleted_at IS NULL",
+            "SELECT * FROM attachments WHERE content_hash = ?"
+            " AND workspace_id = ? AND deleted_at IS NULL",
             (content_hash, workspace_id),
         )
         return _rows_to_dicts(cur.fetchall())
@@ -981,7 +862,8 @@ class AttachmentRepository:
 
     def list_by_session(self, session_id: str, workspace_id: str) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
-            "SELECT * FROM attachments WHERE session_id = ? AND workspace_id = ? AND deleted_at IS NULL"
+            "SELECT * FROM attachments WHERE session_id = ?"
+            " AND workspace_id = ? AND deleted_at IS NULL"
             " ORDER BY created_at DESC",
             (session_id, workspace_id),
         )
@@ -989,8 +871,7 @@ class AttachmentRepository:
 
     def soft_delete(self, att_id: str, workspace_id: str) -> None:
         self._db.connection.execute(
-            "UPDATE attachments SET deleted_at = datetime('now')"
-            " WHERE id = ? AND workspace_id = ?",
+            "UPDATE attachments SET deleted_at = datetime('now') WHERE id = ? AND workspace_id = ?",
             (att_id, workspace_id),
         )
         self._db.connection.commit()
@@ -1040,10 +921,24 @@ class VisionObservationRepository:
             " preprocessing_version, cache_key, input_tokens, output_tokens,"
             " latency_ms, trace_id)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (obs_id, workspace_id, session_id, attachment_id, image_content_hash,
-             prompt, normalized_prompt, result_text, provider, model,
-             preprocessing_version, cache_key, input_tokens, output_tokens,
-             latency_ms, trace_id),
+            (
+                obs_id,
+                workspace_id,
+                session_id,
+                attachment_id,
+                image_content_hash,
+                prompt,
+                normalized_prompt,
+                result_text,
+                provider,
+                model,
+                preprocessing_version,
+                cache_key,
+                input_tokens,
+                output_tokens,
+                latency_ms,
+                trace_id,
+            ),
         )
         self._db.connection.commit()
         return self.get_by_cache_key(cache_key) or {}
@@ -1093,14 +988,20 @@ class MemeAssetRepository:
         for key in ("aliases_json", "emotions_json", "use_cases_json", "avoid_cases_json"):
             if isinstance(d.get(key), str):
                 import json
+
                 try:
-                    d[key] = json.loads(d[key])  # type: ignore[arg-type]
+                    d[key] = json.loads(d[key])
                 except (json.JSONDecodeError, TypeError):
                     d[key] = []
         return d
 
     def _rows_to_assets(self, rows: list[sqlite3.Row]) -> list[dict[str, object]]:
-        return [self._row_to_asset(r) for r in rows if r is not None]  # type: ignore[arg-type]
+        assets: list[dict[str, object]] = []
+        for row in rows:
+            asset = self._row_to_asset(row)
+            if asset is not None:
+                assets.append(asset)
+        return assets
 
     def create(
         self,
@@ -1119,6 +1020,7 @@ class MemeAssetRepository:
     ) -> dict[str, object]:
         import json
         from datetime import UTC, datetime
+
         now = datetime.now(UTC).isoformat()
         self._db.connection.execute(
             "INSERT OR IGNORE INTO meme_assets"
@@ -1128,13 +1030,20 @@ class MemeAssetRepository:
             " use_count, last_used_at, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?)",
             (
-                meme_id, workspace_id, attachment_id, content_hash, name,
+                meme_id,
+                workspace_id,
+                attachment_id,
+                content_hash,
+                name,
                 json.dumps(aliases or [], ensure_ascii=False),
                 description,
                 json.dumps(emotions or [], ensure_ascii=False),
                 json.dumps(use_cases or [], ensure_ascii=False),
                 json.dumps(avoid_cases or [], ensure_ascii=False),
-                text_on_image, source, now, now,
+                text_on_image,
+                source,
+                now,
+                now,
             ),
         )
         self._db.connection.commit()
@@ -1156,9 +1065,7 @@ class MemeAssetRepository:
         )
         return self._row_to_asset(cur.fetchone())
 
-    def find_by_content_hash(
-        self, content_hash: str, workspace_id: str
-    ) -> list[dict[str, object]]:
+    def find_by_content_hash(self, content_hash: str, workspace_id: str) -> list[dict[str, object]]:
         cur = self._db.connection.execute(
             "SELECT * FROM meme_assets WHERE content_hash = ? AND workspace_id = ?"
             " ORDER BY updated_at DESC",
@@ -1182,10 +1089,9 @@ class MemeAssetRepository:
         )
         return self._rows_to_assets(cur.fetchall())
 
-    def search(
-        self, workspace_id: str, query: str, limit: int = 10
-    ) -> list[dict[str, object]]:
+    def search(self, workspace_id: str, query: str, limit: int = 10) -> list[dict[str, object]]:
         import unicodedata
+
         q = unicodedata.normalize("NFKC", query).lower().strip()
         if not q:
             return self.list_enabled(workspace_id)[:limit]
@@ -1199,11 +1105,14 @@ class MemeAssetRepository:
                 str(asset.get("description", "")),
                 str(asset.get("text_on_image", "")),
             ]
-            json_fields: list[list[str]] = [
-                asset.get("aliases_json", []),  # type: ignore[arg-type]
-                asset.get("emotions_json", []),  # type: ignore[arg-type]
-                asset.get("use_cases_json", []),  # type: ignore[arg-type]
-                asset.get("avoid_cases_json", []),  # type: ignore[arg-type]
+            json_fields = [
+                value if isinstance(value, list) else []
+                for value in (
+                    asset.get("aliases_json", []),
+                    asset.get("emotions_json", []),
+                    asset.get("use_cases_json", []),
+                    asset.get("avoid_cases_json", []),
+                )
             ]
             for kw in keywords:
                 for field in text_fields:
@@ -1226,14 +1135,21 @@ class MemeAssetRepository:
         **kwargs: object,
     ) -> dict[str, object] | None:
         allowed = {
-            "name", "aliases_json", "description", "emotions_json",
-            "use_cases_json", "avoid_cases_json", "text_on_image",
-            "source", "enabled",
+            "name",
+            "aliases_json",
+            "description",
+            "emotions_json",
+            "use_cases_json",
+            "avoid_cases_json",
+            "text_on_image",
+            "source",
+            "enabled",
         }
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return self.get(meme_id, workspace_id)
         from datetime import UTC, datetime
+
         now = datetime.now(UTC).isoformat()
         updates["updated_at"] = now
         cols = ", ".join(f"{k} = ?" for k in updates)
@@ -1247,6 +1163,7 @@ class MemeAssetRepository:
 
     def record_use(self, meme_id: str, workspace_id: str) -> None:
         from datetime import UTC, datetime
+
         now = datetime.now(UTC).isoformat()
         self._db.connection.execute(
             "UPDATE meme_assets SET use_count = use_count + 1, last_used_at = ?"
@@ -1284,9 +1201,13 @@ class WorkspaceSettingsRepository:
         row = cur.fetchone()
         if row:
             return dict(row)
-        return {"workspace_id": workspace_id, "quiet_hours_start": "",
-                "quiet_hours_end": "", "timezone": "UTC",
-                "max_daily_notifications": 3}
+        return {
+            "workspace_id": workspace_id,
+            "quiet_hours_start": "",
+            "quiet_hours_end": "",
+            "timezone": "UTC",
+            "max_daily_notifications": 3,
+        }
 
     def upsert(self, workspace_id: str, **kwargs: str | int) -> dict[str, object]:
         cols = ", ".join(kwargs.keys())
@@ -1301,8 +1222,7 @@ class WorkspaceSettingsRepository:
         )
         if cols:
             self._db.connection.execute(
-                f"UPDATE workspace_settings SET ({cols}) = ({placeholders})"
-                f" WHERE workspace_id = ?",
+                f"UPDATE workspace_settings SET ({cols}) = ({placeholders}) WHERE workspace_id = ?",
                 [*values, workspace_id],
             )
         self._db.connection.commit()

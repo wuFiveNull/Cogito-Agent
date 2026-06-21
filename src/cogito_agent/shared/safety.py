@@ -9,9 +9,7 @@ def wrap_untrusted(content: str) -> str:
 
 
 def is_wrapped(content: str) -> bool:
-    return content.startswith(UNTRUSTED_CONTENT_BEGIN) and content.endswith(
-        UNTRUSTED_CONTENT_END
-    )
+    return content.startswith(UNTRUSTED_CONTENT_BEGIN) and content.endswith(UNTRUSTED_CONTENT_END)
 
 
 def unwrap_untrusted(content: str) -> str:

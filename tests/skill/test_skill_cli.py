@@ -19,7 +19,9 @@ def test_cli_runner_run_basic(db_with_ws: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="transform", kind=StepKind.transform,
+                id="s1",
+                name="transform",
+                kind=StepKind.transform,
                 input_mapping={"out": "$val"},
             ),
         ],
@@ -42,7 +44,9 @@ def test_cli_runner_handles_invalid_workspace(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="transform", kind=StepKind.transform,
+                id="s1",
+                name="transform",
+                kind=StepKind.transform,
                 input_mapping={"out": "$ok"},
             ),
         ],
@@ -63,11 +67,15 @@ def test_cli_runner_multi_step_logged(db_with_ws: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="first", kind=StepKind.transform,
+                id="s1",
+                name="first",
+                kind=StepKind.transform,
                 input_mapping={"out": "$val"},
             ),
             SkillStep(
-                id="s2", name="second", kind=StepKind.transform,
+                id="s2",
+                name="second",
+                kind=StepKind.transform,
                 input_mapping={"out": "$step.s1._output"},
             ),
         ],

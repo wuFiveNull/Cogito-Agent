@@ -16,13 +16,16 @@ class SkillPool:
         self._db.connection.execute(
             "INSERT INTO skill_pool (id, name, version, description, manifest_json)"
             " VALUES (?, ?, ?, ?, ?)",
-            (sid, manifest.name, manifest.version,
-             manifest.description, manifest.model_dump_json()),
+            (
+                sid,
+                manifest.name,
+                manifest.version,
+                manifest.description,
+                manifest.model_dump_json(),
+            ),
         )
         self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM skill_pool WHERE id = ?", (sid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM skill_pool WHERE id = ?", (sid,))
         return dict(cur.fetchone())
 
     def get(self, name: str, version: str = "") -> dict[str, object] | None:
@@ -40,9 +43,7 @@ class SkillPool:
         return dict(row) if row else None
 
     def list_all(self) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM skill_pool ORDER BY name, version"
-        )
+        cur = self._db.connection.execute("SELECT * FROM skill_pool ORDER BY name, version")
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -50,12 +51,8 @@ class WorkspaceSkill:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def copy_from_pool(
-        self, workspace_id: str, pool_skill_id: str
-    ) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM skill_pool WHERE id = ?", (pool_skill_id,)
-        )
+    def copy_from_pool(self, workspace_id: str, pool_skill_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute("SELECT * FROM skill_pool WHERE id = ?", (pool_skill_id,))
         pool = cur.fetchone()
         if pool is None:
             return None
@@ -67,15 +64,17 @@ class WorkspaceSkill:
             " (id, workspace_id, pool_skill_id, name, version, description, manifest_json, enabled)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
             (
-                wsid, workspace_id, pool_skill_id,
-                manifest["name"], manifest["version"], manifest.get("description", ""),
+                wsid,
+                workspace_id,
+                pool_skill_id,
+                manifest["name"],
+                manifest["version"],
+                manifest.get("description", ""),
                 json.dumps(manifest),
             ),
         )
         self._db.connection.commit()
-        cur = self._db.connection.execute(
-            "SELECT * FROM workspace_skills WHERE id = ?", (wsid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM workspace_skills WHERE id = ?", (wsid,))
         return dict(cur.fetchone())
 
     def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
@@ -86,9 +85,7 @@ class WorkspaceSkill:
         return [dict(r) for r in cur.fetchall()]
 
     def get(self, wsid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM workspace_skills WHERE id = ?", (wsid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM workspace_skills WHERE id = ?", (wsid,))
         row = cur.fetchone()
         return dict(row) if row else None
 

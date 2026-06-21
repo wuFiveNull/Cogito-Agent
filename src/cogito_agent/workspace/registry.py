@@ -55,9 +55,7 @@ class WorkspaceFileRegistry:
         return result
 
     def get_root_by_id(self, rid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM workspace_roots WHERE id = ?", (rid,)
-        )
+        cur = self._db.connection.execute("SELECT * FROM workspace_roots WHERE id = ?", (rid,))
         return _row_to_dict(cur.fetchone())
 
     def list_roots(self, workspace_id: str) -> list[dict[str, object]]:
@@ -68,9 +66,7 @@ class WorkspaceFileRegistry:
         return _rows_to_dicts(cur.fetchall())
 
     def delete_root(self, rid: str) -> bool:
-        cur = self._db.connection.execute(
-            "DELETE FROM workspace_roots WHERE id = ?", (rid,)
-        )
+        cur = self._db.connection.execute("DELETE FROM workspace_roots WHERE id = ?", (rid,))
         self._db.connection.commit()
         return cur.rowcount > 0
 
@@ -95,28 +91,35 @@ class WorkspaceFileRegistry:
             " size_bytes, sha256, modified_at, indexed_at, status, sensitivity_level,"
             " error_message, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 'normal', '', ?, ?)",
-            (fid, workspace_id, root_id, relative_path, file_name, mime_type,
-             size_bytes, sha256, modified_at, now, now, now),
+            (
+                fid,
+                workspace_id,
+                root_id,
+                relative_path,
+                file_name,
+                mime_type,
+                size_bytes,
+                sha256,
+                modified_at,
+                now,
+                now,
+                now,
+            ),
         )
         self._db.connection.commit()
         result = self.get_file_by_id(fid)
         assert result is not None
         return result
 
-    def update_file_status(
-        self, fid: str, status: str, error_message: str = ""
-    ) -> None:
+    def update_file_status(self, fid: str, status: str, error_message: str = "") -> None:
         now = datetime.now(UTC).isoformat()
         self._db.connection.execute(
-            "UPDATE workspace_files SET status = ?, error_message = ?, updated_at = ?"
-            " WHERE id = ?",
+            "UPDATE workspace_files SET status = ?, error_message = ?, updated_at = ? WHERE id = ?",
             (status, error_message, now, fid),
         )
         self._db.connection.commit()
 
-    def update_file_indexed(
-        self, fid: str, sha256: str, size_bytes: int, modified_at: str
-    ) -> None:
+    def update_file_indexed(self, fid: str, sha256: str, size_bytes: int, modified_at: str) -> None:
         now = datetime.now(UTC).isoformat()
         self._db.connection.execute(
             "UPDATE workspace_files SET sha256 = ?, size_bytes = ?,"
@@ -126,10 +129,17 @@ class WorkspaceFileRegistry:
         )
         self._db.connection.commit()
 
-    def get_file_by_id(self, fid: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute(
-            "SELECT * FROM workspace_files WHERE id = ?", (fid,)
-        )
+    def get_file_by_id(
+        self,
+        fid: str,
+        workspace_id: str = "",
+    ) -> dict[str, object] | None:
+        sql = "SELECT * FROM workspace_files WHERE id = ?"
+        params: list[object] = [fid]
+        if workspace_id:
+            sql += " AND workspace_id = ?"
+            params.append(workspace_id)
+        cur = self._db.connection.execute(sql, params)
         return _row_to_dict(cur.fetchone())
 
     def list_files(
@@ -148,14 +158,10 @@ class WorkspaceFileRegistry:
         cur = self._db.connection.execute(sql, params)
         return _rows_to_dicts(cur.fetchall())
 
-    def list_files_by_status(
-        self, workspace_id: str, status: str
-    ) -> list[dict[str, object]]:
+    def list_files_by_status(self, workspace_id: str, status: str) -> list[dict[str, object]]:
         return self.list_files(workspace_id, status=status)
 
-    def get_file_by_path(
-        self, workspace_id: str, relative_path: str
-    ) -> dict[str, object] | None:
+    def get_file_by_path(self, workspace_id: str, relative_path: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
             "SELECT * FROM workspace_files"
             " WHERE workspace_id = ? AND relative_path = ?"
@@ -164,8 +170,8 @@ class WorkspaceFileRegistry:
         )
         return _row_to_dict(cur.fetchone())
 
-    def remove_file(self, fid: str) -> bool:
-        row = self.get_file_by_id(fid)
+    def remove_file(self, fid: str, workspace_id: str = "") -> bool:
+        row = self.get_file_by_id(fid, workspace_id)
         if row is None:
             return False
         ws_id = str(row["workspace_id"])
@@ -181,12 +187,8 @@ class WorkspaceFileRegistry:
             self._db.connection.execute(
                 "DELETE FROM file_chunks_fts WHERE rowid = ?", (chunk["rowid"],)
             )
-        self._db.connection.execute(
-            "DELETE FROM file_chunks WHERE workspace_file_id = ?", (fid,)
-        )
-        self._db.connection.execute(
-            "DELETE FROM workspace_files WHERE id = ?", (fid,)
-        )
+        self._db.connection.execute("DELETE FROM file_chunks WHERE workspace_file_id = ?", (fid,))
+        self._db.connection.execute("DELETE FROM workspace_files WHERE id = ?", (fid,))
         self._db.connection.commit()
 
         self._audit.log(
@@ -207,9 +209,7 @@ class WorkspaceFileRegistry:
     def _resolve_absolute(self, path: str) -> Path:
         return Path(path).resolve()
 
-    def resolve_safe_path(
-        self, root_id: str, relative_path: str
-    ) -> Path | None:
+    def resolve_safe_path(self, root_id: str, relative_path: str) -> Path | None:
         root_row = self.get_root_by_id(root_id)
         if root_row is None:
             return None
@@ -274,6 +274,7 @@ class WorkspaceFileRegistry:
         if not patterns:
             return False
         import fnmatch
+
         normalized = relative_path.replace("\\", "/")
         segments = normalized.split("/")
         for pattern in patterns.split("\n"):

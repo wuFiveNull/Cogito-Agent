@@ -58,7 +58,7 @@ def test_replay_list_empty() -> None:
 def test_replay_list_with_data() -> None:
     db = Database()
     db.initialize()
-    trace_id = _seed_trace(db)
+    _seed_trace(db)
     inspector = TraceInspector(db)
     traces = inspector.list_traces(workspace_id="*")
     assert any(str(t.get("id", "")).startswith("tr_test") for t in traces)

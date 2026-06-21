@@ -88,9 +88,7 @@ def create_diagnostic_bundle(
         _write_json(root / "database.json", database_report)
 
         if log_path and Path(log_path).is_file():
-            lines = Path(log_path).read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines()[-200:]
+            lines = Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
             (root / "logs.redacted.txt").write_text(
                 "\n".join(redactor.redact(line) for line in lines),
                 encoding="utf-8",

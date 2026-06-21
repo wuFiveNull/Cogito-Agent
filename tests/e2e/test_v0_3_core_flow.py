@@ -81,7 +81,8 @@ def test_v0_3_core_approval_lifecycle() -> None:
 
     # Step 3: Find the skill_run_log id
     cur = db.connection.execute(
-        "SELECT id FROM skill_run_logs WHERE status = 'pending_approval' AND workspace_id = ? ORDER BY rowid DESC LIMIT 1",
+        "SELECT id FROM skill_run_logs WHERE status = 'pending_approval'"
+        " AND workspace_id = ? ORDER BY rowid DESC LIMIT 1",
         ("ws-e2e-v03",),
     )
     row = cur.fetchone()

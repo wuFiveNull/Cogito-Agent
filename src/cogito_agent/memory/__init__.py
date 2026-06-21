@@ -1,11 +1,15 @@
 from .application import MemoryApplicationService
-from .candidates import CandidateExtractor
+from .consolidation import ConsolidationService
+from .memorizer import Memorizer
+from .optimizer import MemoryOptimizer
 from .retrieval import MemoryRetriever
 from .vector import EmbeddingService, HybridRetriever, _pack_embedding, _unpack_embedding
 
 __all__ = [
     "MemoryRetriever",
-    "CandidateExtractor",
+    "ConsolidationService",
+    "Memorizer",
+    "MemoryOptimizer",
     "EmbeddingService",
     "HybridRetriever",
     "MemoryApplicationService",

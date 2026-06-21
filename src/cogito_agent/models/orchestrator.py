@@ -1,21 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional
-
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from cogito_agent.models import ModelRouter, ModelRouteRequest
-from cogito_agent.models.vision import VisionObservation, analyze_image, render_observation_as_text
-from cogito_agent.models.messages import ChatMessage, ContentPart, ImagePart
+from cogito_agent.models.messages import ContentPart, ImagePart
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +29,7 @@ class ExecutionStep(BaseModel):
     preferred_candidates: tuple[str, ...] = Field(default_factory=tuple)
     system_prompt: str = ""
     instruction: str = ""
-    output_schema: Optional[dict[str, object]] = None
+    output_schema: dict[str, object] | None = None
     max_retries: int = 1
 
     @property
@@ -51,7 +42,7 @@ class ExecutionStep(BaseModel):
 
 
 class OrchestrationPlan(BaseModel):
-    steps: List[ExecutionStep] = Field(default_factory=list)
+    steps: list[ExecutionStep] = Field(default_factory=list)
     has_vision: bool = False
     needs_review: bool = False
     raw_message: str = ""
@@ -59,9 +50,21 @@ class OrchestrationPlan(BaseModel):
 
 def _is_coding_query(text: str) -> bool:
     keywords = [
-        "write code", "implement", "fix bug", "refactor", "create file",
-        "modify", "edit code", "add function", "write test", "debug",
-        "pull request", "merge", "commit", "sort an array", "function",
+        "write code",
+        "implement",
+        "fix bug",
+        "refactor",
+        "create file",
+        "modify",
+        "edit code",
+        "add function",
+        "write test",
+        "debug",
+        "pull request",
+        "merge",
+        "commit",
+        "sort an array",
+        "function",
     ]
     lower = text.lower()
     for kw in keywords:
@@ -72,9 +75,20 @@ def _is_coding_query(text: str) -> bool:
 
 def _is_high_risk(text: str) -> bool:
     risk_keywords = [
-        "delete", "remove file", "drop table", "rm -rf", "format",
-        "overwrite", "shutdown", "restart", "sudo", "chmod",
-        "production", "critical", "important config", "delete all",
+        "delete",
+        "remove file",
+        "drop table",
+        "rm -rf",
+        "format",
+        "overwrite",
+        "shutdown",
+        "restart",
+        "sudo",
+        "chmod",
+        "production",
+        "critical",
+        "important config",
+        "delete all",
     ]
     lower = text.lower()
     for kw in risk_keywords:
@@ -86,6 +100,7 @@ def _is_high_risk(text: str) -> bool:
 def _estimate_input_tokens(text: str) -> int:
     try:
         from cogito_agent.models import token_count
+
         return token_count(text)
     except Exception:
         return max(1, len(text) // 4)
@@ -228,7 +243,9 @@ class TaskOrchestrator:
         return plan
 
     def create_router_request(
-        self, step: ExecutionStep, estimated_tokens: int = 0,
+        self,
+        step: ExecutionStep,
+        estimated_tokens: int = 0,
     ) -> ModelRouteRequest:
         """Create a ModelRouteRequest from an ExecutionStep."""
         return ModelRouteRequest(
@@ -241,7 +258,9 @@ class TaskOrchestrator:
         )
 
     def select_model_for_step(
-        self, step: ExecutionStep, estimated_tokens: int = 0,
+        self,
+        step: ExecutionStep,
+        estimated_tokens: int = 0,
     ) -> str | None:
         """Route a step to a model and return the candidate id, or None."""
         req = self.create_router_request(step, estimated_tokens)

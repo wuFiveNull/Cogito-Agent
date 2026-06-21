@@ -75,7 +75,14 @@ class TestTextExtraction:
 
 
 class TestScanIdempotency:
-    def test_scan_is_idempotent(self, db: Database, ws: str, registry: WorkspaceFileRegistry, ing: FileIngestionService, tmp_root: Path) -> None:
+    def test_scan_is_idempotent(
+        self,
+        db: Database,
+        ws: str,
+        registry: WorkspaceFileRegistry,
+        ing: FileIngestionService,
+        tmp_root: Path,
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         (tmp_root / "test.txt").write_text("hello world", encoding="utf-8")
@@ -88,7 +95,14 @@ class TestScanIdempotency:
 
 
 class TestMaxFileSize:
-    def test_large_file_ignored(self, db: Database, ws: str, registry: WorkspaceFileRegistry, ing: FileIngestionService, tmp_root: Path) -> None:
+    def test_large_file_ignored(
+        self,
+        db: Database,
+        ws: str,
+        registry: WorkspaceFileRegistry,
+        ing: FileIngestionService,
+        tmp_root: Path,
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root), max_file_size=10)
         rid = str(root["id"])
         f = tmp_root / "large.txt"
@@ -98,7 +112,14 @@ class TestMaxFileSize:
 
 
 class TestIgnorePatterns:
-    def test_ignore_patterns_respected(self, db: Database, ws: str, registry: WorkspaceFileRegistry, ing: FileIngestionService, tmp_root: Path) -> None:
+    def test_ignore_patterns_respected(
+        self,
+        db: Database,
+        ws: str,
+        registry: WorkspaceFileRegistry,
+        ing: FileIngestionService,
+        tmp_root: Path,
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root), ignore_patterns="*.log\n.git")
         rid = str(root["id"])
         (tmp_root / "app.log").write_text("log data", encoding="utf-8")
@@ -109,7 +130,14 @@ class TestIgnorePatterns:
 
 
 class TestChunkCreation:
-    def test_chunks_created(self, db: Database, ws: str, registry: WorkspaceFileRegistry, ing: FileIngestionService, tmp_root: Path) -> None:
+    def test_chunks_created(
+        self,
+        db: Database,
+        ws: str,
+        registry: WorkspaceFileRegistry,
+        ing: FileIngestionService,
+        tmp_root: Path,
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         f = tmp_root / "long.txt"
@@ -124,7 +152,14 @@ class TestChunkCreation:
 
 
 class TestParseErrors:
-    def test_parse_error_does_not_break_scan(self, db: Database, ws: str, registry: WorkspaceFileRegistry, ing: FileIngestionService, tmp_root: Path) -> None:
+    def test_parse_error_does_not_break_scan(
+        self,
+        db: Database,
+        ws: str,
+        registry: WorkspaceFileRegistry,
+        ing: FileIngestionService,
+        tmp_root: Path,
+    ) -> None:
         root = registry.register_root(ws, str(tmp_root))
         rid = str(root["id"])
         (tmp_root / "good.txt").write_text("ok", encoding="utf-8")

@@ -14,7 +14,7 @@ def test_file_database_is_backed_up_before_migration(tmp_path: Path) -> None:
     db.close()
 
     assert applied
-    backups = list(tmp_path.glob("cogito.db.pre-migrate.v1-to-v13.*.bak"))
+    backups = list(tmp_path.glob("cogito.db.pre-migrate.v1-to-v*.bak"))
     assert len(backups) == 1
     backup = Database(str(backups[0]))
     assert backup.current_version() == 1

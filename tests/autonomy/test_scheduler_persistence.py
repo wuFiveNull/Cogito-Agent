@@ -66,22 +66,19 @@ def test_get_job_failures_counts(scheduler, wid: str) -> None:
         "INSERT INTO scheduled_jobs"
         " (id, name, workspace_id, capability_name, status, updated_at)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), "fail-recent-1", wid, "read_file",
-         JobStatus.failed.value, recent),
+        (str(uuid.uuid4()), "fail-recent-1", wid, "read_file", JobStatus.failed.value, recent),
     )
     scheduler._db.connection.execute(
         "INSERT INTO scheduled_jobs"
         " (id, name, workspace_id, capability_name, status, updated_at)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), "fail-recent-2", wid, "read_file",
-         JobStatus.failed.value, recent),
+        (str(uuid.uuid4()), "fail-recent-2", wid, "read_file", JobStatus.failed.value, recent),
     )
     scheduler._db.connection.execute(
         "INSERT INTO scheduled_jobs"
         " (id, name, workspace_id, capability_name, status, updated_at)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), "fail-old", wid, "read_file",
-         JobStatus.failed.value, old),
+        (str(uuid.uuid4()), "fail-old", wid, "read_file", JobStatus.failed.value, old),
     )
     scheduler._db.connection.commit()
 
@@ -102,15 +99,13 @@ def test_get_job_failures_other_status_ignored(scheduler, wid: str) -> None:
         "INSERT INTO scheduled_jobs"
         " (id, name, workspace_id, capability_name, status, updated_at)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), "completed-job", wid, "read_file",
-         JobStatus.completed.value, recent),
+        (str(uuid.uuid4()), "completed-job", wid, "read_file", JobStatus.completed.value, recent),
     )
     scheduler._db.connection.execute(
         "INSERT INTO scheduled_jobs"
         " (id, name, workspace_id, capability_name, status, updated_at)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), "running-job", wid, "read_file",
-         JobStatus.running.value, recent),
+        (str(uuid.uuid4()), "running-job", wid, "read_file", JobStatus.running.value, recent),
     )
     scheduler._db.connection.commit()
 

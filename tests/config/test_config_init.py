@@ -26,7 +26,7 @@ def test_initialize_config_creates_valid_toml(tmp_path: Path) -> None:
 
 def test_initialize_config_refuses_to_overwrite(tmp_path: Path) -> None:
     target = tmp_path / "config.toml"
-    target.write_text("[model]\nprovider = \"ollama\"\n", encoding="utf-8")
+    target.write_text('[model]\nprovider = "ollama"\n', encoding="utf-8")
 
     with pytest.raises(FileExistsError):
         initialize_config(str(target))

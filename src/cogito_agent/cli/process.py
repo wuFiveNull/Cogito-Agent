@@ -11,6 +11,23 @@ class AlreadyRunningError(RuntimeError):
 def _process_exists(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        # On Windows ``os.kill(pid, 0)`` is not a POSIX-style existence probe
+        # and may terminate the target process. Query a process handle instead.
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(
+            process_query_limited_information,
+            False,
+            pid,
+        )
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        # Access denied still means that a process owns the PID.
+        return ctypes.get_last_error() == 5
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -41,9 +58,7 @@ class PidFile:
             except FileExistsError:
                 owner = self._read_owner()
                 if owner is not None and _process_exists(owner):
-                    raise AlreadyRunningError(
-                        f"daemon already running with PID {owner}"
-                    ) from None
+                    raise AlreadyRunningError(f"daemon already running with PID {owner}") from None
                 try:
                     self.path.unlink()
                 except FileNotFoundError:

@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import uuid
 
-from cogito_agent.models import OpenAICompatibleAdapter
-from cogito_agent.runtime import RuntimeKernel
+from cogito_agent.application import build_runtime_kernel, default_workspace_path
+from cogito_agent.models.openai_adapter import OpenAICompatibleAdapter
 from cogito_agent.shared import EventSource, EventType, RuntimeEvent
 from cogito_agent.storage import Database
 
@@ -49,15 +49,13 @@ def run_e2e_demo(db_path: str = "cogito_demo.db") -> None:
     base_url = os.environ.get("MODEL_BASE_URL", "https://api.openai.com/v1")
 
     if api_key:
-        adapter = OpenAICompatibleAdapter(
-            api_key=api_key, model=model_name, base_url=base_url
-        )
+        adapter = OpenAICompatibleAdapter(api_key=api_key, model=model_name, base_url=base_url)
         print(f"[Model] {model_name} @ {base_url}")
     else:
         adapter = None
         print("[Model] No API key found — using echo mode")
 
-    kernel = RuntimeKernel(db, model_adapter=adapter)
+    kernel = build_runtime_kernel(db, model_adapter=adapter, workspace_path=default_workspace_path(ws_id))
     print("[Kernel] Ready\n")
 
     prompt = "Hello! Please introduce yourself briefly in two sentences."
@@ -79,9 +77,7 @@ def run_e2e_demo(db_path: str = "cogito_demo.db") -> None:
     else:
         print(f"Agent: {result.output}")
 
-    cur_t = db.connection.execute(
-        "SELECT id, status FROM traces WHERE workspace_id = ?", (ws_id,)
-    )
+    cur_t = db.connection.execute("SELECT id, status FROM traces WHERE workspace_id = ?", (ws_id,))
     traces = cur_t.fetchall()
     cur_a = db.connection.execute(
         "SELECT id, action FROM audit_logs WHERE workspace_id = ?", (ws_id,)
@@ -92,8 +88,7 @@ def run_e2e_demo(db_path: str = "cogito_demo.db") -> None:
     print(f"[Audit] {len(logs)} log(s) recorded")
 
     db.connection.execute(
-        "INSERT INTO messages (id, workspace_id, session_id, role, content)"
-        " VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, workspace_id, session_id, role, content) VALUES (?, ?, ?, ?, ?)",
         (str(uuid.uuid4()), ws_id, sess_id, "user", prompt),
     )
     db.connection.commit()

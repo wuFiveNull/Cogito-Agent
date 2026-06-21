@@ -66,7 +66,8 @@ def _is_image_mime(mime: str) -> bool:
 def _read_file(path: str = "") -> ToolResult:
     if not path:
         return ToolResult(
-            status="error", summary="Path is required",
+            status="error",
+            summary="Path is required",
             error="Missing path argument",
         )
     safe = _resolve_safe_path(path)
@@ -102,21 +103,25 @@ def _read_file(path: str = "") -> ToolResult:
             )
         content = safe.read_text(encoding="utf-8")
         return ToolResult(
-            status="ok", summary=f"Read {len(content)} chars",
+            status="ok",
+            summary=f"Read {len(content)} chars",
             data={"content": content, "size": len(content)},
             artifacts=[{"path": str(safe), "type": "file"}],
             lineage=[{"source": str(safe), "tool": "local.file_read"}],
         )
     except Exception as e:
         return ToolResult(
-            status="error", summary="Failed to read file", error=str(e),
+            status="error",
+            summary="Failed to read file",
+            error=str(e),
         )
 
 
 def _list_files(path: str = "") -> ToolResult:
     if not path:
         return ToolResult(
-            status="error", summary="Path is required",
+            status="error",
+            summary="Path is required",
             error="Missing path argument",
         )
     safe = _resolve_safe_path(path)
@@ -135,14 +140,16 @@ def _list_files(path: str = "") -> ToolResult:
             )
         files = sorted(str(f) for f in safe.iterdir())
         return ToolResult(
-            status="ok", summary=f"Listed {len(files)} entries",
+            status="ok",
+            summary=f"Listed {len(files)} entries",
             data={"files": files},
             artifacts=[{"path": str(safe), "type": "directory"}],
             lineage=[{"source": str(safe), "tool": "local.file_list"}],
         )
     except Exception as e:
         return ToolResult(
-            status="error", summary="Failed to list directory",
+            status="error",
+            summary="Failed to list directory",
             error=str(e),
         )
 
@@ -205,13 +212,35 @@ REGISTER_MEME_MANIFEST = CapabilityManifest(
     input_schema={
         "type": "object",
         "properties": {
-            "attachment_id": {"type": "string", "description": "ID of the uploaded image attachment (att_xxx)"},
+            "attachment_id": {
+                "type": "string",
+                "description": "ID of the uploaded image attachment (att_xxx)",
+            },
             "name": {"type": "string", "description": "Short name, e.g. 'Confused Dog'"},
-            "aliases": {"type": "array", "items": {"type": "string"}, "description": "Alias search terms"},
-            "description": {"type": "string", "description": "What the image shows and its expression meaning"},
-            "emotions": {"type": "array", "items": {"type": "string"}, "description": "Emotions expressed"},
-            "use_cases": {"type": "array", "items": {"type": "string"}, "description": "When to send this meme"},
-            "avoid_cases": {"type": "array", "items": {"type": "string"}, "description": "When NOT to send"},
+            "aliases": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Alias search terms",
+            },
+            "description": {
+                "type": "string",
+                "description": "What the image shows and its expression meaning",
+            },
+            "emotions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Emotions expressed",
+            },
+            "use_cases": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "When to send this meme",
+            },
+            "avoid_cases": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "When NOT to send",
+            },
             "text_on_image": {"type": "string", "description": "Visible text in the image"},
         },
         "required": ["attachment_id", "name", "description"],
@@ -240,8 +269,15 @@ ANALYZE_MEME_MANIFEST = CapabilityManifest(
     input_schema={
         "type": "object",
         "properties": {
-            "attachment_id": {"type": "string", "description": "ID of the uploaded image attachment (att_xxx)"},
-            "force_refresh": {"type": "boolean", "description": "Force re-analysis even if profile exists", "default": False},
+            "attachment_id": {
+                "type": "string",
+                "description": "ID of the uploaded image attachment (att_xxx)",
+            },
+            "force_refresh": {
+                "type": "boolean",
+                "description": "Force re-analysis even if profile exists",
+                "default": False,
+            },
         },
         "required": ["attachment_id"],
     },
@@ -269,8 +305,17 @@ SEARCH_MEMES_MANIFEST = CapabilityManifest(
     input_schema={
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Search keyword, e.g. 'happy', 'confused', 'congratulations'"},
-            "limit": {"type": "integer", "description": "Max results", "default": 5, "minimum": 1, "maximum": 20},
+            "query": {
+                "type": "string",
+                "description": "Search keyword, e.g. 'happy', 'confused', 'congratulations'",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results",
+                "default": 5,
+                "minimum": 1,
+                "maximum": 20,
+            },
         },
         "required": ["query"],
     },
@@ -307,7 +352,10 @@ SEND_MEME_MANIFEST = CapabilityManifest(
         "type": "object",
         "properties": {"result": {"type": "string"}},
     },
-    permissions=[Permission(resource="meme", operations=["read"]), Permission(resource="attachment", operations=["read"])],
+    permissions=[
+        Permission(resource="meme", operations=["read"]),
+        Permission(resource="attachment", operations=["read"]),
+    ],
     risk_level=RiskLevel.low,
     allowed_contexts=["interactive"],
     approval_required=False,

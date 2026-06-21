@@ -43,6 +43,7 @@ def _import_codec() -> dict[str, object]:
         UnsupportedModalityError,
         get_codec_for_provider,
     )
+
     return {
         "GeminiCodec": GeminiCodec,
         "OpenAICompatibleCodec": OpenAICompatibleCodec,
@@ -52,6 +53,7 @@ def _import_codec() -> dict[str, object]:
         "get_codec_for_provider": get_codec_for_provider,
     }
 
+
 def _import_orchestrator() -> dict[str, object]:
     from .orchestrator import (
         ExecutionStep,
@@ -59,6 +61,7 @@ def _import_orchestrator() -> dict[str, object]:
         TaskKind,
         TaskOrchestrator,
     )
+
     return {
         "ExecutionStep": ExecutionStep,
         "OrchestrationPlan": OrchestrationPlan,
@@ -66,21 +69,26 @@ def _import_orchestrator() -> dict[str, object]:
         "TaskOrchestrator": TaskOrchestrator,
     }
 
+
 def _import_provider_errors() -> dict[str, object]:
     from .provider_errors import ProviderError, ProviderErrorCode
+
     return {
         "ProviderError": ProviderError,
         "ProviderErrorCode": ProviderErrorCode,
     }
 
+
 def _import_analyze_image() -> object:
     from .vision import analyze_image
+
     return analyze_image
 
 
 def _import_openai_adapter() -> type:
     from .openai_adapter import OpenAICompatibleAdapter
-    return OpenAICompatibleAdapter  # type: ignore[return-value]
+
+    return OpenAICompatibleAdapter
 
 
 def __getattr__(name: str) -> object:

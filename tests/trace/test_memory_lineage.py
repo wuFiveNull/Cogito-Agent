@@ -4,10 +4,7 @@ import uuid
 
 from cogito_agent.governance.audit import AuditLogger
 from cogito_agent.storage import Database, MemoryRepository, WorkspaceRepository
-from cogito_agent.storage.repositories import (
-    MemoryCandidateRepository,
-    MemoryEditRepository,
-)
+from cogito_agent.storage.repositories import MemoryEditRepository
 
 
 def _ws(db: Database, wid: str = "ws-audit") -> str:
@@ -29,13 +26,11 @@ def _count_audit_events(db: Database, workspace_id: str) -> int:
 
 def test_accept_logs_audit(db: Database) -> None:
     wid = _ws(db)
-    cand_repo = MemoryCandidateRepository(db)
-    cand = cand_repo.create(wid, "Auditable candidate")
     logger = _audit_logger(db)
     logger.log(
         actor_id="test",
         action="memory.accept",
-        resource=cand["id"],
+        resource="candidate:audit-test",
         workspace_id=wid,
         session_id="sess-audit-1",
         trace_id="trace-audit-1",
@@ -48,13 +43,11 @@ def test_accept_logs_audit(db: Database) -> None:
 
 def test_reject_logs_audit(db: Database) -> None:
     wid = _ws(db)
-    cand_repo = MemoryCandidateRepository(db)
-    cand = cand_repo.create(wid, "Rejectable candidate")
     logger = _audit_logger(db)
     logger.log(
         actor_id="test",
         action="memory.reject",
-        resource=cand["id"],
+        resource="candidate:audit-test-2",
         workspace_id=wid,
         session_id="sess-audit-2",
         trace_id="trace-audit-2",

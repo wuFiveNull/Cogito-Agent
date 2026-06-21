@@ -70,8 +70,7 @@ class EnvSecretProvider:
         return SecretValue(val, name=key)
 
     def list_keys(self) -> list[str]:
-        return [k[len(self._prefix):] for k in os.environ
-                if k.startswith(self._prefix)]
+        return [k[len(self._prefix) :] for k in os.environ if k.startswith(self._prefix)]
 
     def set_secret(self, key: str, value: str) -> None:
         os.environ[self._env_key(key)] = value
@@ -103,6 +102,7 @@ class LocalSecretsProvider:
     def __init__(self, db_path: str = "") -> None:
         if not db_path:
             from pathlib import Path
+
             db_path = str(Path.home() / ".cogito" / "secrets.db")
         self._db_path = db_path
         self._init_db()
@@ -110,6 +110,7 @@ class LocalSecretsProvider:
     def _init_db(self) -> None:
         import sqlite3
         from pathlib import Path
+
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
@@ -125,11 +126,10 @@ class LocalSecretsProvider:
 
     def get_secret(self, key: str) -> SecretValue | None:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
-                row = conn.execute(
-                    "SELECT value FROM secrets WHERE key = ?", (key,)
-                ).fetchone()
+                row = conn.execute("SELECT value FROM secrets WHERE key = ?", (key,)).fetchone()
                 if row is None:
                     return None
                 # Update last_used_at
@@ -144,22 +144,20 @@ class LocalSecretsProvider:
 
     def list_keys(self) -> list[str]:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT key FROM secrets ORDER BY key"
-                ).fetchall()
+                rows = conn.execute("SELECT key FROM secrets ORDER BY key").fetchall()
                 return [r[0] for r in rows]
         except sqlite3.OperationalError:
             return []
 
     def set_secret(self, key: str, value: str) -> None:
         import sqlite3
+
         now = datetime.now(UTC).isoformat()
         with sqlite3.connect(self._db_path) as conn:
-            existing = conn.execute(
-                "SELECT 1 FROM secrets WHERE key = ?", (key,)
-            ).fetchone()
+            existing = conn.execute("SELECT 1 FROM secrets WHERE key = ?", (key,)).fetchone()
             if existing:
                 conn.execute(
                     "UPDATE secrets SET value = ?, updated_at = ? WHERE key = ?",
@@ -167,23 +165,22 @@ class LocalSecretsProvider:
                 )
             else:
                 conn.execute(
-                    "INSERT INTO secrets (key, value, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?)",
+                    "INSERT INTO secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)",
                     (key, value, now, now),
                 )
             conn.commit()
 
     def delete_secret(self, key: str) -> bool:
         import sqlite3
+
         with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute(
-                "DELETE FROM secrets WHERE key = ?", (key,)
-            )
+            cur = conn.execute("DELETE FROM secrets WHERE key = ?", (key,))
             conn.commit()
             return cur.rowcount > 0
 
     def rotate_secret(self, key: str, new_value: str) -> bool:
         import sqlite3
+
         now = datetime.now(UTC).isoformat()
         with sqlite3.connect(self._db_path) as conn:
             cur = conn.execute(
@@ -195,11 +192,12 @@ class LocalSecretsProvider:
 
     def metadata(self, key: str) -> dict[str, Any] | None:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
                 row = conn.execute(
-                    "SELECT key, created_at, updated_at, last_used_at"
-                    " FROM secrets WHERE key = ?", (key,)
+                    "SELECT key, created_at, updated_at, last_used_at FROM secrets WHERE key = ?",
+                    (key,),
                 ).fetchone()
                 if row is None:
                     return None
@@ -214,11 +212,11 @@ class LocalSecretsProvider:
 
     def all_metadata(self) -> list[dict[str, Any]]:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
                 rows = conn.execute(
-                    "SELECT key, created_at, updated_at, last_used_at"
-                    " FROM secrets ORDER BY key"
+                    "SELECT key, created_at, updated_at, last_used_at FROM secrets ORDER BY key"
                 ).fetchall()
                 return [
                     {
@@ -240,6 +238,7 @@ def _keyring_available() -> bool:
     """Check if the keyring library is available and usable."""
     try:
         import keyring
+
         # Attempt a simple get to verify the backend works
         keyring.get_keyring()
         return True
@@ -251,6 +250,7 @@ def _platform_keychain_available() -> bool:
     """Check if a platform-specific keychain tool is available."""
     import platform
     import subprocess
+
     system = platform.system()
     try:
         if system == "Windows":
@@ -287,6 +287,7 @@ class KeychainSecretProvider:
             return "keyring"
         if _platform_keychain_available():
             import platform
+
             return f"platform:{platform.system().lower()}"
         return "unavailable"
 
@@ -300,6 +301,7 @@ class KeychainSecretProvider:
                 ProviderError,
                 ProviderErrorCode,
             )
+
             raise ProviderError(
                 ProviderErrorCode.SECRET_MISSING,
                 "No OS keychain backend available. "
@@ -312,6 +314,7 @@ class KeychainSecretProvider:
         try:
             if self._backend == "keyring":
                 import keyring
+
                 val = keyring.get_password(self._service_name, key)
                 if val is None:
                     return None
@@ -323,24 +326,35 @@ class KeychainSecretProvider:
     def _platform_get(self, key: str) -> SecretValue | None:
         import platform
         import subprocess
+
         system = platform.system()
         try:
             if system == "Windows":
                 return self._win_get(key)
             elif system == "Darwin":
                 result = subprocess.run(
-                    ["security", "find-generic-password",
-                     "-s", self._service_name, "-a", key, "-w"],
-                    capture_output=True, text=True, timeout=5,
+                    [
+                        "security",
+                        "find-generic-password",
+                        "-s",
+                        self._service_name,
+                        "-a",
+                        key,
+                        "-w",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return SecretValue(result.stdout.strip(), name=key)
                 return None
             elif system == "Linux":
                 result = subprocess.run(
-                    ["secret-tool", "lookup",
-                     "service", self._service_name, "key", key],
-                    capture_output=True, text=True, timeout=5,
+                    ["secret-tool", "lookup", "service", self._service_name, "key", key],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return SecretValue(result.stdout.strip(), name=key)
@@ -351,11 +365,17 @@ class KeychainSecretProvider:
 
     def _win_get(self, key: str) -> SecretValue | None:
         import subprocess
+
         try:
             result = subprocess.run(
-                ["powershell", "-Command",
-                 f"(Get-StoredCredential -Target '{self._service_name}:{key}').Password"],
-                capture_output=True, text=True, timeout=5,
+                [
+                    "powershell",
+                    "-Command",
+                    f"(Get-StoredCredential -Target '{self._service_name}:{key}').Password",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
                 return SecretValue(result.stdout.strip(), name=key)
@@ -377,18 +397,21 @@ class KeychainSecretProvider:
     def _platform_list_keys(self) -> list[str]:
         import platform
         import subprocess
+
         system = platform.system()
         try:
             if system == "Darwin":
                 result = subprocess.run(
                     ["security", "dump-keychain", "-r"],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     keys = []
                     for line in result.stdout.splitlines():
                         if f'"svce"<blob>="{self._service_name}.' in line:
-                            key = line.split('=')[1].strip().strip('"')
+                            key = line.split("=")[1].strip().strip('"')
                             key = key.replace(f"{self._service_name}.", "")
                             keys.append(key)
                     return keys
@@ -405,6 +428,7 @@ class KeychainSecretProvider:
         try:
             if self._backend == "keyring":
                 import keyring
+
                 keyring.set_password(self._service_name, key, value)
                 return
             self._platform_set(key, value)
@@ -413,6 +437,7 @@ class KeychainSecretProvider:
                 ProviderError,
                 ProviderErrorCode,
             )
+
             raise ProviderError(
                 ProviderErrorCode.UNKNOWN_ERROR,
                 f"Failed to store secret in keychain: {exc}",
@@ -421,33 +446,53 @@ class KeychainSecretProvider:
     def _platform_set(self, key: str, value: str) -> None:
         import platform
         import subprocess
+
         system = platform.system()
         try:
             if system == "Darwin":
                 subprocess.run(
-                    ["security", "add-generic-password",
-                     "-s", self._service_name, "-a", key, "-w", value, "-U"],
-                    capture_output=True, timeout=5, check=True,
+                    [
+                        "security",
+                        "add-generic-password",
+                        "-s",
+                        self._service_name,
+                        "-a",
+                        key,
+                        "-w",
+                        value,
+                        "-U",
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
                 )
             elif system == "Linux":
                 subprocess.run(
-                    ["secret-tool", "store",
-                     "service", self._service_name, "key", key],
-                    input=value.encode(), capture_output=True, timeout=5, check=True,
+                    ["secret-tool", "store", "service", self._service_name, "key", key],
+                    input=value.encode(),
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
                 )
             elif system == "Windows":
                 subprocess.run(
-                    ["powershell", "-Command",
-                     f"$c=New-Object PSCredential '{self._service_name}:{key}',"
-                     f"(ConvertTo-SecureString '{value}' -AsPlainText -Force);"
-                     f"$c | Microsoft.PowerShell.SecretManagement.Set-Secret"],
-                    capture_output=True, timeout=5, check=True,
+                    [
+                        "powershell",
+                        "-Command",
+                        f"$c=New-Object PSCredential '{self._service_name}:{key}',"
+                        f"(ConvertTo-SecureString '{value}' -AsPlainText -Force);"
+                        f"$c | Microsoft.PowerShell.SecretManagement.Set-Secret",
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
                 )
         except Exception as exc:
             from cogito_agent.models.provider_errors import (
                 ProviderError,
                 ProviderErrorCode,
             )
+
             raise ProviderError(
                 ProviderErrorCode.UNKNOWN_ERROR,
                 f"OS keychain set failed: {exc}",
@@ -458,6 +503,7 @@ class KeychainSecretProvider:
         try:
             if self._backend == "keyring":
                 import keyring
+
                 try:
                     keyring.delete_password(self._service_name, key)
                     return True
@@ -470,28 +516,33 @@ class KeychainSecretProvider:
     def _platform_delete(self, key: str) -> bool:
         import platform
         import subprocess
+
         system = platform.system()
         try:
             if system == "Darwin":
                 result = subprocess.run(
-                    ["security", "delete-generic-password",
-                     "-s", self._service_name, "-a", key],
-                    capture_output=True, timeout=5,
+                    ["security", "delete-generic-password", "-s", self._service_name, "-a", key],
+                    capture_output=True,
+                    timeout=5,
                 )
                 return result.returncode == 0
             elif system == "Linux":
                 result = subprocess.run(
-                    ["secret-tool", "clear",
-                     "service", self._service_name, "key", key],
-                    capture_output=True, timeout=5,
+                    ["secret-tool", "clear", "service", self._service_name, "key", key],
+                    capture_output=True,
+                    timeout=5,
                 )
                 return result.returncode == 0
             elif system == "Windows":
                 result = subprocess.run(
-                    ["powershell", "-Command",
-                     f"Microsoft.PowerShell.SecretManagement.Remove-Secret"
-                     f" -Name '{self._service_name}:{key}'"],
-                    capture_output=True, timeout=5,
+                    [
+                        "powershell",
+                        "-Command",
+                        f"Microsoft.PowerShell.SecretManagement.Remove-Secret"
+                        f" -Name '{self._service_name}:{key}'",
+                    ],
+                    capture_output=True,
+                    timeout=5,
                 )
                 return result.returncode == 0
         except Exception:
@@ -527,6 +578,7 @@ class LocalEncryptedSecretProvider:
 
     def __init__(self, db_path: str = "", key_path: str = "") -> None:
         from pathlib import Path
+
         if not db_path:
             db_path = str(Path.home() / ".cogito" / "secrets_encrypted.db")
         if not key_path:
@@ -544,6 +596,7 @@ class LocalEncryptedSecretProvider:
 
     def _load_or_create_key(self) -> Any:
         from pathlib import Path
+
         try:
             from cryptography.fernet import Fernet
         except ImportError as exc:
@@ -557,9 +610,7 @@ class LocalEncryptedSecretProvider:
             try:
                 return Fernet(raw)
             except Exception as exc:
-                raise RuntimeError(
-                    f"Invalid encryption key at {self._key_path}: {exc}"
-                ) from exc
+                raise RuntimeError(f"Invalid encryption key at {self._key_path}: {exc}") from exc
         key = Fernet.generate_key()
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_path.write_bytes(key)
@@ -571,6 +622,7 @@ class LocalEncryptedSecretProvider:
 
     def _init_db(self) -> None:
         import sqlite3
+
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS secrets ("
@@ -593,11 +645,10 @@ class LocalEncryptedSecretProvider:
 
     def get_secret(self, key: str) -> SecretValue | None:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
-                row = conn.execute(
-                    "SELECT value FROM secrets WHERE key = ?", (key,)
-                ).fetchone()
+                row = conn.execute("SELECT value FROM secrets WHERE key = ?", (key,)).fetchone()
                 if row is None:
                     return None
                 conn.execute(
@@ -611,23 +662,21 @@ class LocalEncryptedSecretProvider:
 
     def list_keys(self) -> list[str]:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT key FROM secrets ORDER BY key"
-                ).fetchall()
+                rows = conn.execute("SELECT key FROM secrets ORDER BY key").fetchall()
                 return [r[0] for r in rows]
         except sqlite3.OperationalError:
             return []
 
     def set_secret(self, key: str, value: str) -> None:
         import sqlite3
+
         now = datetime.now(UTC).isoformat()
         encrypted = self._encrypt(value)
         with sqlite3.connect(self._db_path) as conn:
-            existing = conn.execute(
-                "SELECT 1 FROM secrets WHERE key = ?", (key,)
-            ).fetchone()
+            existing = conn.execute("SELECT 1 FROM secrets WHERE key = ?", (key,)).fetchone()
             if existing:
                 conn.execute(
                     "UPDATE secrets SET value = ?, updated_at = ? WHERE key = ?",
@@ -635,23 +684,22 @@ class LocalEncryptedSecretProvider:
                 )
             else:
                 conn.execute(
-                    "INSERT INTO secrets (key, value, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?)",
+                    "INSERT INTO secrets (key, value, created_at, updated_at) VALUES (?, ?, ?, ?)",
                     (key, encrypted, now, now),
                 )
             conn.commit()
 
     def delete_secret(self, key: str) -> bool:
         import sqlite3
+
         with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute(
-                "DELETE FROM secrets WHERE key = ?", (key,)
-            )
+            cur = conn.execute("DELETE FROM secrets WHERE key = ?", (key,))
             conn.commit()
             return cur.rowcount > 0
 
     def rotate_secret(self, key: str, new_value: str) -> bool:
         import sqlite3
+
         now = datetime.now(UTC).isoformat()
         encrypted = self._encrypt(new_value)
         with sqlite3.connect(self._db_path) as conn:
@@ -664,11 +712,12 @@ class LocalEncryptedSecretProvider:
 
     def metadata(self, key: str) -> dict[str, Any] | None:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
                 row = conn.execute(
-                    "SELECT key, created_at, updated_at, last_used_at"
-                    " FROM secrets WHERE key = ?", (key,)
+                    "SELECT key, created_at, updated_at, last_used_at FROM secrets WHERE key = ?",
+                    (key,),
                 ).fetchone()
                 if row is None:
                     return None
@@ -683,11 +732,11 @@ class LocalEncryptedSecretProvider:
 
     def all_metadata(self) -> list[dict[str, Any]]:
         import sqlite3
+
         try:
             with sqlite3.connect(self._db_path) as conn:
                 rows = conn.execute(
-                    "SELECT key, created_at, updated_at, last_used_at"
-                    " FROM secrets ORDER BY key"
+                    "SELECT key, created_at, updated_at, last_used_at FROM secrets ORDER BY key"
                 ).fetchall()
                 return [
                     {
@@ -728,6 +777,7 @@ class DevSqliteSecretProvider:
         )
         if not db_path or db_path == ":memory:":
             import tempfile
+
             db_path = tempfile.mktemp(suffix=".db")
         self._inner = LocalSecretsProvider(db_path=db_path)
 

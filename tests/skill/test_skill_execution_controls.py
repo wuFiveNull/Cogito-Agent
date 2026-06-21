@@ -18,6 +18,7 @@ from cogito_agent.skill import SkillRunner
 
 def _make_cap_manifest(name: str = "test_cap"):
     from cogito_agent.shared import CapabilityManifest, CapabilityType, Permission, RiskLevel
+
     return CapabilityManifest(
         name=name,
         version="1.0",
@@ -44,9 +45,11 @@ def test_per_step_timeout_fails_step(db_runner: SkillRunner) -> None:
 
     registry.register("slow", _make_cap_manifest("slow"), _slow)
     runner._cap_reg = registry
-    runner._policy = PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.allow),
-    ])
+    runner._policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.allow),
+        ]
+    )
 
     manifest = SkillManifest(
         name="timeout-test",
@@ -56,7 +59,9 @@ def test_per_step_timeout_fails_step(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="t1", name="slow", kind=StepKind.capability,
+                id="t1",
+                name="slow",
+                kind=StepKind.capability,
                 uses_capability="slow",
                 input_mapping={"text": "$input.val"},
                 execution=StepExecutionConfig(timeout_seconds=0.01),
@@ -84,9 +89,11 @@ def test_retry_succeeds_on_second_attempt(db_runner: SkillRunner) -> None:
 
     registry.register("flaky", _make_cap_manifest("flaky"), _flaky)
     runner._cap_reg = registry
-    runner._policy = PolicyEngine(rules=[
-        PolicyRule("*", "*", "*", DecisionType.allow),
-    ])
+    runner._policy = PolicyEngine(
+        rules=[
+            PolicyRule("*", "*", "*", DecisionType.allow),
+        ]
+    )
 
     manifest = SkillManifest(
         name="retry-test",
@@ -96,7 +103,9 @@ def test_retry_succeeds_on_second_attempt(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="r1", name="flaky", kind=StepKind.capability,
+                id="r1",
+                name="flaky",
+                kind=StepKind.capability,
                 uses_capability="flaky",
                 input_mapping={"text": "$input.val"},
                 execution=StepExecutionConfig(retry_count=1, retry_delay_seconds=0.01),
@@ -121,12 +130,16 @@ def test_failure_policy_skip_continues_to_next_step(db_runner: SkillRunner) -> N
         outputs={},
         steps=[
             SkillStep(
-                id="s1", name="failing", kind=StepKind.capability,
+                id="s1",
+                name="failing",
+                kind=StepKind.capability,
                 uses_capability="nonexistent.tool",
                 on_error=OnError.skip,
             ),
             SkillStep(
-                id="s2", name="after", kind=StepKind.transform,
+                id="s2",
+                name="after",
+                kind=StepKind.transform,
                 input_mapping={"out": "$ok"},
             ),
         ],
@@ -149,12 +162,16 @@ def test_failure_policy_stop_breaks_execution(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="b1", name="failing", kind=StepKind.capability,
+                id="b1",
+                name="failing",
+                kind=StepKind.capability,
                 uses_capability="nonexistent.tool",
                 on_error=OnError.stop,
             ),
             SkillStep(
-                id="b2", name="after", kind=StepKind.transform,
+                id="b2",
+                name="after",
+                kind=StepKind.transform,
                 input_mapping={"out": "$ok"},
             ),
         ],
@@ -176,7 +193,9 @@ def test_output_schema_validation_valid_passes(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="o1", name="valid", kind=StepKind.transform,
+                id="o1",
+                name="valid",
+                kind=StepKind.transform,
                 input_mapping={"x": "$ok"},
                 output_schema={"type": "object", "properties": {"x": {"type": "string"}}},
             ),
@@ -199,7 +218,9 @@ def test_output_schema_validation_invalid_fails(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="o1", name="invalid", kind=StepKind.transform,
+                id="o1",
+                name="invalid",
+                kind=StepKind.transform,
                 input_mapping={"x": "$ok"},
                 output_schema={
                     "type": "object",
@@ -225,11 +246,15 @@ def test_budget_enforcement_stops_execution(db_runner: SkillRunner) -> None:
         outputs={},
         steps=[
             SkillStep(
-                id="b1", name="first", kind=StepKind.transform,
+                id="b1",
+                name="first",
+                kind=StepKind.transform,
                 input_mapping={"out": "$input.val"},
             ),
             SkillStep(
-                id="b2", name="limited", kind=StepKind.transform,
+                id="b2",
+                name="limited",
+                kind=StepKind.transform,
                 input_mapping={"out": "$input.val"},
                 execution=StepExecutionConfig(max_budget_cost=0.0),
             ),
