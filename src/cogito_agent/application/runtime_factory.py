@@ -62,8 +62,23 @@ def build_runtime_kernel(
     memory_retrieval_service: Any = None,
     **runtime_options: Any,
 ) -> RuntimeKernel:
-    """Application composition root for the provider-neutral runtime kernel."""
+    """Application composition root for the provider-neutral runtime kernel.
+
+    If ``model_adapter`` is not provided, attempts auto-detection via
+    config — callers (CLI, API) no longer need to build the adapter
+    themselves.
+    """
     policy = policy_engine or PolicyEngine()
+
+    # Auto-detect model adapter if not explicitly provided
+    if model_adapter is None:
+        try:
+            from cogito_agent.config.loader import build_multimodel_adapter, load_config
+
+            model_adapter = build_multimodel_adapter(load_config())
+        except Exception:
+            pass  # No model adapter — kernel runs in echo-only mode
+
     services = db.create_runtime_services(
         capability_registry=capability_registry,
         policy_engine=policy,

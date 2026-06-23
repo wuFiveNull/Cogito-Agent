@@ -34,7 +34,7 @@ def run_cli(db_path: str = ":memory:", *,
         _run_connect_mode(connect_url)
         return
 
-    from .config_manager import build_model_adapter_from_config, get_config
+    from .config_manager import get_config
 
     db = Database(db_path)
     db.initialize()
@@ -50,12 +50,7 @@ def run_cli(db_path: str = ":memory:", *,
 
     cfg = get_config()
     current_provider = cfg.get("model.provider", "mock")
-    from cogito_agent.config.loader import build_multimodel_adapter, load_config
-
-    adapter = build_multimodel_adapter(load_config())
-    if adapter is None:
-        adapter = build_model_adapter_from_config()
-    kernel = build_runtime_kernel(db, model_adapter=adapter, workspace_path=default_workspace_path(workspace_id))
+    kernel = build_runtime_kernel(db, workspace_path=default_workspace_path(workspace_id))
 
     print("Cogito-Agent CLI  (type 'exit' to quit, '/help' for commands)")
     print("-" * 50)
