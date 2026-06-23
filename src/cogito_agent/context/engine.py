@@ -4,33 +4,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import BaseModel, Field
-
-
-class ContextItem(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    source_type: str
-    source_id: str
-    text: str
-    rank: int = 0
-    token_estimate: int = 0
-    included: bool = True
-    reason: str = ""
-    role: str = ""
-    tool_call_id: str = ""
-    freshness_score: float = 0.5
-    trust_score: float = 0.5
-    evidence: list[dict[str, Any]] = Field(default_factory=list)
-    stable_ref: str = ""
-    exclusion_reason: str = ""
-
-    def model_post_init(self, __context: Any) -> None:
-        if not self.stable_ref:
-            self.stable_ref = (
-                f"{self.source_type}:{self.source_id}"
-                if self.source_id
-                else f"{self.source_type}:{self.id}"
-            )
+from cogito_agent.shared.context_item import ContextItem
 
 
 class ContextTraceSink(Protocol):

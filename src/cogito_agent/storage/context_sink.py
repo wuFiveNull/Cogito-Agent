@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-from cogito_agent.context.engine import ContextItem
+from cogito_agent.shared.context_item import ContextItem
 
 from .database import Database
 

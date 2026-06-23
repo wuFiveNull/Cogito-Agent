@@ -372,6 +372,7 @@ class Database:
         tracer = Tracer(self)
         audit = AuditLogger(self)
         executor = None
+        tool_schema_provider = None
         if capability_registry is not None:
             executor = GovernedCapabilityExecutor(
                 capability_registry,
@@ -382,6 +383,16 @@ class Database:
                 guardians=default_guardians(),
                 artifact_writer=artifact_writer,
             )
+            # ToolSchemaProvider adapter — keeps capability.schemas out of runtime
+            class _CapToolSchemaProvider:
+                def __init__(self, cap_reg):
+                    self._cap_reg = cap_reg
+                def get_tool_schemas(self, actor="assistant"):
+                    from cogito_agent.capability.schemas import filter_available_tools, manifest_to_tool_schema
+                    manifests = self._cap_reg.list_tools()
+                    available = filter_available_tools(manifests, actor=actor)
+                    return [manifest_to_tool_schema(m) for m in available]
+            tool_schema_provider = _CapToolSchemaProvider(capability_registry)
         return RuntimeServices(
             persistence=SqliteRuntimePersistence(self),
             tracer=tracer,
@@ -389,6 +400,7 @@ class Database:
             policy=policy,
             capability_catalog=capability_registry,
             capability_executor=executor,
+            tool_schema_provider=tool_schema_provider,
         )
 
     def create_subagent_persistence(self) -> Any:

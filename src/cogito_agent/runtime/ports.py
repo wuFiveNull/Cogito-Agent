@@ -170,6 +170,9 @@ class RuntimeServices:
     policy: RuntimePolicyPort
     capability_catalog: RuntimeCapabilityCatalogPort | None = None
     capability_executor: RuntimeCapabilityExecutorPort | None = None
+    tool_schema_provider: ToolSchemaProvider | None = None
+    consolidation: ConsolidationPort | None = None
+    memory_retrieval: RuntimeMemoryRetrievalPort | None = None
 
 
 @runtime_checkable
@@ -207,6 +210,46 @@ class SubagentPersistencePort(Protocol):
 @runtime_checkable
 class SubagentPersistenceProvider(Protocol):
     def create_subagent_persistence(self) -> SubagentPersistencePort: ...
+
+
+class ToolSchemaProvider(Protocol):
+    """Provides OpenAI-compatible tool schemas from the capability registry.
+
+    Wraps ``filter_available_tools`` / ``manifest_to_tool_schema``
+    so that ``runtime`` never needs to import ``capability.schemas``.
+    """
+
+    def get_tool_schemas(self, actor: str = "assistant") -> list[dict[str, object]]: ...
+
+
+class ConsolidationPort(Protocol):
+    """Post-turn memory consolidation, extracted behind a port so
+    ``runtime`` does not import ``ConsolidationService`` directly.
+    """
+
+    def after_turn(
+        self,
+        messages: list[dict[str, object]],
+        workspace_id: str,
+        session_id: str = "",
+    ) -> None: ...
+
+    def consolidation_backlog(self, workspace_id: str, message_count: int) -> int: ...
+
+    def get_trim_point(self, workspace_id: str, message_count: int) -> int: ...
+
+
+class RuntimeMemoryRetrievalPort(Protocol):
+    """Memory retrieval for context building, extracted behind a port so
+    ``runtime`` does not import ``MemoryRetrievalService`` directly.
+    """
+
+    def recall(
+        self,
+        query_context: Any,
+        limit: int = 5,
+        min_score: float = 0.35,
+    ) -> Any: ...
 
 
 class SubagentRuntimeServicesProvider(

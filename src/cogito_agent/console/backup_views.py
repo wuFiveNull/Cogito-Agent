@@ -21,12 +21,12 @@ backup_router = APIRouter()
 WORKSPACE_ID = "default"
 
 
-def _service() -> BackupApplicationService:
-    from cogito_agent.api.app import reset_application_state_for_restore
+def _service(request: Request) -> BackupApplicationService:
     from cogito_agent.storage import get_db
 
     db = get_db()
     settings = Settings.get().storage
+    km = getattr(request.app.state, "kernel_manager", None)
 
     def audit_restored(name: str, workspace_id: str) -> None:
         log_audit(
@@ -37,7 +37,7 @@ def _service() -> BackupApplicationService:
     return BackupApplicationService(
         db_path=db.path,
         backup_dir=settings.backup_dir,
-        reset_before_restore=reset_application_state_for_restore,
+        reset_before_restore=km.get_reset_callback() if km else None,
         restore_completed=audit_restored,
     )
 
@@ -63,7 +63,7 @@ def _context(
 
 @backup_router.get("", response_class=HTMLResponse, include_in_schema=False)
 async def backup_page(request: Request) -> HTMLResponse:
-    service = _service()
+    service = _service(request)
     return templates.TemplateResponse(
         request,
         "console/backups.html",
@@ -73,7 +73,7 @@ async def backup_page(request: Request) -> HTMLResponse:
 
 @backup_router.post("/create", response_class=HTMLResponse, include_in_schema=False)
 async def backup_create(request: Request) -> HTMLResponse:
-    service = _service()
+    service = _service(request)
     try:
         report = service.create(workspace_id=WORKSPACE_ID)
         context = _context(request, service, report=report)
@@ -84,7 +84,7 @@ async def backup_create(request: Request) -> HTMLResponse:
 
 @backup_router.post("/preflight", response_class=HTMLResponse, include_in_schema=False)
 async def backup_preflight(request: Request, name: str = Form(...)) -> HTMLResponse:
-    service = _service()
+    service = _service(request)
     try:
         context = _context(request, service, report=service.preflight(name))
         context["selected_backup"] = redact_html(name)
@@ -99,7 +99,7 @@ async def backup_restore(
     name: str = Form(...),
     confirmation: str = Form(...),
 ) -> HTMLResponse:
-    service = _service()
+    service = _service(request)
     try:
         report = service.restore(
             name,

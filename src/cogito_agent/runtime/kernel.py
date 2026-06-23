@@ -11,10 +11,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from cogito_agent.queue.message import InboundMessage
 
-from cogito_agent.capability.schemas import (
-    filter_available_tools,
-    manifest_to_tool_schema,
-)
 from cogito_agent.context import (
     ContextEngine,
     ContextItem,
@@ -127,6 +123,7 @@ class RuntimeKernel:
         self._budget = budget or TurnBudget()
         self._model_adapter = model_adapter
         resolved = services
+        self._services = resolved
         self._cap_reg = resolved.capability_catalog
         self._policy = resolved.policy
         self._persistence = resolved.persistence
@@ -244,11 +241,10 @@ class RuntimeKernel:
         raise last_error  # type: ignore[misc]
 
     def _get_tool_schemas(self, actor: str = "assistant") -> list[dict[str, object]]:
-        if not self._cap_reg:
-            return []
-        manifests = self._cap_reg.list_tools()
-        available = filter_available_tools(manifests, actor=actor)
-        return [manifest_to_tool_schema(m) for m in available]
+        provider = self._services.tool_schema_provider
+        if provider is not None:
+            return provider.get_tool_schemas(actor=actor)
+        return []
 
     def process(self, event: RuntimeEvent) -> TurnResult:
         trace, span = self._prepare_turn_setup(event, "process_turn")
