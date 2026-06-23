@@ -45,11 +45,35 @@ CONSOLE_SESSION_ID = "console-default"
 CONSOLE_WORKSPACE_ID = "default"
 
 
-def _ensure_console_session() -> str:
+def _get_db(request: Request):
+    """获取 Database 连接——优先从 app.state，回退到全局单例。"""
+    db = getattr(request.app.state, "db", None)
+    if db is not None:
+        return db
     from cogito_agent.storage import get_db
+    return get_db()
+
+
+def _get_kernel_manager(request: Request):
+    """获取 KernelManager——优先从 app.state，回退到全局 get_kernel()。
+
+    独立 Console 模式：app.state.kernel_manager 由 console/app.py 设置。
+    嵌入式 API 模式：回退到 api/app.py 的全局 get_kernel()。
+    """
+    km = getattr(request.app.state, "kernel_manager", None)
+    if km is not None:
+        return km
+    # 回退：直接返回 kernel 对象（兼容嵌入式 API 模式）
+    from cogito_agent.api.app import get_kernel
+    return get_kernel()
+
+
+def _ensure_console_session(request: Request | None = None) -> str:
+    from cogito_agent.storage import get_db as _get_global_db
     from cogito_agent.storage.repositories import SessionRepository
 
-    db = get_db()
+    db = _get_db(request) if request is not None else _get_global_db()
+    repo = SessionRepository(db)
     repo = SessionRepository(db)
     sess = repo.get_by_id(CONSOLE_SESSION_ID, CONSOLE_WORKSPACE_ID)
     if sess is None:
@@ -108,14 +132,13 @@ async def overview_page(request: Request) -> HTMLResponse:
 @console_router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
 async def chat_page(request: Request) -> HTMLResponse:
     from cogito_agent.console.services import ChatWorkspaceService
-    from cogito_agent.storage import get_db
     from cogito_agent.storage.repositories import (
         WorkspaceRepository,
     )
 
-    _ensure_console_session()
+    _ensure_console_session(request)
 
-    db = get_db()
+    db = _get_db(request)
     ws_repo = WorkspaceRepository(db)
     ws_repo.get_by_id(CONSOLE_WORKSPACE_ID)
     sessions = ChatWorkspaceService(db).list_sessions(CONSOLE_WORKSPACE_ID)
@@ -147,9 +170,7 @@ async def chat_send(
     session_id: str = Form(CONSOLE_SESSION_ID),
     workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
 ) -> HTMLResponse:
-    from cogito_agent.api.app import get_chat_service
     from cogito_agent.shared import EventSource, EventType, RuntimeEvent
-    from cogito_agent.storage import get_db
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
     message = message.strip()
@@ -166,8 +187,14 @@ async def chat_send(
         )
 
     try:
-        db = get_db()
-        chat_service = get_chat_service()
+        db = _get_db(request)
+        km = _get_kernel_manager(request)
+        # km 可能是 RuntimeKernel 或 KernelManager，都支持 get_chat_service
+        if hasattr(km, "get_chat_service"):
+            chat_service = km.get_chat_service()
+        else:
+            from cogito_agent.application import ChatApplicationService
+            chat_service = ChatApplicationService(km)  # type: ignore[misc]
 
         from cogito_agent.application import WorkspaceApplicationService
         from cogito_agent.storage.repositories import SessionRepository
@@ -244,10 +271,8 @@ async def chat_stream_route(
     session_id: str = Form(CONSOLE_SESSION_ID),
     workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
 ) -> StreamingResponse:
-    from cogito_agent.api.app import get_chat_service
     from cogito_agent.cli.config_manager import get_config
     from cogito_agent.shared import EventSource, EventType, RuntimeEvent, StreamEventType
-    from cogito_agent.storage import get_db
     from cogito_agent.shared.redaction import RedactionHelper
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -256,8 +281,13 @@ async def chat_stream_route(
 
     def event_stream() -> Any:
         try:
-            db = get_db()
-            chat_service = get_chat_service()
+            db = _get_db(request)
+            km = _get_kernel_manager(request)
+            if hasattr(km, "get_chat_service"):
+                chat_service = km.get_chat_service()
+            else:
+                from cogito_agent.application import ChatApplicationService
+                chat_service = ChatApplicationService(km)  # type: ignore[misc]
 
             from cogito_agent.application import WorkspaceApplicationService
             from cogito_agent.storage.repositories import SessionRepository

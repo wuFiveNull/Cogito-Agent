@@ -53,7 +53,7 @@ disallow_any_unimported = false
 cogito = "cogito_agent.cli:run_cli"
 cogito-demo = "cogito_agent.cli.e2e_demo:run_e2e_demo"
 cogito-daemon = "cogito_agent.cli.daemon:main"
-cogito-console = "cogito_agent.api.app:run_api"
+cogito-console = "cogito_agent.cli.console:run_console"
 
 [tool.setuptools.package-data]
 cogito_agent = [

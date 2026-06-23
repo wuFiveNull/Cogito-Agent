@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import os
 from pathlib import Path
 
@@ -55,7 +56,27 @@ __all__ = [
     "register_migration",
     "get_db",
     "reset_db",
+    "set_request_db",
 ]
+
+# ── Request-scoped DB (contextvars) ──────────────────────────────────────────
+# Allows Console/API apps to inject the per-request DB connection without
+# changing any existing ``from cogito_agent.storage import get_db`` calls.
+
+_request_db: contextvars.ContextVar[Database | None] = contextvars.ContextVar(
+    "_request_db", default=None
+)
+
+
+def set_request_db(db: Database | None) -> None:
+    """Set the request-scoped Database connection.
+
+    Used by middleware in :mod:`cogito_agent.console.app` to inject the
+    correct DB connection for each request.  When set, ``get_db()``
+    returns this connection instead of the global singleton.
+    """
+    _request_db.set(db)
+
 
 # ── Shared database singleton ─────────────────────────────────────────────
 
@@ -63,12 +84,16 @@ _db: Database | None = None
 
 
 def get_db() -> Database:
-    """Return the global Database singleton, creating & migrating it on first call.
+    """Return a ``Database`` connection.
 
-    All consumers (API endpoints, console views, CLI) should obtain their
-    ``Database`` instance through this function to share a single connection
-    and avoid redundant migration runs.
+    Resolution order:
+
+    1. Request-scoped connection (set via :func:`set_request_db`)
+    2. Global singleton (created on first call)
     """
+    ctx_db = _request_db.get()
+    if ctx_db is not None:
+        return ctx_db
     global _db
     if _db is None:
         db_path = os.environ.get("COGITO_DB_PATH", ":memory:")
