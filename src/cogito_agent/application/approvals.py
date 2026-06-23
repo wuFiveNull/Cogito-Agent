@@ -23,6 +23,8 @@ class ApprovalRepositoryPort(Protocol):
 
     def get_by_id(self, approval_id: str) -> dict[str, object] | None: ...
 
+    def list_pending(self, workspace_id: str) -> list[dict[str, object]]: ...
+
 
 class ApprovalAuditPort(Protocol):
     def log(
@@ -67,6 +69,10 @@ class ApprovalApplicationService:
             resource,
             reason,
         )
+
+    def list_pending(self, workspace_id: str) -> list[dict[str, object]]:
+        """List all pending approvals for a workspace."""
+        return self._repository.list_pending(workspace_id)
 
     def resolve(
         self,

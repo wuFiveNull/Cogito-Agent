@@ -62,6 +62,10 @@ class Outbox:
         self._db.connection.commit()
         return cursor.rowcount == 1
 
+    def list(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, Any]]:
+        """List all outbox messages (alias for list_all)."""
+        return self.list_all(workspace_id=workspace_id, limit=limit)
+
     def dismiss(self, message_id: str) -> bool:
         cursor = self._db.connection.execute(
             "UPDATE outbox_messages SET dismissed_at=?, status='skipped' WHERE id=?",

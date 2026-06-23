@@ -1,23 +1,18 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import uuid
 from typing import Any
 
 from cogito_agent.governance import AuditLogger
+from cogito_agent.retrieval import MemoryRetrievalPort
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import (
     MemoryEditRepository,
     MemoryRepository,
 )
 
-from cogito_agent.retrieval import MemoryRetrievalPort
-
 from ..embedding.service import MemoryEmbeddingIndexService
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +58,12 @@ class MemoryApplicationService:
     def set_current_context(self, workspace_id: str, trace_id: str = "") -> None:
         self._current_workspace_id = workspace_id
         self._current_trace_id = trace_id
+
+    def list(self, workspace_id: str, limit: int = 50) -> list[dict[str, object]]:
+        """List active memories for a workspace."""
+        if self._mem_repo is None:
+            return []
+        return self._mem_repo.list_by_workspace(workspace_id, limit=limit)
 
     # ── SQLite methods (backward compat, keep for Console/API) ──
 
@@ -505,7 +506,7 @@ class MemoryApplicationService:
                 )
             ws_id = self._current_workspace_id or "default"
             try:
-                from cogito_agent.retrieval.query import MemoryQueryBuilder, MemoryQueryContext
+                from cogito_agent.retrieval.query import MemoryQueryBuilder
 
                 builder = MemoryQueryBuilder()
                 ctx = builder.build(

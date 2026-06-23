@@ -13,6 +13,7 @@ pytest -k "test_name_pattern"      # Run tests matching pattern
 ruff check src/                    # Lint source
 ruff check src/ --fix              # Lint and auto-fix
 mypy src/                          # Type check (strict mode enabled)
+cogito-tui                         # Launch the TUI
 python -m build --wheel            # Build wheel package
 ```
 
@@ -55,3 +56,29 @@ python -m build --wheel            # Build wheel package
 - `api` must not write storage except through application services
 - Trace/audit/redaction is applied at every boundary (CLI, API, autonomy, drift)
 - All dynamic content in Console is HTML-escaped and redacted
+
+## TUI Architecture
+
+The TUI at ``src/cogito_agent/tui/`` replaces the old argparse CLI with a Textual-based
+full-screen terminal interface inspired by Google's gemini-cli (React+Ink).
+
+**Entry point**: ``cogito-tui`` (``cogito_agent.tui.app:main``)
+
+**Key constraints**:
+- **No direct DB access** — TUI never imports ``*Repository`` or calls
+  ``db.connection.execute()``. All data flows through Application Services
+  (``ChatApplicationService``, ``SessionApplicationService``, etc.)
+- **Extend services, not the TUI** — if a method is missing on a service,
+  add it to the service module, not to the TUI
+- **Single Database instance** — created once in ``app.main()``, injected into all
+  services, closed on ``App.on_exit()``
+
+**Component structure**:
+- ``app.py`` — ``CogitoTUI(TextualApp)`` with reactive state, service init, dialog mgmt
+- ``screens/chat_screen.py`` — Main layout: message list + composer + footer
+- ``widgets/message_item.py`` — Type-dispatch message rendering (gemini-cli HistoryItemDisplay pattern)
+- ``widgets/dialog_manager.py`` — Priority-ordered modal dialog selection
+- ``widgets/messages/factory.py`` — Decorator-based message type registry (``@register("type")``)
+- ``themes/manager.py`` — Wraps Textual ``theme`` / ``register_theme()``
+
+**DIALOG_PRIORITY** (first match wins): auth > theme > settings > model > session > memory > confirm > help

@@ -15,6 +15,10 @@ class SessionApplicationService:
         self._messages = MessageRepository(db)
         self._audit = audit or AuditLogger(db)
 
+    def list(self, workspace_id: str) -> list[dict[str, object]]:
+        """List all active sessions for a workspace."""
+        return self._sessions.list_by_workspace(workspace_id)
+
     def create(
         self,
         workspace_id: str,

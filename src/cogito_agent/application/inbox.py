@@ -7,6 +7,7 @@ class InboxOutboxPort(Protocol):
     def mark_read(self, message_id: str) -> bool: ...
     def dismiss(self, message_id: str) -> bool: ...
     def retry(self, message_id: str) -> bool: ...
+    def list(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, object]]: ...
 
 
 class InboxFeedbackPort(Protocol):
@@ -50,6 +51,10 @@ class InboxApplicationService:
         self._outbox = outbox
         self._feedback = feedback
         self._audit = audit
+
+    def list(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, object]]:
+        """List inbox items for a workspace."""
+        return self._outbox.list(workspace_id=workspace_id, limit=limit)
 
     def mark_read(self, item_id: str) -> bool:
         return self._outbox.mark_read(item_id)

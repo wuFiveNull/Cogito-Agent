@@ -26,6 +26,10 @@ class WorkspaceApplicationService:
             return existing
         return self._workspaces.create(workspace_id, name or workspace_id)
 
+    def list(self) -> list[dict[str, object]]:
+        """List all active workspaces."""
+        return self._workspaces.list_all()
+
     def create_workspace(
         self,
         name: str,
