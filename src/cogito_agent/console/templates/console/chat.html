@@ -10,8 +10,7 @@
       <button class="btn-new-chat"
               hx-post="/console/chat/sessions"
               hx-target="#session-list"
-              hx-swap="beforeend"
-              hx-on::after-request="newSession(event)"
+              hx-swap="afterbegin"
               title="New Chat">+ New Chat</button>
     </div>
     <div class="session-list" id="session-list">
@@ -23,8 +22,7 @@
            hx-get="/console/chat/sessions/{{ s.id | e }}"
            hx-target="#chat-messages"
            hx-swap="innerHTML"
-           hx-indicator="#global-spinner"
-           hx-on::after-request="switchSession('{{ s.id | e }}')">
+           hx-indicator="#global-spinner">
           <div class="session-title">{{ s.title[:40] | e if s.title else 'Chat' | e }}</div>
           <div class="session-meta">
             <span class="session-count">{{ s.message_count }} msg</span>
@@ -76,13 +74,7 @@
     </div>
 
     <div class="chat-input-area">
-      <form id="chat-form"
-            hx-post="/console/chat/send"
-            hx-target="#chat-messages"
-            hx-swap="beforeend"
-            hx-indicator="#chat-spinner"
-            hx-on::before-request="document.getElementById('chat-empty')?.remove()"
-            hx-on::after-request="this.reset(); scrollChat(); updateSessionList()">
+      <form id="chat-form">
         <input type="hidden" name="session_id" value="{{ session_id }}">
         <input type="hidden" name="workspace_id" value="{{ workspace_id }}">
         <textarea name="message"
@@ -92,7 +84,7 @@
                   required></textarea>
         <button type="submit" class="btn-send">
           <span class="btn-label">Send</span>
-          <span id="chat-spinner" class="spinner htmx-indicator"></span>
+          <span class="spinner" id="chat-spinner"></span>
         </button>
         <button type="button" class="btn-stop" id="stop-turn" onclick="stopTurn()" disabled>
           Stop
@@ -114,6 +106,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/console/static/chat-stream.js?v={{ static_version }}"></script>
 <script>
 function scrollChat() {
   var el = document.getElementById('chat-messages');
@@ -121,13 +114,11 @@ function scrollChat() {
 }
 
 function switchSession(sessionId) {
-  // Update hidden form field
   var form = document.getElementById('chat-form');
   if (form) {
     var input = form.querySelector('input[name="session_id"]');
     if (input) input.value = sessionId;
   }
-  // Deactivate all sessions, activate this one
   document.querySelectorAll('.session-item').forEach(function(el) {
     el.classList.toggle('active', el.dataset.sessionId === sessionId);
   });
@@ -136,8 +127,6 @@ function switchSession(sessionId) {
 }
 
 function newSession(event) {
-  // The new session item is already appended to #session-list
-  // Find the last .session-item and click its link to activate it
   var items = document.querySelectorAll('#session-list .session-item');
   var last = items[items.length - 1];
   if (last) {
@@ -147,33 +136,52 @@ function newSession(event) {
 }
 
 function updateSessionList() {
-  // Refresh the session list to update message counts and last preview
   htmx.ajax('GET', '/console/chat/sessions', {
     target: '#session-list',
     swap: 'innerHTML',
   });
 }
 
-function setTurnState(running) {
-  var workspace = document.querySelector('.chat-workspace');
-  var status = document.getElementById('stream-status');
-  var stop = document.getElementById('stop-turn');
-  if (workspace) workspace.dataset.streamState = running ? 'running' : 'idle';
-  if (status) status.lastElementChild.textContent = running ? 'Running' : 'Ready';
-  if (stop) stop.disabled = !running;
-}
-
-function stopTurn() {
-  var form = document.getElementById('chat-form');
-  if (form) htmx.trigger(form, 'htmx:abort');
-  setTurnState(false);
-}
-
-document.addEventListener('htmx:beforeRequest', function(event) {
-  if (event.target && event.target.id === 'chat-form') setTurnState(true);
+// Delete controls: show confirm on trash click, cancel on ✗ click
+document.getElementById('session-list')?.addEventListener('click', function(e) {
+  var target = e.target;
+  // 🗑  -> show confirm buttons
+  if (target.classList.contains('btn-del-trigger')) {
+    e.preventDefault();
+    target.style.display = 'none';
+    target.parentNode.querySelector('.del-confirm').style.display = 'inline';
+    return;
+  }
+  // ✗ -> hide confirm, restore trash
+  if (target.classList.contains('btn-confirm-no')) {
+    e.preventDefault();
+    var confirmSpan = target.closest('.del-confirm');
+    if (confirmSpan) {
+      confirmSpan.style.display = 'none';
+      confirmSpan.parentNode.querySelector('.btn-del-trigger').style.display = 'inline';
+    }
+    return;
+  }
 });
+
+// Wire htmx events via global listeners (local htmx build does not support hx-on: attributes)
 document.addEventListener('htmx:afterRequest', function(event) {
-  if (event.target && event.target.id === 'chat-form') setTurnState(false);
+  var el = event.target;
+  if (!el) return;
+
+  // New session created -> switch to it
+  if (el.matches('.btn-new-chat')) {
+    newSession(event);
+    return;
+  }
+
+  // Session history loaded -> update UI
+  if (el.matches('.session-link')) {
+    var sessionItem = el.closest('.session-item');
+    if (sessionItem && sessionItem.dataset.sessionId) {
+      switchSession(sessionItem.dataset.sessionId);
+    }
+  }
 });
 
 document.getElementById('chat-input')?.addEventListener('keydown', function(event) {

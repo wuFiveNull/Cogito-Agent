@@ -12,6 +12,19 @@ from .adapter import ModelResponse, ToolIntent
 from .codec import OpenAICompatibleCodec, ProviderMessageCodec
 
 
+def _deep_copy_tool(t: dict[str, object]) -> dict[str, object]:
+    """Deep-copy a tool dict so we can mutate names without affecting the original."""
+    result: dict[str, object] = {}
+    for k, v in t.items():
+        if isinstance(v, dict):
+            result[k] = _deep_copy_tool(v)  # type: ignore[arg-type]
+        elif isinstance(v, list):
+            result[k] = [dict(item) if isinstance(item, dict) else item for item in v]
+        else:
+            result[k] = v
+    return result
+
+
 def _merge_streaming_tool_calls(
     existing: list[ToolIntent],
     delta_tc: dict[str, object],
@@ -81,7 +94,22 @@ class OpenAICompatibleAdapter:
         if "max_tokens" in kwargs:
             body["max_tokens"] = kwargs["max_tokens"]
         if "tools" in kwargs:
-            body["tools"] = kwargs["tools"]
+            tools = kwargs["tools"]
+            if isinstance(tools, list):
+                # Some providers (e.g. DeepSeek) reject dots in function names.
+                # Sanitize: "." -> "_" and ":" -> "_" to match [a-zA-Z0-9_-]+
+                sanitized: list[dict[str, object]] = []
+                for t in tools:
+                    t_copy = _deep_copy_tool(t)
+                    fn = t_copy.get("function", {})
+                    if isinstance(fn, dict):
+                        raw = fn.get("name", "")
+                        if isinstance(raw, str):
+                            fn["name"] = raw.replace(".", "_").replace(":", "_")
+                    sanitized.append(t_copy)
+                body["tools"] = sanitized
+            else:
+                body["tools"] = tools
         if kwargs.get("stream"):
             body["stream"] = True
         return body
@@ -231,19 +259,19 @@ class OpenAICompatibleAdapter:
 
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
-                buf = ""
+                buf = b""
                 while True:
-                    chunk = resp.read(1)
+                    chunk = resp.read(4096)
                     if not chunk:
                         break
-                    buf += chunk.decode("utf-8", errors="replace")
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        line = line.strip()
-                        if not line or line.startswith(":"):
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        line_str = line.strip().decode("utf-8", errors="replace")
+                        if not line_str or line_str.startswith(":"):
                             continue
-                        if line.startswith("data: "):
-                            payload = line[6:]
+                        if line_str.startswith("data: "):
+                            payload = line_str[6:]
                             if payload == "[DONE]":
                                 return
                             try:
@@ -304,7 +332,12 @@ class OpenAICompatibleAdapter:
                                     yield "[TOOL_CALLS]"
                                 return
         except urllib.error.HTTPError as e:
-            yield f"[stream error: HTTP {e.code}]"
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            yield f"[stream error: HTTP {e.code} {detail}]"
         except Exception as e:
             yield f"[stream error: {e}]"
 

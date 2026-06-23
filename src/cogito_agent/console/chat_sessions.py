@@ -19,7 +19,7 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _get_db_and_repos() -> tuple[Any, Any, Any, Any]:
-    from cogito_agent.api.app import get_db
+    from cogito_agent.storage import get_db
     from cogito_agent.storage.repositories import (
         MessageRepository,
         SessionRepository,
@@ -34,14 +34,14 @@ def _get_db_and_repos() -> tuple[Any, Any, Any, Any]:
 
 
 def _ensure_workspace(ws_repo: Any) -> dict[str, object]:
-    from cogito_agent.api.app import get_db
+    from cogito_agent.storage import get_db
 
     del ws_repo
     return WorkspaceApplicationService(get_db()).ensure_workspace(CONSOLE_WORKSPACE_ID)
 
 
 def _session_commands() -> SessionApplicationService:
-    from cogito_agent.api.app import get_db
+    from cogito_agent.storage import get_db
 
     return SessionApplicationService(get_db())
 

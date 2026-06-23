@@ -30,9 +30,9 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _get_db() -> _Database:
-    from cogito_agent.api.app import get_db as _get_shared_db
+    from cogito_agent.storage import get_db
 
-    return _get_shared_db()
+    return get_db()
 
 
 def _ensure_workspace(workspace_id: str) -> None:
@@ -75,30 +75,33 @@ def _list_audit(
         for _ in range(5):
             params.append(like)
 
+    cutoff = ""
     if time_range:
         days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
         days = days_map.get(time_range, 0)
         if days:
             cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-            where_clauses.append("al.created_at >= ?")
-            params.append(cutoff)
 
     where = ""
     if where_clauses:
         where = "WHERE " + " AND ".join(where_clauses)
 
-    sql = f"SELECT al.* FROM audit_logs al {where} ORDER BY al.created_at DESC LIMIT ?"
-    params.append(limit)
-    rows = db.connection.execute(sql, params).fetchall()
+    from cogito_agent.storage.repositories import AuditRepository
+    rows = AuditRepository(db).list_by_advanced_filters(
+        workspace_id=workspace_id,
+        actor=actor or "",
+        operation=operation or "",
+        q=q or "",
+        since=cutoff if time_range else "",
+        limit=limit,
+    )
     return [dict(r) for r in rows]
 
 
 def _audit_stats(workspace_id: str) -> dict[str, int]:
     db = _get_db()
-    cur = db.connection
-    wc = "WHERE workspace_id=?" if workspace_id != "*" else ""
-    params = (workspace_id,) if workspace_id != "*" else ()
-    total = cur.execute(f"SELECT COUNT(*) FROM audit_logs {wc}", params).fetchone()[0]
+    from cogito_agent.storage.repositories import AuditRepository
+    total = AuditRepository(db).count_by_filters(workspace_id=workspace_id)
     return {"total": total}
 
 
@@ -150,8 +153,8 @@ async def audit_page(
 async def audit_detail(request: Request, audit_id: str) -> HTMLResponse:
     _ensure_workspace(CONSOLE_WORKSPACE_ID)
     db = _get_db()
-    cur = db.connection.execute("SELECT * FROM audit_logs WHERE id=?", (audit_id,))
-    row = cur.fetchone()
+    from cogito_agent.storage.repositories import AuditRepository
+    row = AuditRepository(db).get_by_id(audit_id)
     if row is None:
         error_ctx: dict[str, object] = {
             "request": request,

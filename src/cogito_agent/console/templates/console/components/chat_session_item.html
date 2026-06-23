@@ -3,8 +3,7 @@
      hx-get="/console/chat/sessions/{{ session.id | e }}"
      hx-target="#chat-messages"
      hx-swap="innerHTML"
-     hx-indicator="#global-spinner"
-     hx-on::after-request="switchSession('{{ session.id | e }}')">
+     hx-indicator="#global-spinner">
     <div class="session-title">{{ session.title[:40] | e if session.title else 'Chat' | e }}</div>
     <div class="session-meta">
       <span class="session-count">0 msg</span>
@@ -16,13 +15,17 @@
             title="Rename">Edit</button>
     <button class="btn-icon"
             hx-post="/console/chat/sessions/{{ session.id | e }}/branch"
-            hx-target="#session-list" hx-swap="beforeend" title="Branch">Fork</button>
-    <button class="btn-icon btn-archive"
-            hx-post="/console/chat/sessions/{{ session.id | e }}/archive"
-            hx-confirm="Archive this session?"
-            hx-target="closest .session-item"
-            hx-swap="outerHTML"
-            title="Archive">X</button>
+            hx-target="#session-list" hx-swap="afterbegin" title="Branch">Fork</button>
+    <div class="delete-controls">
+      <button class="btn-icon btn-archive btn-del-trigger" title="Delete this session">🗑</button>
+      <span class="del-confirm" style="display:none">
+        <button class="btn-icon btn-confirm-yes" title="Confirm delete"
+                hx-post="/console/chat/sessions/{{ session.id | e }}/archive"
+                hx-target="closest .session-item"
+                hx-swap="outerHTML">✓</button>
+        <button class="btn-icon btn-confirm-no" title="Cancel">✗</button>
+      </span>
+    </div>
   </div>
   <form class="session-rename" hidden
         hx-post="/console/chat/sessions/{{ session.id | e }}/rename"

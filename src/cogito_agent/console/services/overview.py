@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -15,16 +14,21 @@ from cogito_agent.console.status import build_status
 from cogito_agent.console.utils import csrf_token_input
 from cogito_agent.console.utils import menu_items as _menu_items
 from cogito_agent.storage import Database
-from cogito_agent.storage.repositories import ApprovalRepository
+from cogito_agent.storage import get_db as _get_db
+from cogito_agent.storage.repositories import (
+    ApprovalRepository,
+    DecisionRepository,
+    DriftRunRepository,
+    DriftStateRepository,
+    MemoryItemRepository,
+    ModelCallRepository,
+    OutboxRepository,
+    ToolCallRepository,
+    TraceRepository,
+)
 from cogito_agent.version import APP_VERSION
 
 from .base import BaseConsoleService
-
-
-def _content_id(content: str) -> str:
-    import hashlib
-
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 class ConsoleOverviewService(BaseConsoleService):
@@ -32,12 +36,7 @@ class ConsoleOverviewService(BaseConsoleService):
         self._db: Database | None = None
 
     def _get_db(self) -> Database:
-        if self._db is None:
-            path = os.environ.get("COGITO_DB_PATH", ":memory:")
-            self._db = Database(path)
-            self._db.initialize()
-            self._db.migrate()
-        return self._db
+        return _get_db()
 
     def build_page_context(
         self,
@@ -100,33 +99,18 @@ class ConsoleOverviewService(BaseConsoleService):
             pending_approvals = []
 
         try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM outbox_messages "
-                "WHERE status IN ('failed', 'dead_letter')"
-            )
-            row = cur.fetchone()
-            failed_deliveries = row["cnt"] if row else 0
+            outbox_repo = OutboxRepository(db)
+            failed_deliveries = outbox_repo.count_by_status(("failed", "dead_letter"))
+            failed_delivery_items = outbox_repo.list_failed(limit=5)
         except Exception:
             failed_deliveries = 0
-
-        try:
-            cur = db.connection.execute(
-                "SELECT id, title, last_error FROM outbox_messages "
-                "WHERE status IN ('failed', 'dead_letter') "
-                "ORDER BY created_at DESC LIMIT 5"
-            )
-            failed_delivery_items = [dict(r) for r in cur.fetchall()]
-        except Exception:
             failed_delivery_items = []
 
         try:
-            from cogito_agent.storage import Database
-            db = Database()
-            rows = db.connection.execute(
-                "SELECT id, summary, memory_type FROM memory_items"
-                " WHERE status='active' AND memory_type != '_recent_context'"
-                " ORDER BY updated_at DESC LIMIT 10"
-            ).fetchall()
+            mem_repo = MemoryItemRepository(db)
+            rows = mem_repo.list_active(
+                "default", exclude_type="_recent_context", limit=10
+            )
             pending_candidates = [{
                 "id": str(r["id"])[:16],
                 "text": str(r["summary"]),
@@ -137,24 +121,11 @@ class ConsoleOverviewService(BaseConsoleService):
 
         cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
         try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM drift_runs WHERE status='failed' AND created_at >= ?",
-                (cutoff,),
-            )
-            row = cur.fetchone()
-            failed_drift_runs = row["cnt"] if row else 0
+            drift_repo = DriftRunRepository(db)
+            failed_drift_runs = drift_repo.count_failed(since=cutoff)
+            failed_drift_items = drift_repo.list_failed(since=cutoff, limit=5)
         except Exception:
             failed_drift_runs = 0
-
-        try:
-            cur = db.connection.execute(
-                "SELECT id, skill_name, error_message FROM drift_runs "
-                "WHERE status='failed' AND created_at >= ? "
-                "ORDER BY created_at DESC LIMIT 5",
-                (cutoff,),
-            )
-            failed_drift_items = [dict(r) for r in cur.fetchall()]
-        except Exception:
             failed_drift_items = []
 
         total_issues = (
@@ -182,9 +153,8 @@ class ConsoleOverviewService(BaseConsoleService):
         drift_ok = False
         drift_msg = "Drift runtime not available"
         try:
-            db = self._get_db()
-            cur = db.connection.execute("SELECT enabled FROM drift_state WHERE id='main'")
-            row = cur.fetchone()
+            drift_state_repo = DriftStateRepository(self._get_db())
+            row = drift_state_repo.get()
             if row is not None:
                 drift_ok = True
                 drift_msg = f"Drift {'enabled' if row['enabled'] else 'disabled'}"
@@ -209,39 +179,30 @@ class ConsoleOverviewService(BaseConsoleService):
         events: list[dict[str, Any]] = []
 
         try:
-            cur = db.connection.execute(
-                "SELECT id, status, started_at FROM traces ORDER BY started_at DESC LIMIT 10"
-            )
-            for row in cur.fetchall():
-                events.append(
-                    {
-                        "type": "trace",
-                        "id": row["id"],
-                        "status": row["status"],
-                        "timestamp": row["started_at"],
-                        "summary": f"Trace {row['status']}",
-                        "url": f"/console/traces/{row['id']}",
-                    }
-                )
+            trace_repo = TraceRepository(db)
+            for row in trace_repo.list_by_workspace("default", limit=10):
+                events.append({
+                    "type": "trace",
+                    "id": row["id"],
+                    "status": row["status"],
+                    "timestamp": row["started_at"],
+                    "summary": f"Trace {row['status']}",
+                    "url": f"/console/traces/{row['id']}",
+                })
         except Exception:
             pass
 
         try:
-            cur = db.connection.execute(
-                "SELECT id, skill_name, status, created_at FROM drift_runs "
-                "ORDER BY created_at DESC LIMIT 5"
-            )
-            for row in cur.fetchall():
-                events.append(
-                    {
-                        "type": "drift",
-                        "id": row["id"],
-                        "status": row["status"],
-                        "timestamp": row["created_at"],
-                        "summary": f"Drift: {row['skill_name']} ({row['status']})",
-                        "url": f"/console/drift/runs/{row['id']}",
-                    }
-                )
+            drift_repo = DriftRunRepository(db)
+            for row in drift_repo.list_by_workspace("default", limit=5):
+                events.append({
+                    "type": "drift",
+                    "id": row["id"],
+                    "status": row["status"],
+                    "timestamp": row["created_at"],
+                    "summary": f"Drift: {row['skill_name']} ({row['status']})",
+                    "url": f"/console/drift/runs/{row['id']}",
+                })
         except Exception:
             pass
 
@@ -251,16 +212,14 @@ class ConsoleOverviewService(BaseConsoleService):
             store = DecisionStore(db)
             decisions = store.list_decisions(workspace_id="*", limit=5)
             for dec in decisions:
-                events.append(
-                    {
-                        "type": "decision",
-                        "id": dec["id"],
-                        "status": dec.get("action", ""),
-                        "timestamp": dec.get("created_at", ""),
-                        "summary": f"Decision: {dec.get('action', 'unknown')}",
-                        "url": f"/console/autonomy/decisions/{dec['id']}",
-                    }
-                )
+                events.append({
+                    "type": "decision",
+                    "id": dec["id"],
+                    "status": dec.get("action", ""),
+                    "timestamp": dec.get("created_at", ""),
+                    "summary": f"Decision: {dec.get('action', 'unknown')}",
+                    "url": f"/console/autonomy/decisions/{dec['id']}",
+                })
         except Exception:
             pass
 
@@ -270,16 +229,14 @@ class ConsoleOverviewService(BaseConsoleService):
             artifact_service = ArtifactService(db)
             artifacts = artifact_service.list_artifacts(workspace_id="default", limit=5)
             for art in artifacts:
-                events.append(
-                    {
-                        "type": "artifact",
-                        "id": art["id"],
-                        "status": "created",
-                        "timestamp": art.get("created_at", ""),
-                        "summary": f"Artifact: {art.get('title', 'untitled')}",
-                        "url": f"/console/artifacts/{art['id']}",
-                    }
-                )
+                events.append({
+                    "type": "artifact",
+                    "id": art["id"],
+                    "status": "created",
+                    "timestamp": art.get("created_at", ""),
+                    "summary": f"Artifact: {art.get('title', 'untitled')}",
+                    "url": f"/console/artifacts/{art['id']}",
+                })
         except Exception:
             pass
 
@@ -307,89 +264,25 @@ class ConsoleOverviewService(BaseConsoleService):
         decisions_24h = 0
 
         try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM model_calls mc "
-                "JOIN traces t ON mc.trace_id = t.id WHERE t.started_at >= ?",
-                (cutoff_24h,),
-            )
-            row = cur.fetchone()
-            model_calls_24h = row["cnt"] if row else 0
+            mc_repo = ModelCallRepository(db)
+            model_calls_24h = mc_repo.count_by_time_range(cutoff_24h)
+            model_calls_7d = mc_repo.count_by_time_range(cutoff_7d)
+            avg_latency_24h = mc_repo.avg_latency(cutoff_24h)
         except Exception:
             pass
 
         try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM model_calls mc "
-                "JOIN traces t ON mc.trace_id = t.id WHERE t.started_at >= ?",
-                (cutoff_7d,),
-            )
-            row = cur.fetchone()
-            model_calls_7d = row["cnt"] if row else 0
+            tc_repo = ToolCallRepository(db)
+            tool_calls_24h = tc_repo.count_by_time_range(cutoff_24h)
+            tool_calls_7d = tc_repo.count_by_time_range(cutoff_7d)
         except Exception:
             pass
 
         try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM tool_calls tc "
-                "JOIN traces t ON tc.trace_id = t.id WHERE t.started_at >= ?",
-                (cutoff_24h,),
-            )
-            row = cur.fetchone()
-            tool_calls_24h = row["cnt"] if row else 0
-        except Exception:
-            pass
-
-        try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM tool_calls tc "
-                "JOIN traces t ON tc.trace_id = t.id WHERE t.started_at >= ?",
-                (cutoff_7d,),
-            )
-            row = cur.fetchone()
-            tool_calls_7d = row["cnt"] if row else 0
-        except Exception:
-            pass
-
-        try:
-            cur = db.connection.execute(
-                "SELECT AVG(mc.latency_ms) AS avg_lat FROM model_calls mc "
-                "JOIN traces t ON mc.trace_id = t.id "
-                "WHERE t.started_at >= ? AND mc.latency_ms > 0",
-                (cutoff_24h,),
-            )
-            row = cur.fetchone()
-            if row and row["avg_lat"]:
-                avg_latency_24h = round(row["avg_lat"], 1)
-        except Exception:
-            pass
-
-        try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ?",
-                (cutoff_24h,),
-            )
-            row = cur.fetchone()
-            total_traces_24h = row["cnt"] if row else 0
-        except Exception:
-            pass
-
-        try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ?",
-                (cutoff_7d,),
-            )
-            row = cur.fetchone()
-            total_traces_7d = row["cnt"] if row else 0
-        except Exception:
-            pass
-
-        try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ? AND status='error'",
-                (cutoff_24h,),
-            )
-            row = cur.fetchone()
-            failed = row["cnt"] if row else 0
+            trace_repo = TraceRepository(db)
+            total_traces_24h = trace_repo.count_by_time_range(cutoff_24h)
+            total_traces_7d = trace_repo.count_by_time_range(cutoff_7d)
+            failed = trace_repo.count_failed_by_time_range(cutoff_24h)
             failure_rate_24h = (
                 round(failed / total_traces_24h * 100, 1) if total_traces_24h > 0 else 0.0
             )
@@ -397,12 +290,8 @@ class ConsoleOverviewService(BaseConsoleService):
             pass
 
         try:
-            cur = db.connection.execute(
-                "SELECT COUNT(*) AS cnt FROM notification_decisions WHERE created_at >= ?",
-                (cutoff_24h,),
-            )
-            row = cur.fetchone()
-            decisions_24h = row["cnt"] if row else 0
+            decision_repo = DecisionRepository(db)
+            decisions_24h = decision_repo.count_by_time_range(cutoff_24h)
         except Exception:
             pass
 

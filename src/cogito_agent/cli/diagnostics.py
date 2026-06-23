@@ -12,7 +12,7 @@ from typing import Any
 
 from cogito_agent.config import load_config
 from cogito_agent.storage import Database
-from cogito_agent.trace import RedactionHelper
+from cogito_agent.shared.redaction import RedactionHelper
 from cogito_agent.version import APP_VERSION
 
 _SENSITIVE_KEYS = ("secret", "password", "token", "api_key", "bearer", "credential")

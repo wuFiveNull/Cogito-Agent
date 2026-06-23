@@ -6,8 +6,8 @@ from typing import Any, cast
 
 from cogito_agent.cli.config_manager import _resolve_api_key, get_config
 from cogito_agent.models import list_providers
-from cogito_agent.models.registry import _PROVIDERS
-from cogito_agent.trace.redaction import RedactionHelper
+from cogito_agent.models.registry import get_provider_config
+from cogito_agent.shared.redaction import RedactionHelper
 
 _PROVIDER_ERRORS = {
     "PROVIDER_NOT_CONFIGURED": "Provider '{provider}' is not configured in cogito config",
@@ -34,7 +34,7 @@ def _check_secret_available() -> bool:
 
 def _get_provider_info(name: str) -> dict[str, Any]:
     """Return info dict for a provider by name."""
-    cfg: Any = _PROVIDERS.get(name, {})
+    cfg: object = get_provider_config(name) or {}
     config_data = get_config()
     return {
         "name": name,
@@ -68,7 +68,7 @@ def provider_show(args: Any) -> None:
         print(f"  Provider '{name}' not found. Known: {', '.join(sorted(providers))}")
         return
     info = _get_provider_info(name)
-    cfg: Any = _PROVIDERS.get(name, {})
+    cfg: object = get_provider_config(name) or {}
     print(f"  Name:              {name}")
     print(f"  Configured:        {'yes' if info['configured'] else 'no'}")
     print(f"  Requires secret:   {'yes' if info['requires_secret'] else 'no'}")
@@ -225,7 +225,7 @@ def provider_test(args: Any) -> None:
 
     # Resolve base_url
     if not base_url:
-        pcfg = _PROVIDERS.get(name)
+        pcfg = get_provider_config(name)
         if pcfg and hasattr(pcfg, "base_url") and pcfg.base_url:
             base_url = pcfg.base_url
             print("  [OK]  Using default base_url")

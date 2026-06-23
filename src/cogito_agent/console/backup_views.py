@@ -8,8 +8,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from cogito_agent.application import BackupApplicationService
+from cogito_agent.application.audit import log_audit
 from cogito_agent.config import Settings
-from cogito_agent.governance import AuditLogger
 from cogito_agent.version import APP_VERSION
 
 from .redaction import redact_html
@@ -22,26 +22,21 @@ WORKSPACE_ID = "default"
 
 
 def _service() -> BackupApplicationService:
-    from cogito_agent.api.app import get_db, reset_application_state_for_restore
+    from cogito_agent.api.app import reset_application_state_for_restore
+    from cogito_agent.storage import get_db
 
     db = get_db()
     settings = Settings.get().storage
 
     def audit_restored(name: str, workspace_id: str) -> None:
-        restored_db = get_db()
-        AuditLogger(restored_db).log(
-            actor_id="console",
-            action="backup.restore.completed",
-            resource=name,
-            workspace_id=workspace_id,
-            decision="allow",
+        log_audit(
+            get_db(), "console", "backup.restore.completed", name, workspace_id,
             reason="restore completed",
         )
 
     return BackupApplicationService(
         db_path=db.path,
         backup_dir=settings.backup_dir,
-        audit=AuditLogger(db),
         reset_before_restore=reset_application_state_for_restore,
         restore_completed=audit_restored,
     )

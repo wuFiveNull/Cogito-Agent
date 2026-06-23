@@ -8,6 +8,14 @@ class TraceInspector:
     def __init__(self, db: Database, redactor: RedactionHelper | None = None) -> None:
         self._db = db
         self._redactor = redactor or RedactionHelper()
+        from cogito_agent.storage.repositories import (
+            ModelCallRepository,
+            ToolCallRepository,
+            TraceRepository,
+        )
+        self._traces = TraceRepository(db)
+        self._model_calls = ModelCallRepository(db)
+        self._tool_calls = ToolCallRepository(db)
 
     def list_traces(
         self,
@@ -15,125 +23,28 @@ class TraceInspector:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, object]]:
-        if workspace_id == "*":
-            cur = self._db.connection.execute(
-                "SELECT id, workspace_id, session_id, root_event_id,"
-                " status, started_at, ended_at"
-                " FROM traces ORDER BY started_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
-        else:
-            cur = self._db.connection.execute(
-                "SELECT id, workspace_id, session_id, root_event_id,"
-                " status, started_at, ended_at"
-                " FROM traces WHERE workspace_id = ?"
-                " ORDER BY started_at DESC LIMIT ? OFFSET ?",
-                (workspace_id, limit, offset),
-            )
-        return [dict(r) for r in cur.fetchall()]
+        return self._traces.list_by_workspace(workspace_id, limit=limit, offset=offset)
 
     def get_trace_full(self, trace_id: str) -> dict[str, object] | None:
-        cur = self._db.connection.execute("SELECT * FROM traces WHERE id = ?", (trace_id,))
-        row = cur.fetchone()
-        if row is None:
+        detail = self._traces.get_detail_with_spans(trace_id)
+        if detail is None:
             return None
-        trace = dict(row)
 
-        trace["spans"] = self._get_spans(trace_id)
-        trace["model_calls"] = self._get_model_calls(trace_id)
-        trace["tool_calls"] = self._get_tool_calls(trace_id)
-        trace["audit_logs"] = self._get_audit_logs(trace_id)
-        trace["source_lineage"] = self._get_source_lineage(trace_id)
-        trace["context_items"] = self._get_context_items(trace_id)
-        trace["state_path"] = self._reconstruct_state_path(trace_id)
-        trace["skill_runs"] = self._get_skill_run_logs(trace_id)
+        detail["source_lineage"] = self._traces.get_source_lineage_by_trace(trace_id)
+        detail["context_items"] = self._traces.get_context_items_by_trace(trace_id)
+        detail["state_path"] = self._reconstruct_state_path(trace_id)
+        detail["skill_runs"] = self._get_skill_run_logs(trace_id)
 
-        return trace
-
-    def _get_spans(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM spans WHERE trace_id = ? ORDER BY started_at",
-            (trace_id,),
-        )
-        return [dict(r) for r in cur.fetchall()]
-
-    def _get_model_calls(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM model_calls WHERE trace_id = ? ORDER BY rowid",
-            (trace_id,),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            if isinstance(r.get("prompt_summary"), str):
-                r["prompt_summary"] = self._redactor.redact(r["prompt_summary"])
-            if isinstance(r.get("response_summary"), str):
-                r["response_summary"] = self._redactor.redact(r["response_summary"])
-        return rows
-
-    def _get_tool_calls(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM tool_calls WHERE trace_id = ? ORDER BY rowid",
-            (trace_id,),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            if isinstance(r.get("input_summary"), str):
-                r["input_summary"] = self._redactor.redact(r["input_summary"])
-            if isinstance(r.get("output_summary"), str):
-                r["output_summary"] = self._redactor.redact(r["output_summary"])
-        return rows
-
-    def _get_audit_logs(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM audit_logs WHERE trace_id = ? ORDER BY rowid",
-            (trace_id,),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            if isinstance(r.get("details"), str):
-                r["details"] = self._redactor.redact(r["details"])
-        return rows
-
-    def _get_source_lineage(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM source_lineage WHERE trace_id = ? ORDER BY rowid",
-            (trace_id,),
-        )
-        return [dict(r) for r in cur.fetchall()]
-
-    def _get_context_items(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM context_items WHERE trace_id = ? ORDER BY rank",
-            (trace_id,),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            if isinstance(r.get("text"), str):
-                r["text"] = self._redactor.redact(r["text"])
-        return rows
+        return detail
 
     def _get_skill_run_logs(self, trace_id: str) -> list[dict[str, object]]:
-        cur = self._db.connection.execute(
-            "SELECT * FROM skill_run_logs WHERE trace_id = ? ORDER BY rowid",
-            (trace_id,),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            sj = r.get("step_logs_json")
-            if isinstance(sj, str):
-                import json
-
-                try:
-                    r["steps"] = json.loads(sj)
-                except (json.JSONDecodeError, TypeError):
-                    r["steps"] = []
-            del r["step_logs_json"]
-        return rows
+        from cogito_agent.skill import SkillRunner
+        return SkillRunner(self._db).list_skill_run_logs_by_trace(trace_id)
 
     def _reconstruct_state_path(self, trace_id: str) -> list[dict[str, object]]:
         """Reconstruct the state transition path from spans and events."""
         path: list[dict[str, object]] = []
-        spans = self._get_spans(trace_id)
+        spans = self._traces.get_spans_by_trace(trace_id)
         for s in spans:
             kind = str(s.get("kind", ""))
             name = str(s.get("name", ""))
@@ -233,8 +144,8 @@ class TraceInspector:
                 else:
                     lines.append(f"  \u2713 {label}")
 
-        # Audit logs
-        als = trace.get("audit_logs", [])
+        # Audit logs (from get_detail_with_spans -> key is "audits")
+        als = trace.get("audits", trace.get("audit_logs", []))
         if isinstance(als, list) and als:
             lines.append("")
             lines.append(f"-- Policy Decisions ({len(als)}) --")
@@ -284,3 +195,33 @@ class TraceInspector:
 
         lines.append("=" * 60)
         return "\n".join(lines)
+
+
+def run_trace_replay(action: str, trace_id: str, db_path: str) -> None:
+    """CLI entry point for ``cogito replay list/show``."""
+    from cogito_agent.storage import Database
+
+    db = Database(db_path)
+    db.initialize()
+    inspector = TraceInspector(db)
+
+    if action == "list":
+        traces = inspector.list_traces(workspace_id="*", limit=100)
+        if not traces:
+            print("No traces found.")
+            return
+        print(f"\nTraces ({len(traces)}):")
+        for t in traces:
+            tid = str(t.get("id", ""))[:16]
+            status = str(t.get("status", ""))
+            started = str(t.get("started_at", ""))[:19]
+            print(f"  {tid}  [{status}]  {started}")
+
+    elif action == "show":
+        trace = inspector.get_trace_full(trace_id)
+        if trace is None:
+            print(f"Trace '{trace_id}' not found.")
+            return
+        print(inspector.format_trace_detail(trace))
+
+    db.close()

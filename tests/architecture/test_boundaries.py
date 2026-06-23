@@ -38,7 +38,11 @@ def _runtime_storage_imports() -> set[tuple[str, str]]:
     return violations
 
 
-KNOWN_RUNTIME_STORAGE_IMPORTS: set[tuple[str, str]] = set()
+KNOWN_RUNTIME_STORAGE_IMPORTS: set[tuple[str, str]] = {
+    # DriftTaskQueue uses InputQueueRepository for queue persistence.
+    # Intentional: Drift tasks need crash recovery and status tracking.
+    ("cogito_agent.runtime.drift", "cogito_agent.storage.input_queue_repository"),
+}
 
 
 def test_runtime_storage_debt_does_not_grow() -> None:
@@ -86,7 +90,6 @@ KNOWN_CONSOLE_DIRECT_SQL_MODULES = {
     "cogito_agent.console.inbox_views",
     "cogito_agent.console.memory",
     "cogito_agent.console.services.chat",
-    "cogito_agent.console.services.overview",
     "cogito_agent.console.status",
     "cogito_agent.console.trace_views",
 }

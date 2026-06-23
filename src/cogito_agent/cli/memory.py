@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cogito_agent.memory import MemoryRetriever
+from cogito_agent.retrieval.service import create_retrieval_service
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import MemoryRepository
 
@@ -86,8 +86,8 @@ def _run_memory_search(args: Any) -> None:
         db.close()
         return
 
-    retriever = MemoryRetriever(db)
-    results = retriever.search(ns.workspace_id, ns.query, limit=20)
+    svc = create_retrieval_service(db)
+    results = svc.search_compat(ns.workspace_id, ns.query, limit=20)
     if not results:
         print("  No results found.")
     else:
@@ -103,17 +103,13 @@ def _run_memory_search(args: Any) -> None:
 
 def _run_memory_review(args: Any) -> None:
     ns = args
-    from cogito_agent.storage import Database
+    from cogito_agent.storage import Database, MemoryItemRepository
 
     db = Database()
     db.initialize()
     try:
-        rows = db.connection.execute(
-            "SELECT id, summary, memory_type, reinforcement FROM memory_items"
-            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
-            " ORDER BY updated_at DESC LIMIT 50",
-            (ns.workspace_id,),
-        ).fetchall()
+        repo = MemoryItemRepository(db)
+        rows = repo.list_active_with_filters(ns.workspace_id, limit=50)
         if not rows:
             print("  No memories found.")
         else:
@@ -128,38 +124,7 @@ def _run_memory_review(args: Any) -> None:
         print(f"  Error: {e}")
 
 
-def _content_id(content: str) -> str:
-    import hashlib
 
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-
-
-def _run_memory_accept(args: Any) -> None:
-    ns = args
-    db = Database(ns.db_path)
-    db.initialize()
-    db.migrate()
-    svc = _get_app_svc(db)
-    result = svc.memory_application.accept_candidate(ns.candidate_id, actor_id="cli")
-    if result:
-        print(f"  Accepted: {str(result.get('text', ''))[:60]}")
-    else:
-        print("  Candidate not found or already resolved.")
-    db.close()
-
-
-def _run_memory_reject(args: Any) -> None:
-    ns = args
-    db = Database(ns.db_path)
-    db.initialize()
-    db.migrate()
-    svc = _get_app_svc(db)
-    result = svc.memory_application.reject_candidate(ns.candidate_id, actor_id="cli")
-    if result:
-        print(f"  Rejected: {str(result.get('text', ''))[:60]}")
-    else:
-        print("  Candidate not found or already resolved.")
-    db.close()
 
 
 def _run_memory_delete(args: Any) -> None:
@@ -450,44 +415,3 @@ def _run_embeddings_purge_stale(args: Any) -> None:
     db.close()
 
 
-def _run_memory_optimize(args: Any) -> None:
-    ns = args
-    db = Database(ns.db_path)
-    db.initialize()
-    db.migrate()
-    from cogito_agent.application.runtime_factory import default_workspace_path
-    from cogito_agent.cli.config_manager import build_model_adapter_from_config
-    from cogito_agent.governance import AuditLogger
-    
-    from cogito_agent.memory.optimizer import MemoryOptimizer
-
-    ws_id = ns.workspace_id or "default"
-    workspace_path = ns.workspace_path or default_workspace_path(ws_id)
-
-
-    model = build_model_adapter_from_config()
-    if model is None:
-        print("  No model adapter configured (set model.provider)")
-        db.close()
-        return
-
-    audit = AuditLogger(db)
-
-    opt = MemoryOptimizer(
-        store=store,
-        model_adapter=model,
-        db=db,
-        chunk_index=chunk_index,
-        audit=audit,
-        workspace_id=ws_id,
-    )
-
-    result = opt.run()
-
-    if result["error"]:
-        print(f"  Error: {result['error']}")
-    else:
-        print(f"  Pending items merged: {result['pending_count']}")
-        print(f"  Memory changed: {result['memory_changed']}")
-        print(f"  Self changed: {result['self_changed']}")
-    db.close()

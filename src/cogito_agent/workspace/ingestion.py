@@ -269,21 +269,27 @@ class FileIngestionService:
 
     def _try_create_chunk_embeddings(self, fid: str, workspace_id: str) -> None:
         try:
-            from cogito_agent.memory.vector import EmbeddingService, _pack_embedding
+            from cogito_agent.embedding.service import (
+                _pack_embedding,
+                create_embedding_provider_from_config,
+            )
+            from cogito_agent.config import Settings
 
-            svc = EmbeddingService()
+            provider = create_embedding_provider_from_config(Settings.get().memory.embedding)
+            if provider is None:
+                return
             chunks = self._db.connection.execute(
                 "SELECT id, text FROM file_chunks WHERE workspace_file_id = ? ORDER BY chunk_index",
                 (fid,),
             ).fetchall()
             for chunk in chunks:
                 try:
-                    vec = svc.encode(str(chunk["text"]))
+                    vec = provider.embed_text(str(chunk["text"]))
                     blob = _pack_embedding(vec)
                     self._db.connection.execute(
                         "INSERT OR REPLACE INTO file_chunk_embeddings"
                         " (chunk_id, embedding, model_name) VALUES (?, ?, ?)",
-                        (chunk["id"], blob, svc.model_name),
+                        (chunk["id"], blob, provider.model_name),
                     )
                 except Exception:
                     pass

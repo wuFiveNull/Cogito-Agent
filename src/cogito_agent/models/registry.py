@@ -64,6 +64,11 @@ def list_providers() -> list[str]:
     return list(_PROVIDERS.keys())
 
 
+def get_provider_config(name: str) -> ProviderConfig | None:
+    """Return the registered ProviderConfig for *name*, or None."""
+    return _PROVIDERS.get(name)
+
+
 register_provider(
     ProviderConfig(
         name="openai",

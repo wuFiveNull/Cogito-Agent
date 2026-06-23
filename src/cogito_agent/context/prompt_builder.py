@@ -148,6 +148,13 @@ class PromptBuilder:
         system_parts = [self._system]
         if skill_instruction:
             system_parts.append(f"\nSkill Context:\n{skill_instruction}")
+
+        # Memory files (SELF.md, MEMORY.md, etc.) go into system prompt
+        memory_file_items = [c for c in included if c.source_type == "memory_file"]
+        if memory_file_items:
+            for mf in memory_file_items:
+                system_parts.append(f"\n# {mf.source_id}\n{mf.text}")
+
         msgs.append({"role": "system", "content": "\n".join(system_parts)})
 
         summary_items = [c for c in included if c.source_type == "session_summary"]
@@ -160,9 +167,9 @@ class PromptBuilder:
             )
 
         # 2. Context frame: dynamic sections wrapped in <system-reminder>
-        #    Following Akashic's pattern: retrieved memories, file context,
-        #    memory files, and artifacts go in a context frame as a user
-        #    message, not as system instructions.
+        #    Following Akashic's pattern: retrieved memories and file context
+        #    go in a context frame as a user message, not as system instructions.
+        #    Static memory files (SELF.md, MEMORY.md, etc.) are in the system prompt above.
         frame_sections: list[str] = []
         memory_items = [
             c
@@ -176,13 +183,6 @@ class PromptBuilder:
                 for c in memory_items
             )
             frame_sections.append(f"## retrieved_memory\n{memory_block}")
-
-        # Memory files (SELF.md, MEMORY.md, RECENT_CONTEXT.md, NOW.md)
-        memory_file_items = [c for c in included if c.source_type == "memory_file"]
-        if memory_file_items:
-            for mf in memory_file_items:
-                text = wrap_untrusted(mf.text) if mf.source_id in ("file_chunk",) else mf.text
-                frame_sections.append(f"## {mf.source_id}\n{text}")
 
         file_items = [
             c for c in included if c.source_type in ("file", "workspace_file", "file_chunk")

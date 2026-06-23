@@ -6,7 +6,10 @@ import time
 import uuid
 from collections.abc import Generator
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cogito_agent.queue.message import InboundMessage
 
 from cogito_agent.capability.schemas import (
     filter_available_tools,
@@ -20,7 +23,7 @@ from cogito_agent.context import (
 from cogito_agent.execution import (
     CapabilityExecutionRequest,
 )
-from cogito_agent.memory import ConsolidationService, MemoryRetriever
+from cogito_agent.memory import ConsolidationService
 from cogito_agent.models import (
     ModelAdapter,
     ModelResponse,
@@ -31,17 +34,14 @@ from cogito_agent.models import (
 from cogito_agent.models.messages import (
     ContentPart,
     ImagePart,
-    TextPart,
     has_image,
     normalize_content,
-)
-from cogito_agent.models.messages import (
-    extract_text as _extract_text_from_parts,
 )
 from cogito_agent.retrieval import MemoryRecallResult, MemoryRetrievalService
 from cogito_agent.retrieval.query import MemoryQueryBuilder
 from cogito_agent.shared import (
     DecisionType,
+    EventSource,
     EventType,
     PolicyRequest,
     RuntimeEvent,
@@ -61,6 +61,10 @@ from .ports import (
 )
 
 _CONSOLIDATION_GUARD_THRESHOLD = 30  # max unconsolidated messages before guard
+_TOOL_CHAIN_TERMINATED = (
+    "Tool chain terminated: maximum tool rounds reached. "
+    "Results from completed tools have been applied."
+)
 from .result_composer import ComposedResult, ResultComposer
 
 
@@ -112,12 +116,12 @@ class RuntimeKernel:
         budget: TurnBudget | None = None,
         model_adapter: ModelAdapter | None = None,
         context_engine: ContextEngine | None = None,
-        memory_retriever: MemoryRetriever | None = None,
         memory_retrieval_service: MemoryRetrievalService | None = None,
         capability_executor: RuntimeCapabilityExecutorPort | None = None,
         artifact_writer: RuntimeArtifactWriterPort | None = None,
         max_tool_rounds: int = 3,
         presence: Any = None,
+        workspace_path: str = "",
     ) -> None:
         self._sm = TurnStateMachine()
         self._budget = budget or TurnBudget()
@@ -132,8 +136,8 @@ class RuntimeKernel:
             capability_executor or resolved.capability_executor
         )
         self._ctx_engine = context_engine or ContextEngine()
-        self._mem_retriever = memory_retriever
         self._memory_retrieval_service = memory_retrieval_service
+        self._workspace_path = workspace_path
         self._query_builder_for_retrieval = MemoryQueryBuilder()
         self._model_call_count = 0
         self._tool_call_count = 0
@@ -153,11 +157,20 @@ class RuntimeKernel:
         self._meme_service: Any = None
         self._memory_service: Any = None
         self._consolidation_service: ConsolidationService | None = None
+        self._vision_pipeline: Any = None
         if self._cap_executor is None and self._cap_reg is not None:
             raise ValueError("capability_registry requires a governed capability executor")
 
     def set_vision_service(self, service: VisionObservationPort) -> None:
         self._vision_service = service
+        from .vision_pipeline import VisionPipeline
+
+        self._vision_pipeline = VisionPipeline(
+            model_adapter=self._model_adapter,
+            vision_service=service,
+            tracer=self._tracer,
+            bind_route_observer=self._bind_route_observer,
+        )
 
     def set_meme_service(self, service: Any) -> None:
         self._meme_service = service
@@ -176,158 +189,38 @@ class RuntimeKernel:
         span: object,
         event: RuntimeEvent | None = None,
     ) -> tuple[list[ContentPart], str]:
-        """If images present in content, run vision pipeline and return modified content.
+        """If images present, run vision pipeline via VisionPipeline helper."""
+        from .vision_pipeline import VisionPipeline
 
-        Returns:
-            Tuple of (modified_content, user_text_without_images).
-            If no images, content and text are returned unchanged.
-        """
-        if not has_image(extra_content) or self._model_adapter is None:
-            return extra_content, user_text
+        pipeline = self._vision_pipeline or VisionPipeline(
+            model_adapter=self._model_adapter,
+            vision_service=self._vision_service,
+            tracer=self._tracer,
+            bind_route_observer=self._bind_route_observer,
+        )
+        result_content, result_text = pipeline.run_pipeline(
+            extra_content, user_text, trace, span, event=event,
+        )
 
-        image_parts = [p for p in extra_content if isinstance(p, ImagePart)]
-        text_parts = [p for p in extra_content if not isinstance(p, ImagePart)]
-        primary_text = _extract_text_from_parts(text_parts) or user_text  # type: ignore[arg-type]
-
-        # If vision service is available with its own adapter, use it via inspect_image
-        if self._vision_service is not None and self._vision_service.has_vision_capability:
-            try:
-                self._vision_service.set_current_context(
-                    workspace_id=(event.workspace_id if event else ""),
-                    trace_id=str(getattr(trace, "id", "")),
-                )
-                results: list[str] = []
-                trace_id = str(getattr(trace, "id", ""))
-                for img_part in image_parts:
-                    att_id = getattr(img_part, "attachment_id", None) or ""
-                    if not att_id:
-                        continue
-                    result = self._vision_service.inspect_image(
-                        attachment_id=att_id,
-                        prompt=primary_text or "Describe this image",
-                        workspace_id=(event.workspace_id if event else ""),
-                        trace_id=trace_id,
-                    )
-                    if result:
-                        results.append(result)
-
-                if results:
-                    combined = "\n\n".join(results)
-                    call_id = f"vision_{uuid.uuid4().hex[:12]}"
-                    self._tool_results.append(
-                        {
-                            "tool": "vision.observe",
-                            "summary": combined[:500],
-                            "status": "ok",
-                            "tool_call_id": call_id,
-                        }
-                    )
-                    return text_parts, primary_text  # type: ignore[return-value]
-            except Exception as exc:
-                logger.warning("Vision service pipeline failed, falling back: %s", exc)
-
-        try:
-            call_start = datetime.now(UTC)
-            vision_msgs = self._build_vision_messages(image_parts, primary_text)
-            if event is not None:
-                self._bind_route_observer(event, trace, span)
-            vision_resp = self._model_adapter.chat(
-                vision_msgs,
-                _route_role="vision_worker",
-                _route_task_kind="vision_understanding",
-            )
-            vision_latency = int((datetime.now(UTC) - call_start).total_seconds() * 1000)
-
+        # Count the model call if the pipeline used the primary adapter
+        if has_image(extra_content) and not (
+            self._vision_service is not None and self._vision_service.has_vision_capability
+        ):
             self._model_call_count += 1
-            self._tracer.log_model_call(
-                trace_id=str(getattr(trace, "id", "")),
-                span_id=str(getattr(span, "id", "")),
-                provider=vision_resp.provider,
-                model=vision_resp.model,
-                input_token_count=vision_resp.input_tokens,
-                output_token_count=vision_resp.output_tokens,
-                prompt_summary=f"vision analysis ({len(image_parts)} images)",
-                response_summary=vision_resp.content[:200] if vision_resp.content else "",
-                latency_ms=vision_latency,
-                stop_reason=vision_resp.stop_reason,
-                error=vision_resp.error,
-            )
 
-            if vision_resp.error:
-                raise RuntimeError(f"Vision model error: {vision_resp.error}")
+        return result_content, result_text
 
-            from cogito_agent.models.vision import VisionObservation, _extract_json, _repair_json
-
-            parsed = _extract_json(vision_resp.content)
-            if parsed is None:
-                parsed = _repair_json(vision_resp.content)
-            if parsed is None:
-                raise RuntimeError(
-                    f"Vision model returned unparseable JSON: {vision_resp.content[:200]}"
-                )
-            observation = VisionObservation.model_validate(parsed)
-
-            call_id = f"vision_{uuid.uuid4().hex[:12]}"
-            self._tool_results.append(
-                {
-                    "tool": "vision.observe",
-                    "summary": observation.model_dump_json(),
-                    "status": "ok",
-                    "tool_call_id": call_id,
-                }
-            )
-
-            logger.info(
-                "Vision pipeline succeeded: %s via %s (%d images, %dms)",
-                observation.summary[:80],
-                vision_resp.model,
-                len(image_parts),
-                vision_latency,
-            )
-            return text_parts, primary_text  # type: ignore[return-value]
-
-        except Exception as exc:
-            logger.error("Vision pipeline failed: %s", exc)
-            raise RuntimeError(
-                f"Vision analysis failed: {exc}. "
-                f"Cannot proceed with primary model - images cannot be directly processed."
-            ) from exc
-
-    @staticmethod
     def _build_vision_messages(
+        self,
         image_parts: list[ImagePart],
         instruction: str,
     ) -> list[dict[str, object]]:
-        """Build legacy dict messages for vision model."""
-        from cogito_agent.models.messages import ChatMessage, MessageRole
+        """Delegate to VisionPipeline."""
+        if self._vision_pipeline is not None:
+            return self._vision_pipeline.build_vision_messages(image_parts, instruction)
+        from .vision_pipeline import VisionPipeline
 
-        vision_prompt = (
-            "You are a vision analysis model. Analyze the provided image(s) and "
-            "output a structured JSON observation. Do NOT include markdown fences "
-            "or extra commentary. Output ONLY valid JSON matching this schema:\n"
-            '{"summary": "...", "ocr_text": [...], "objects": [...], '
-            '"ui_elements": [...], '
-            '"spatial_relations": [...], "uncertainties": [...]}'
-        )
-        sys_msg = ChatMessage(
-            role=MessageRole.system,
-            content=[TextPart(text=vision_prompt)],
-        )
-        user_msg = ChatMessage(
-            role=MessageRole.user,
-            content=[*image_parts],
-        )
-        msgs: list[dict[str, object]] = [
-            sys_msg.to_legacy_dict(),
-            user_msg.to_legacy_dict(),
-        ]
-        if instruction.strip():
-            inst_msg = ChatMessage(
-                role=MessageRole.user,
-                content=[TextPart(text=instruction)],
-            )
-            msgs.append(inst_msg.to_legacy_dict())
-        return msgs
+        return VisionPipeline.build_vision_messages(image_parts, instruction)
 
     @property
     def state(self) -> TurnState:
@@ -358,88 +251,26 @@ class RuntimeKernel:
         return [manifest_to_tool_schema(m) for m in available]
 
     def process(self, event: RuntimeEvent) -> TurnResult:
-        terminal = {
-            TurnState.completed,
-            TurnState.failed,
-            TurnState.denied,
-            TurnState.cancelled,
-            TurnState.budget_exceeded,
-        }
-        if self._sm.state in terminal:
-            self._sm._state = TurnState.received
-
-        # Track user activity
-        if self._presence is not None and event.type in (
-            EventType.user_message, EventType.user_command,
-        ):
-            self._presence.touch(
-                session_key=event.session_id or "default",
-                channel=event.source.value if hasattr(event.source, "value") else str(event.source),
-            )
-
-        trace = self._tracer.create_trace(
-            workspace_id=event.workspace_id,
-            root_event_id=event.id,
-            session_id=event.session_id,
-        )
-        span = self._tracer.create_span(trace.id, "process_turn", SpanKind.runtime)
-        span.input_summary = f"event={event.type.value}, actor={event.actor_id}"
-        self._start_time = datetime.now(UTC)
+        trace, span = self._prepare_turn_setup(event, "process_turn")
 
         try:
-            self._sm.transition(TurnState.loading_session)
-            self._persist_user_message(event)
-            self._transition(TurnState.building_context)
-            ctx = self._build_context(event, trace_id=trace.id)
-            self._sources = [
-                {"type": c.source_type, "id": c.source_id, "text": c.text}
-                for c in ctx
-                if isinstance(c, ContextItem) and c.included
-            ]
+            ctx, text = self._run_pre_model_phase(event, trace)
 
-            self._transition(TurnState.model_calling)
-            self._check_budget_model()
-            self._check_model_policy(event)
-            raw_text = event.payload.get("text", "") if event.type == EventType.user_message else ""
-            text = str(raw_text) if raw_text is not None else ""
             model_resp = self._generate_reply(event, text, trace, span, ctx=ctx)
 
-            self._transition(TurnState.planning_tool)
-
             # Multi-round tool loop
+            self._transition(TurnState.planning_tool)
             tool_round = 0
             while model_resp.tool_intents and self._cap_reg and tool_round < self._max_tool_rounds:
                 tool_round += 1
                 model_resp = self._dispatch_tools(event, model_resp, trace, span)
-                # Budget check is handled inside _dispatch_tools per-tool
 
             if tool_round >= self._max_tool_rounds and model_resp.tool_intents:
-                model_resp = ModelResponse(
-                    content="Tool chain terminated: maximum tool rounds reached. "
-                    "Results from completed tools have been applied."
-                )
+                model_resp = ModelResponse(content=_TOOL_CHAIN_TERMINATED)
 
-            model_result = self._compose_result(event, model_resp, trace, span)
+            model_result, output_text = self._run_after_turn(event, model_resp, trace, span)
             tool_summaries = list(self._tool_results)
 
-            self._transition(TurnState.composing_result)
-            output_text = model_result.render_text()
-            self._persist(event, output_text, trace.id)
-            self._update_session_summary(event)
-            self._consolidate(event)
-
-            self._audit.log(
-                actor_id=event.actor_id,
-                action="turn_completed",
-                resource="session",
-                workspace_id=event.workspace_id,
-                session_id=event.session_id,
-                trace_id=trace.id,
-                decision="allow",
-                reason="Turn completed",
-            )
-
-            self._sm.transition(TurnState.completed)
             result = TurnResult(
                 state=TurnState.completed,
                 output=output_text,
@@ -450,10 +281,7 @@ class RuntimeKernel:
             )
 
         except BudgetError as exc:
-            try:
-                self._sm.transition(TurnState.failed)
-            except ValueError:
-                pass
+            self._safe_transition(self._sm, TurnState.failed)
             result = TurnResult(
                 state=TurnState.failed,
                 error=str(exc),
@@ -462,10 +290,7 @@ class RuntimeKernel:
             )
 
         except PolicyDeniedError as exc:
-            try:
-                self._sm.transition(TurnState.denied)
-            except ValueError:
-                pass
+            self._safe_transition(self._sm, TurnState.denied)
             result = TurnResult(
                 state=TurnState.denied,
                 error=str(exc),
@@ -473,10 +298,7 @@ class RuntimeKernel:
             )
 
         except ApprovalRequiredError as exc:
-            try:
-                self._sm.transition(TurnState.waiting_approval)
-            except ValueError:
-                pass
+            self._safe_transition(self._sm, TurnState.waiting_approval)
             result = TurnResult(
                 state=TurnState.waiting_approval,
                 approval_pending=True,
@@ -486,20 +308,14 @@ class RuntimeKernel:
             )
 
         except Exception as exc:
-            try:
-                self._sm.transition(TurnState.failed)
-            except ValueError:
-                pass
-            error_msg = str(exc)
+            self._safe_transition(self._sm, TurnState.failed)
             result = TurnResult(
                 state=TurnState.failed,
-                error=error_msg,
+                error=str(exc),
                 trace_id=trace.id,
             )
 
-        self._tracer.end_span(span)
-        self._tracer.end_trace(trace)
-        span.output_summary = f"state={result.state.value}, error={result.error}"
+        self._cleanup_turn(trace, span, state_value=result.state.value, error=result.error)
         return result
 
     def _stream_generate_reply(
@@ -623,24 +439,7 @@ class RuntimeKernel:
         Generates delta events during model inference, tool_call events
         during capability dispatch, and ends with final or error.
         """
-        terminal = {
-            TurnState.completed,
-            TurnState.failed,
-            TurnState.denied,
-            TurnState.cancelled,
-            TurnState.budget_exceeded,
-        }
-        if self._sm.state in terminal:
-            self._sm._state = TurnState.received
-
-        trace = self._tracer.create_trace(
-            workspace_id=event.workspace_id,
-            root_event_id=event.id,
-            session_id=event.session_id,
-        )
-        span = self._tracer.create_span(trace.id, "process_stream_turn", SpanKind.runtime)
-        span.input_summary = f"event={event.type.value}, actor={event.actor_id}, stream"
-        self._start_time = datetime.now(UTC)
+        trace, span = self._prepare_turn_setup(event, "process_stream_turn")
 
         meta_data: dict[str, object] = {
             "trace_id": trace.id,
@@ -660,21 +459,7 @@ class RuntimeKernel:
         )
 
         try:
-            self._sm.transition(TurnState.loading_session)
-            self._persist_user_message(event)
-            self._transition(TurnState.building_context)
-            ctx = self._build_context(event, trace_id=trace.id)
-            self._sources = [
-                {"type": c.source_type, "id": c.source_id, "text": c.text}
-                for c in ctx
-                if isinstance(c, ContextItem) and c.included
-            ]
-
-            self._transition(TurnState.model_calling)
-            self._check_budget_model()
-            self._check_model_policy(event)
-            raw_text = event.payload.get("text", "") if event.type == EventType.user_message else ""
-            text = str(raw_text) if raw_text is not None else ""
+            ctx, text = self._run_pre_model_phase(event, trace)
 
             tool_schemas = self._get_tool_schemas(actor=event.actor_id)
 
@@ -697,8 +482,8 @@ class RuntimeKernel:
             except StopIteration as e:
                 model_resp = e.value
 
+            # Multi-round tool loop with streaming events
             self._transition(TurnState.planning_tool)
-
             tool_round = 0
             while model_resp.tool_intents and self._cap_reg and tool_round < self._max_tool_rounds:
                 tool_round += 1
@@ -739,9 +524,6 @@ class RuntimeKernel:
                         request_id=request_id,
                         trace_id=trace.id,
                     )
-                    self._tracer.end_span(span)
-                    self._tracer.end_trace(trace)
-                    span.output_summary = "state=waiting_approval"
                     self._audit.log(
                         actor_id=event.actor_id,
                         action="turn_approval_required",
@@ -751,32 +533,15 @@ class RuntimeKernel:
                         trace_id=trace.id,
                         decision="require_approval",
                     )
+                    self._cleanup_turn(
+                        trace, span, state_value=TurnState.waiting_approval.value,
+                    )
                     return
 
             if tool_round >= self._max_tool_rounds and model_resp.tool_intents:
-                model_resp = ModelResponse(
-                    content="Tool chain terminated: maximum tool rounds reached. "
-                    "Results from completed tools have been applied."
-                )
+                model_resp = ModelResponse(content=_TOOL_CHAIN_TERMINATED)
 
-            model_result = self._compose_result(event, model_resp, trace, span)
-            output_text = model_result.render_text()
-
-            self._transition(TurnState.composing_result)
-            self._persist(event, output_text, trace.id)
-            self._update_session_summary(event)
-            self._consolidate(event)
-
-            self._audit.log(
-                actor_id=event.actor_id,
-                action="turn_completed",
-                resource="session",
-                workspace_id=event.workspace_id,
-                session_id=event.session_id,
-                trace_id=trace.id,
-                decision="allow",
-            )
-            self._sm.transition(TurnState.completed)
+            _, output_text = self._run_after_turn(event, model_resp, trace, span)
 
             yield StreamEvent(
                 type=StreamEventType.final,
@@ -784,16 +549,18 @@ class RuntimeKernel:
                     "response": output_text,
                     "trace_id": trace.id,
                     "state": TurnState.completed.value,
+                    "input_tokens": model_resp.input_tokens,
+                    "output_tokens": model_resp.output_tokens,
+                    "model": model_resp.model or "",
+                    "provider": model_resp.provider or "",
+                    "latency_ms": model_resp.latency_ms,
                 },
                 request_id=request_id,
                 trace_id=trace.id,
             )
 
         except BudgetError as exc:
-            try:
-                self._sm.transition(TurnState.failed)
-            except ValueError:
-                pass
+            self._safe_transition(self._sm, TurnState.failed)
             yield StreamEvent(
                 type=StreamEventType.error,
                 data={
@@ -810,10 +577,7 @@ class RuntimeKernel:
             )
 
         except PolicyDeniedError as exc:
-            try:
-                self._sm.transition(TurnState.denied)
-            except ValueError:
-                pass
+            self._safe_transition(self._sm, TurnState.denied)
             yield StreamEvent(
                 type=StreamEventType.error,
                 data={
@@ -830,10 +594,7 @@ class RuntimeKernel:
             )
 
         except Exception as exc:
-            try:
-                self._sm.transition(TurnState.failed)
-            except ValueError:
-                pass
+            self._safe_transition(self._sm, TurnState.failed)
             from cogito_agent.models.provider_errors import normalize_provider_error
 
             perr = normalize_provider_error(exc)
@@ -852,9 +613,7 @@ class RuntimeKernel:
                 trace_id=trace.id,
             )
 
-        self._tracer.end_span(span)
-        self._tracer.end_trace(trace)
-        span.output_summary = f"state={self._sm.state.value}"
+        self._cleanup_turn(trace, span, state_value=self._sm.state.value)
 
     def interrupt(self, event: RuntimeEvent) -> None:
         self._sm.transition(TurnState.interrupted)
@@ -869,6 +628,40 @@ class RuntimeKernel:
         self._sm.transition(TurnState.resuming)
         self._start_time = datetime.now(UTC)
         return self.process(event)
+
+    # ── Queue-aware entry point ────────────────────────────────────────
+
+    def process_from_queue(self, inbound: "InboundMessage") -> TurnResult:
+        """Process an InboundMessage from the queue and return a TurnResult.
+
+        Converts the queue message to a RuntimeEvent and delegates to
+        ``process()``.  This is the single entry point the queue consumer
+        (AgentLoop / DriftConsumer) should call.
+        """
+        event = self._inbound_to_event(inbound)
+        return self.process(event)
+
+    @staticmethod
+    def _inbound_to_event(inbound: "InboundMessage") -> RuntimeEvent:
+        """Convert an InboundMessage to a RuntimeEvent for ``process()``."""
+        from cogito_agent.queue.message import InboundMessage as _IM
+
+        source_map: dict[str, EventSource] = {
+            "cli": EventSource.cli, "web": EventSource.api, "acp": EventSource.api,
+        }
+        source = source_map.get(inbound.channel, EventSource.api)
+        payload: dict[str, object] = {"text": inbound.content}
+        if inbound.media:
+            payload["content"] = inbound.media
+        return RuntimeEvent(
+            id=str(uuid.uuid4()),
+            workspace_id=inbound.workspace_id,
+            session_id=inbound.session_id,
+            actor_id=str(inbound.metadata.get("actor_id", "user")),
+            source=source,
+            type=EventType.user_message,
+            payload=payload,
+        )
 
     def _transition(self, target: TurnState) -> None:
         self._sm.transition(target)
@@ -950,6 +743,7 @@ class RuntimeKernel:
             session_summary=self._persistence.get_latest_summary(
                 event.workspace_id, event.session_id
             ),
+            workspace_path=self._workspace_path,
         )
         raw = event.payload.get("content", [])
         self._extra_content = raw if isinstance(raw, list) else []
@@ -963,7 +757,7 @@ class RuntimeKernel:
         current_message: str,
         trace_id: str,
     ) -> None:
-        """Load memories via Retrieval V2 or fallback, building MemoryRecallResult."""
+        """Load memories via Retrieval V2, building MemoryRecallResult."""
         self._current_recall_result = None
         memories: list[dict[str, object]] = []
 
@@ -1001,7 +795,8 @@ class RuntimeKernel:
 
                 recall_result = self._memory_retrieval_service.recall(
                     query_context=qctx,
-                    limit=10,
+                    limit=5,
+                    min_score=0.35,
                 )
                 self._current_recall_result = recall_result
                 self._current_retrieval_trace_id = recall_result.trace_id
@@ -1019,14 +814,34 @@ class RuntimeKernel:
             except Exception:
                 logger.exception("Retrieval V2 failed")
                 memories = []
-        elif self._mem_retriever is not None:
-            memories = self._mem_retriever.list_recent(event.workspace_id)
 
         self._current_memories = memories
 
     def _update_session_summary(self, event: RuntimeEvent) -> None:
         try:
             self._persistence.update_summary(event.workspace_id, event.session_id)
+
+            # Sync SESSION_SUMMARY.md view
+            if self._workspace_path:
+                try:
+                    summary = self._persistence.get_latest_summary(
+                        event.workspace_id,
+                        event.session_id,
+                    )
+                    if summary and summary.get("summary"):
+                        from cogito_agent.memory.file_io import atomic_write_memory_file
+
+                        content = (
+                            "# Session Summary\n\n"
+                            f"{summary['summary']}\n"
+                        )
+                        atomic_write_memory_file(
+                            self._workspace_path,
+                            "SESSION_SUMMARY.md",
+                            content,
+                        )
+                except Exception:
+                    logger.debug("SESSION_SUMMARY.md sync failed (non-fatal)")
         except Exception:
             # Compression is a derived optimization and must not fail a turn.
             return
@@ -1084,40 +899,16 @@ class RuntimeKernel:
         extra_content: list[ContentPart],
         workspace_id: str,
     ) -> list[ContentPart]:
-        """Resolve ImagePart.attachment_id to data URIs for native vision models."""
-        resolved: list[ContentPart] = []
-        for part in extra_content:
-            if isinstance(part, ImagePart) and part.attachment_id and not part.uri:
-                if self._vision_service:
-                    try:
-                        att = self._vision_service.require_attachment(
-                            part.attachment_id,
-                            workspace_id,
-                        )
-                        raw = self._vision_service.read_attachment_bytes(att)
-                        from cogito_agent.media import MediaProcessor
+        """Delegate to VisionPipeline."""
+        pipeline = self._vision_pipeline
+        if pipeline is not None:
+            return pipeline.resolve_attachments(extra_content, workspace_id)
 
-                        proc = MediaProcessor()
-                        prepared = proc.validate_and_prepare(raw, filename=att.original_filename)
-                        data_uri = proc.to_data_uri(prepared)
-                        resolved.append(
-                            ImagePart(
-                                uri=data_uri,
-                                mime_type=prepared.mime_type,
-                                width=prepared.width,
-                                height=prepared.height,
-                                attachment_id=part.attachment_id,
-                            )
-                        )
-                    except Exception:
-                        resolved.append(
-                            TextPart(text=f"[Attachment {part.attachment_id}: failed to load]")
-                        )
-                else:
-                    resolved.append(TextPart(text=f"[Attachment {part.attachment_id}]"))
-            else:
-                resolved.append(part)
-        return resolved
+        from .vision_pipeline import VisionPipeline
+
+        return VisionPipeline(
+            vision_service=self._vision_service,
+        ).resolve_attachments(extra_content, workspace_id)
 
     def _build_vision_context(
         self,
@@ -1125,37 +916,18 @@ class RuntimeKernel:
         workspace_id: str,
         session_id: str,
     ) -> str:
-        """Build vision observation context string for prompt injection."""
-        if not self._vision_service:
-            return ""
-        attachment_ids: list[str] = []
-        for part in extra_content or []:
-            if isinstance(part, ImagePart) and part.attachment_id:
-                attachment_ids.append(part.attachment_id)
-            elif isinstance(part, ImagePart) and part.uri:
-                pass
-        if not attachment_ids:
-            return ""
-        try:
-            return self._vision_service.format_observations_for_context(
-                attachment_ids,
-                workspace_id,
-            )
-        except Exception:
-            return ""
+        """Delegate to VisionPipeline."""
+        pipeline = self._vision_pipeline
+        if pipeline is not None:
+            return pipeline.build_vision_context(extra_content, workspace_id, session_id)
+        return ""
 
     def _supports_vision(self) -> bool:
-        """Check if the primary model adapter supports vision natively."""
-        adapter = self._model_adapter
-        if adapter is None:
-            return False
-        router = getattr(adapter, "_router", None)
-        if router is None:
-            return False
-        candidates = getattr(router, "_candidates", {})
-        return any(
-            "image" in c.input_modalities or "vision" in c.capabilities for c in candidates.values()
-        )
+        """Delegate to VisionPipeline."""
+        pipeline = self._vision_pipeline
+        if pipeline is not None:
+            return pipeline.supports_vision()
+        return False
 
     def _get_extra_content(self, event: RuntimeEvent) -> list[ContentPart]:
         raw = event.payload.get("content", [])
@@ -1296,6 +1068,14 @@ class RuntimeKernel:
             capability_name = intent.capability_name
             if not capability_name:
                 continue
+
+            # Some providers (DeepSeek) reject dots in function names;
+            # the adapter sanitizes with _ -> . / : reverse mapping.
+            if self._cap_reg is not None:
+                resolved = self._resolve_tool_name(capability_name)
+                if resolved is not None:
+                    capability_name = resolved
+
             self._check_budget_tool()
             args = dict(intent.arguments) if intent.arguments else {}
 
@@ -1503,12 +1283,171 @@ class RuntimeKernel:
                 title_if_empty=title,
             )
 
-    def _persist(self, event: RuntimeEvent, output: str, trace_id: str = "") -> None:
+    def _persist(self, event: RuntimeEvent, output: str, trace_id: str = "", model_resp: ModelResponse | None = None) -> None:
         mid = str(uuid.uuid4())
+        metadata: dict[str, object] = {}
+        if trace_id:
+            metadata["trace_id"] = trace_id
+        if model_resp:
+            if model_resp.input_tokens:
+                metadata["input_tokens"] = model_resp.input_tokens
+            if model_resp.output_tokens:
+                metadata["output_tokens"] = model_resp.output_tokens
+            if model_resp.model:
+                metadata["model"] = model_resp.model
+            if model_resp.provider:
+                metadata["provider"] = model_resp.provider
+            if model_resp.latency_ms:
+                metadata["latency_ms"] = model_resp.latency_ms
         self._persistence.persist_assistant_message(
             message_id=mid,
             workspace_id=event.workspace_id,
             session_id=event.session_id,
             content=output,
             trace_id=trace_id,
+            metadata=metadata,
         )
+
+    # ── Turn pipeline shared helpers ─────────────────────────────────────────
+    # These methods extract the identical logic that was previously duplicated
+    # between process() and process_stream(). Each caller wraps them with its own
+    # return / yield formatting.
+
+    @staticmethod
+    def _safe_transition(sm: TurnStateMachine, target: TurnState) -> None:
+        """Transition state, ignoring invalid transitions."""
+        try:
+            sm.transition(target)
+        except ValueError:
+            pass
+
+    def _prepare_turn_setup(
+        self, event: RuntimeEvent, span_name: str = "process_turn"
+    ) -> tuple[object, object]:
+        """Reset state, create trace+span, track presence.
+
+        Shared prologue for *process* and *process_stream*.
+        """
+        terminal = {
+            TurnState.completed,
+            TurnState.failed,
+            TurnState.denied,
+            TurnState.cancelled,
+            TurnState.budget_exceeded,
+        }
+        if self._sm.state in terminal:
+            self._sm._state = TurnState.received
+
+        if self._presence is not None and event.type in (
+            EventType.user_message, EventType.user_command,
+        ):
+            self._presence.touch(
+                session_key=event.session_id or "default",
+                channel=event.source.value if hasattr(event.source, "value") else str(event.source),
+            )
+
+        trace = self._tracer.create_trace(
+            workspace_id=event.workspace_id,
+            root_event_id=event.id,
+            session_id=event.session_id,
+        )
+        span = self._tracer.create_span(trace.id, span_name, SpanKind.runtime)
+        span.input_summary = f"event={event.type.value}, actor={event.actor_id}"
+        self._start_time = datetime.now(UTC)
+        return trace, span
+
+    def _run_pre_model_phase(
+        self, event: RuntimeEvent, trace: object,
+    ) -> tuple[list[ContextItem], str]:
+        """Session loading → context building → budget & policy checks.
+
+        Shared pre-model-call phase used by both *process* and *process_stream*.
+        Returns the built context items and the extracted user text.
+        """
+        self._sm.transition(TurnState.loading_session)
+        self._persist_user_message(event)
+        self._transition(TurnState.building_context)
+        ctx = self._build_context(event, trace_id=trace.id)
+        self._sources = [
+            {"type": c.source_type, "id": c.source_id, "text": c.text}
+            for c in ctx
+            if isinstance(c, ContextItem) and c.included
+        ]
+
+        self._transition(TurnState.model_calling)
+        self._check_budget_model()
+        self._check_model_policy(event)
+        raw_text = event.payload.get("text", "") if event.type == EventType.user_message else ""
+        text = str(raw_text) if raw_text is not None else ""
+        return ctx, text
+
+    def _run_after_turn(
+        self, event: RuntimeEvent, model_resp: ModelResponse, trace: object, span: object,
+    ) -> tuple[ComposedResult, str]:
+        """Result composition → persist → summary → consolidate → audit.
+
+        Shared post-tool-loop phase.  Returns the composited result and rendered
+        output text; the caller wraps these in a TurnResult or StreamEvent.final.
+        """
+        model_result = self._compose_result(event, model_resp, trace, span)
+        output_text = model_result.render_text()
+
+        self._transition(TurnState.composing_result)
+        self._persist(event, output_text, trace.id, model_resp=model_resp)
+        self._update_session_summary(event)
+        self._consolidate(event)
+
+        self._audit.log(
+            actor_id=event.actor_id,
+            action="turn_completed",
+            resource="session",
+            workspace_id=event.workspace_id,
+            session_id=event.session_id,
+            trace_id=trace.id,
+            decision="allow",
+            reason="Turn completed",
+        )
+        self._sm.transition(TurnState.completed)
+        return model_result, output_text
+
+    def _resolve_tool_name(self, name: str) -> str | None:
+        """Resolve a sanitized tool name back to its original dotted form.
+
+        Some providers (e.g. DeepSeek) reject dots/colons in function names.
+        The adapter sanitizes ALL dots/colons to underscores.
+        This method tries reverse mappings and checks against the capability registry.
+        """
+        if not name or "_" not in name or self._cap_reg is None:
+            return None
+        # Try: replace all _ with .  (most common: memory_store_candidate -> memory.store.candidate)
+        for sep in (".", ":"):
+            candidate = name.replace("_", sep)
+            if candidate == name:
+                continue
+            if self._cap_reg.get_manifest(candidate) is not None:
+                return candidate
+        # Try replacing first _ only (memory_store -> memory.store)
+        for sep in (".", ":"):
+            idx = name.find("_")
+            if idx < 0:
+                continue
+            candidate = name[:idx] + sep + name[idx + 1:]
+            if self._cap_reg.get_manifest(candidate) is not None:
+                return candidate
+        return None
+
+    def _cleanup_turn(
+        self,
+        trace: object,
+        span: object,
+        *,
+        state_value: str,
+        error: str | None = None,
+    ) -> None:
+        """Close span and trace, setting the output summary."""
+        self._tracer.end_span(span)
+        self._tracer.end_trace(trace)
+        summary = f"state={state_value}"
+        if error:
+            summary += f", error={error}"
+        span.output_summary = summary

@@ -21,7 +21,8 @@ WORKSPACE_ID = "default"
 
 
 def _service() -> MCPApplicationService:
-    from cogito_agent.api.app import get_db, get_mcp_manager
+    from cogito_agent.api.app import get_mcp_manager
+    from cogito_agent.storage import get_db
     from cogito_agent.storage.mcp_calls import SqliteMCPCallReader
 
     db = get_db()

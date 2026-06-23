@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cogito_agent.storage import Database
+from cogito_agent.storage.repositories import OutboxRepository as _OutboxRepository
 
 
 class Outbox:
+    """Wraps ``outbox_messages`` table via OutboxRepository."""
+
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._repo = _OutboxRepository(db)
 
     def enqueue(
         self,
@@ -25,46 +29,30 @@ class Outbox:
         commit: bool = True,
     ) -> str:
         mid = str(uuid.uuid4())
-        now = datetime.now(UTC).isoformat()
-        self._db.connection.execute(
-            "INSERT INTO outbox_messages"
-            " (id, event_id, decision_id, workspace_id, user_id, title, body,"
-            " status, priority, source, trace_id, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                mid,
-                event_id,
-                decision_id,
-                workspace_id,
-                user_id,
-                title,
-                body,
-                "pending",
-                priority,
-                source,
-                trace_id or None,
-                now,
-            ),
+        result = self._repo.create(
+            mid=mid,
+            event_id=event_id,
+            decision_id=decision_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            title=title,
+            body=body,
+            priority=priority,
+            source=source,
+            trace_id=trace_id,
+            status="pending",
         )
-        if commit:
-            self._db.connection.commit()
-        return mid
+        return str(result["id"])
 
     def mark_sent(self, message_id: str) -> None:
         now = datetime.now(UTC).isoformat()
-        self._db.connection.execute(
-            "UPDATE outbox_messages SET status = 'sent', sent_at = ? WHERE id = ?",
-            (now, message_id),
-        )
-        self._db.connection.commit()
+        self._repo.update_status(message_id, "sent", {"sent_at": now})
 
     def mark_failed(self, message_id: str, error: str = "") -> None:
         now = datetime.now(UTC).isoformat()
-        self._db.connection.execute(
-            "UPDATE outbox_messages SET status = 'failed', sent_at = ? WHERE id = ?",
-            (now, message_id),
-        )
-        self._db.connection.commit()
+        self._repo.update_status(message_id, "failed", {"sent_at": now})
+        if error:
+            self._repo.mark_failed(message_id, error)
 
     def mark_read(self, message_id: str) -> bool:
         cursor = self._db.connection.execute(
@@ -92,20 +80,8 @@ class Outbox:
         return cursor.rowcount == 1
 
     def list_pending(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, Any]]:
-        if workspace_id == "*":
-            cur = self._db.connection.execute(
-                "SELECT * FROM outbox_messages WHERE status = 'pending'"
-                " ORDER BY created_at ASC LIMIT ?",
-                (limit,),
-            )
-        else:
-            cur = self._db.connection.execute(
-                "SELECT * FROM outbox_messages"
-                " WHERE status = 'pending' AND workspace_id = ?"
-                " ORDER BY created_at ASC LIMIT ?",
-                (workspace_id, limit),
-            )
-        return [dict(r) for r in cur.fetchall()]
+        w = workspace_id if workspace_id != "*" else ""
+        return self._repo.list_pending(workspace_id=w, limit=limit)
 
     def list_all(self, workspace_id: str = "*", limit: int = 50) -> list[dict[str, Any]]:
         if workspace_id == "*":
@@ -121,12 +97,29 @@ class Outbox:
             )
         return [dict(r) for r in cur.fetchall()]
 
+    def list_by_status(
+        self,
+        status: str,
+        workspace_id: str = "*",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        w = workspace_id if workspace_id != "*" else ""
+        return self._repo.list_by_status((status,), workspace_id=w, limit=limit)
+
     def get_message(self, message_id: str) -> dict[str, Any] | None:
+        return self._repo.get_by_id(message_id)
+
+    def count_by_status(self, workspace_id: str = "*") -> dict[str, int]:
+        where = "WHERE workspace_id=?" if workspace_id != "*" else ""
+        params = (workspace_id,) if workspace_id != "*" else ()
         cur = self._db.connection.execute(
-            "SELECT * FROM outbox_messages WHERE id = ?", (message_id,)
+            f"SELECT status, COUNT(*) AS cnt FROM outbox_messages {where} GROUP BY status",
+            params,
         )
-        row = cur.fetchone()
-        return dict(row) if row else None
+        result: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0, "skipped": 0}
+        for r in cur.fetchall():
+            result[str(r["status"])] = r["cnt"]
+        return result
 
     def list_messages_filtered(
         self,
@@ -134,7 +127,7 @@ class Outbox:
         status: str = "",
         time_range: str = "all",
         q: str = "",
-        limit: int = 100,
+        limit: int = 50,
     ) -> list[dict[str, Any]]:
         params: list[Any] = []
         where_clauses: list[str] = []
@@ -148,13 +141,13 @@ class Outbox:
             params.append(status)
 
         if q:
-            where_clauses.append("(title LIKE ? OR body LIKE ? OR id LIKE ? OR decision_id LIKE ?)")
+            where_clauses.append(
+                "(title LIKE ? OR body LIKE ? OR id LIKE ? OR decision_id LIKE ?)"
+            )
             like = f"%{q}%"
             params.extend([like, like, like, like])
 
         if time_range and time_range != "all":
-            from datetime import timedelta
-
             days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
             days = days_map.get(time_range, 0)
             if days:
@@ -171,15 +164,3 @@ class Outbox:
             (*params, limit),
         )
         return [dict(r) for r in cur.fetchall()]
-
-    def count_by_status(self, workspace_id: str = "*") -> dict[str, int]:
-        where = "WHERE workspace_id=?" if workspace_id != "*" else ""
-        params = (workspace_id,) if workspace_id != "*" else ()
-        cur = self._db.connection.execute(
-            f"SELECT status, COUNT(*) AS cnt FROM outbox_messages {where} GROUP BY status",
-            params,
-        )
-        result: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0, "skipped": 0}
-        for r in cur.fetchall():
-            result[str(r["status"])] = r["cnt"]
-        return result

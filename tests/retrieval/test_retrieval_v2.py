@@ -830,13 +830,11 @@ def test_old_v1_embeddings_isolated_from_v2(db):
 
 def test_conftest_compatibility(db):
     _ensure_workspace(db, "ws")
-    from cogito_agent.memory import MemoryRetriever
     from cogito_agent.retrieval.service import create_retrieval_service
 
     svc = create_retrieval_service(db)
-    retriever = MemoryRetriever(db, service=svc)
     _add_memory(db, "m1", "ws", "apple banana fruit")
-    results = retriever.search("ws", "apple banana", limit=10)
+    results = svc.search_compat("ws", "apple banana", limit=10)
     assert len(results) >= 1
 
 

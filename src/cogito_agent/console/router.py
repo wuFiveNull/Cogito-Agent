@@ -46,23 +46,28 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _ensure_console_session() -> str:
-    from cogito_agent.api.app import get_db
+    from cogito_agent.storage import get_db
     from cogito_agent.storage.repositories import SessionRepository
 
     db = get_db()
     repo = SessionRepository(db)
     sess = repo.get_by_id(CONSOLE_SESSION_ID, CONSOLE_WORKSPACE_ID)
     if sess is None:
-        from cogito_agent.application import WorkspaceApplicationService
+        # Check if session exists but is soft-deleted; restore it
+        restored = repo.restore(CONSOLE_SESSION_ID, CONSOLE_WORKSPACE_ID)
+        if restored:
+            sess = restored
+        else:
+            from cogito_agent.application import WorkspaceApplicationService
 
-        service = WorkspaceApplicationService(db)
-        service.ensure_workspace(CONSOLE_WORKSPACE_ID)
-        service.create_session(
-            CONSOLE_WORKSPACE_ID,
-            "Console Chat",
-            session_id=CONSOLE_SESSION_ID,
-            actor_id="console",
-        )
+            service = WorkspaceApplicationService(db)
+            service.ensure_workspace(CONSOLE_WORKSPACE_ID)
+            service.create_session(
+                CONSOLE_WORKSPACE_ID,
+                "Console Chat",
+                session_id=CONSOLE_SESSION_ID,
+                actor_id="console",
+            )
     return CONSOLE_SESSION_ID
 
 
@@ -102,8 +107,8 @@ async def overview_page(request: Request) -> HTMLResponse:
 
 @console_router.get("/chat", response_class=HTMLResponse, include_in_schema=False)
 async def chat_page(request: Request) -> HTMLResponse:
-    from cogito_agent.api.app import get_db
     from cogito_agent.console.services import ChatWorkspaceService
+    from cogito_agent.storage import get_db
     from cogito_agent.storage.repositories import (
         WorkspaceRepository,
     )
@@ -142,8 +147,9 @@ async def chat_send(
     session_id: str = Form(CONSOLE_SESSION_ID),
     workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
 ) -> HTMLResponse:
-    from cogito_agent.api.app import get_chat_service, get_db
+    from cogito_agent.api.app import get_chat_service
     from cogito_agent.shared import EventSource, EventType, RuntimeEvent
+    from cogito_agent.storage import get_db
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
     message = message.strip()
@@ -238,10 +244,11 @@ async def chat_stream_route(
     session_id: str = Form(CONSOLE_SESSION_ID),
     workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
 ) -> StreamingResponse:
-    from cogito_agent.api.app import get_chat_service, get_db
+    from cogito_agent.api.app import get_chat_service
     from cogito_agent.cli.config_manager import get_config
     from cogito_agent.shared import EventSource, EventType, RuntimeEvent, StreamEventType
-    from cogito_agent.trace.redaction import RedactionHelper
+    from cogito_agent.storage import get_db
+    from cogito_agent.shared.redaction import RedactionHelper
 
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
     message = message.strip()
@@ -322,6 +329,32 @@ async def chat_stream_route(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ─── Chat Interrupt ────────────────────────────────────────────────────
+
+
+@console_router.post("/chat/interrupt", include_in_schema=False)
+async def chat_interrupt(
+    request: Request,
+    session_id: str = Form(CONSOLE_SESSION_ID),
+    workspace_id: str = Form(CONSOLE_WORKSPACE_ID),
+) -> HTMLResponse:
+    from cogito_agent.api.app import get_chat_service
+    from cogito_agent.shared import EventSource, EventType, RuntimeEvent
+
+    rid = getattr(request.state, "request_id", str(uuid.uuid4()))
+    event = RuntimeEvent(
+        workspace_id=workspace_id,
+        session_id=session_id,
+        actor_id="user",
+        source=EventSource.api,
+        type=EventType.user_interrupt,
+        payload={"text": "", "_request_id": rid},
+    )
+    chat_service = get_chat_service()
+    chat_service.interrupt(event)
+    return HTMLResponse(status_code=200, content="")
 
 
 console_router.include_router(_memory_router, prefix="/memory")

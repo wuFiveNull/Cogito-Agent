@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
 from cogito_agent.memory import ConsolidationService
 from cogito_agent.memory.memorizer import Memorizer
+from cogito_agent.memory.ports import LLMExtractionPort
 from cogito_agent.storage import Database
 
 
@@ -31,6 +33,29 @@ def _msg(role: str, content: str, mid: str = "") -> dict:
     return m
 
 
+def _mock_extractor(
+    extraction_data: dict[str, Any] | None = None,
+    compression_data: dict[str, list[str]] | None = None,
+) -> LLMExtractionPort:
+    """Build a minimal mock LLMExtractionPort for tests."""
+    class _MockExtractor:
+        def extract_memories(self, conversation_text: str, memory_context: str = "") -> dict[str, Any] | None:
+            return extraction_data
+
+        def compress_context(self, conversation_text: str) -> dict[str, list[str]] | None:
+            return compression_data
+
+    return _MockExtractor()
+
+
+def _extraction(entries: list[dict[str, Any]] | None = None,
+                pending: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    return {
+        "history_entries": entries or [],
+        "pending_items": pending or [],
+    }
+
+
 # ── Basic state tracking ────────────────────────────────────────────────
 
 
@@ -50,32 +75,16 @@ def test_different_workspaces_independent(memorizer: Memorizer) -> None:
 
 
 def test_consolidation_with_mock_model(memorizer: Memorizer) -> None:
-    class _MockModel:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            data = {
-                "history_entries": [
-                    {"summary": "[2024-06-01] User asked about weather", "emotional_weight": 3},
-                ],
-                "pending_items": [
-                    {"tag": "preference", "content": "User likes sunny weather"},
-                ],
-            }
-            return ModelResponse(content=json.dumps(data))
-
-    class _LightModel:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            return ModelResponse(content=json.dumps({
-                "active_topics": ["weather"],
-                "user_preferences": ["sunny"],
-                "follow_ups": [],
-                "avoidances": [],
-                "ongoing_threads": [],
-            }))
-
+    extractor = _mock_extractor(
+        extraction_data=_extraction(
+            entries=[{"summary": "[2024-06-01] User asked about weather", "emotional_weight": 3}],
+            pending=[{"tag": "preference", "content": "User likes sunny weather"}],
+        ),
+        compression_data={"active_topics": ["weather"], "user_preferences": ["sunny"],
+                          "follow_ups": [], "avoidances": [], "ongoing_threads": []},
+    )
     svc = ConsolidationService(
-        memorizer, model_adapter=_MockModel(), light_model_adapter=_LightModel(),
+        memorizer, llm_extractor=extractor,
         keep_count=6,
     )
     msgs = [
@@ -98,11 +107,11 @@ def test_consolidation_with_mock_model(memorizer: Memorizer) -> None:
     assert "preference" in types  # pending_items → preference
 
 
-def test_skips_llm_without_model(memorizer: Memorizer) -> None:
+def test_skips_llm_without_extractor(memorizer: Memorizer) -> None:
     svc = ConsolidationService(memorizer)
     msgs = [_msg("user", "A" * 100, mid="m1"), _msg("assistant", "B" * 100, mid="m2")]
     svc.after_turn(msgs, "ws-1")
-    # Without model, nothing should be written
+    # Without extractor, nothing should be written
     rows = memorizer._db.connection.execute(
         "SELECT COUNT(*) AS cnt FROM memory_items"
     ).fetchone()
@@ -110,24 +119,14 @@ def test_skips_llm_without_model(memorizer: Memorizer) -> None:
 
 
 def test_consolidation_with_json_codeblock(memorizer: Memorizer) -> None:
-    class _MockModel:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            data = {
-                "history_entries": [
-                    {"summary": "[2024-06-01] User mentioned preference", "emotional_weight": 2},
-                ],
-                "pending_items": [],
-            }
-            return ModelResponse(content=f"```json\n{json.dumps(data)}\n```")
-
-    class _LightModel:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            return ModelResponse(content="{}")
-
     svc = ConsolidationService(
-        memorizer, model_adapter=_MockModel(), light_model_adapter=_LightModel(),
+        memorizer,
+        llm_extractor=_mock_extractor(
+            extraction_data=_extraction(
+                entries=[{"summary": "[2024-06-01] User mentioned preference", "emotional_weight": 2}],
+            ),
+            compression_data={},
+        ),
         keep_count=6,
     )
     msgs = [
@@ -147,24 +146,23 @@ def test_consolidation_with_json_codeblock(memorizer: Memorizer) -> None:
 
 def test_called_twice_no_duplicate(memorizer: Memorizer) -> None:
     """Same data consolidated twice should not duplicate memory_items."""
-    class _MockModel:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            data = {
-                "history_entries": [
-                    {"summary": "[2024-06-01] Fact about sky", "emotional_weight": 1},
-                ],
-                "pending_items": [],
-            }
-            return ModelResponse(content=json.dumps(data))
 
-    class _LightModel:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            return ModelResponse(content="{}")
+    class _CountingExtractor:
+        def __init__(self):
+            self.call_count = 0
+
+        def extract_memories(self, conversation_text, memory_context=""):
+            self.call_count += 1
+            return _extraction(
+                entries=[{"summary": "[2024-06-01] Fact about sky", "emotional_weight": 1}],
+            )
+
+        def compress_context(self, conversation_text):
+            return {"active_topics": [], "user_preferences": [],
+                    "follow_ups": [], "avoidances": [], "ongoing_threads": []}
 
     svc = ConsolidationService(
-        memorizer, model_adapter=_MockModel(), light_model_adapter=_LightModel(),
+        memorizer, llm_extractor=_CountingExtractor(),
         keep_count=6,
     )
     msgs = [
@@ -211,7 +209,7 @@ def test_empty_content_no_error(memorizer: Memorizer) -> None:
     svc.after_turn([_msg("assistant", "")], "ws-1")
 
 
-def test_no_model_no_crash(memorizer: Memorizer) -> None:
+def test_no_extractor_no_crash(memorizer: Memorizer) -> None:
     svc = ConsolidationService(memorizer)
     msgs = [_msg("user", "Hello"), _msg("assistant", "Hi")]
     svc.after_turn(msgs, "ws-1")  # Should not raise
@@ -230,20 +228,19 @@ def test_last_consolidated_tracking(memorizer: Memorizer) -> None:
 # ── Light model compression ─────────────────────────────────────────────
 
 
-def test_light_model_stores_recent_context(memorizer: Memorizer) -> None:
-    class _MockLight:
-        def chat(self, messages, **kwargs):
-            from cogito_agent.models import ModelResponse
-            return ModelResponse(content=json.dumps({
-                "active_topics": ["python coding"],
-                "user_preferences": ["likes type hints"],
-                "follow_ups": [],
-                "avoidances": [],
-                "ongoing_threads": [],
-            }))
-
+def test_extractor_stores_recent_context(memorizer: Memorizer) -> None:
+    extractor = _mock_extractor(
+        extraction_data=_extraction(pending=[]),
+        compression_data={
+            "active_topics": ["python coding"],
+            "user_preferences": ["likes type hints"],
+            "follow_ups": [],
+            "avoidances": [],
+            "ongoing_threads": [],
+        },
+    )
     svc = ConsolidationService(
-        memorizer, light_model_adapter=_MockLight(), model_adapter=_MockLight(),
+        memorizer, llm_extractor=extractor,
         keep_count=6,
     )
     msgs = [

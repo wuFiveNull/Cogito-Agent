@@ -3,6 +3,7 @@ from typing import Protocol, runtime_checkable
 from .dense import DenseMemoryRetriever
 from .fusion import CandidateFusion, ScoreBreakdown
 from .gate import RetrievalGate, RetrievalGateResult
+from .injection import MemoryInjectionBuilder
 from .query import MemoryQueryBuilder, MemoryQueryContext
 from .resident import ResidentMemorySelector
 from .service import MemoryRecallResult, MemoryRetrievalService
@@ -55,6 +56,7 @@ __all__ = [
     "ResidentMemorySelector",
     "CandidateFusion",
     "ScoreBreakdown",
+    "MemoryInjectionBuilder",
     "MemoryRetrievalPort",
     "EmbeddingPort",
 ]

@@ -1,5 +1,5 @@
 from .budget import TurnBudget
-from .drift import DriftMaintenance, DriftRuntime
+from .drift import DriftConsumer, DriftMaintenance, DriftRuntime, DriftTaskQueue
 from .kernel import RuntimeKernel, TurnResult
 from .multimodal import MultimodalCoordinator, PreparedPrimaryInput
 from .result_composer import (
@@ -20,6 +20,8 @@ __all__ = [
     "PreparedPrimaryInput",
     "DriftRuntime",
     "DriftMaintenance",
+    "DriftTaskQueue",
+    "DriftConsumer",
     "SubagentManager",
     "SubagentSession",
     "ArtifactReference",

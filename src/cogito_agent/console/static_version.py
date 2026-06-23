@@ -16,6 +16,9 @@ def _compute_static_hash() -> str:
     js_path = HERE / "static" / "htmx.min.js"
     if js_path.is_file():
         hasher.update(js_path.read_bytes())
+    stream_js_path = HERE / "static" / "chat-stream.js"
+    if stream_js_path.is_file():
+        hasher.update(stream_js_path.read_bytes())
     digest = hasher.hexdigest()[:12]
     return digest
 

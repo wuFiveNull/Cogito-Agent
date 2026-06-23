@@ -108,12 +108,16 @@ class CandidateFusion:
         rrf_k: float = 60.0,
         keyword_weight: float = 0.5,
         recency_half_life_days: float = 90.0,
-        hotness_alpha: float = 0.0,
+        hotness_alpha: float = 0.15,
     ) -> None:
         self._rrf_k = rrf_k
         self._keyword_weight = keyword_weight
         self._recency_half_life_days = recency_half_life_days
         self._hotness_alpha = hotness_alpha
+
+    @property
+    def hotness_alpha(self) -> float:
+        return self._hotness_alpha
 
     def fuse(
         self,

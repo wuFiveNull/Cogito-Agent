@@ -4,7 +4,7 @@ import html
 import re
 from urllib.parse import urlparse
 
-from cogito_agent.trace.redaction import RedactionHelper
+from cogito_agent.shared.redaction import RedactionHelper
 
 _redactor = RedactionHelper()
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")

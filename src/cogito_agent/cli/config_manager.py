@@ -12,7 +12,7 @@ from cogito_agent.models import (
     get_adapter,
     list_providers,
 )
-from cogito_agent.models.registry import _PROVIDERS
+from cogito_agent.models.registry import get_provider_config
 from cogito_agent.security import (
     KeychainSecretProvider,
     LocalSecretsProvider,
@@ -174,7 +174,7 @@ def doctor() -> list[dict[str, str]]:
 
     base_url = cfg.get("model.base_url", "")
     if provider != "mock" and not base_url:
-        pcfg = _PROVIDERS.get(provider)
+        pcfg = get_provider_config(provider)
         if pcfg and pcfg.base_url:
             results.append(
                 {
@@ -202,7 +202,7 @@ def doctor() -> list[dict[str, str]]:
 
     model_name = cfg.get("model.model", "")
     if provider != "mock" and not model_name:
-        pcfg = _PROVIDERS.get(provider)
+        pcfg = get_provider_config(provider)
         if pcfg and pcfg.default_model:
             results.append(
                 {

@@ -1,29 +1,34 @@
 from __future__ import annotations
 
-import json
-
-from cogito_agent.context import SessionCompressionService
-
-from .database import Database
-from .repositories import MessageRepository
+from cogito_agent.storage.database import Database
+from cogito_agent.storage.session_store import SessionStore
 
 
 class SqliteRuntimePersistence:
-    """SQLite adapter for RuntimeKernel's persistence port."""
+    """SQLite adapter for RuntimeKernel's persistence port.
+
+    Delegates to ``SessionStore`` for all message and session operations.
+    This indirection lets the message layer (MessageQueue, AgentLoop) and
+    the kernel share the same persistence path.
+    """
 
     def __init__(self, db: Database) -> None:
-        self._db = db
-        self._messages = MessageRepository(db)
-        self._compression = SessionCompressionService(db)
+        self._store = SessionStore(db)
 
     def list_messages(self, session_id: str, workspace_id: str) -> list[dict[str, object]]:
-        return [dict(row) for row in self._messages.list_by_session(session_id, workspace_id)]
+        return self._store.get_history(session_id, workspace_id)
 
     def get_latest_summary(self, workspace_id: str, session_id: str) -> dict[str, object] | None:
-        return self._compression.get_latest(workspace_id, session_id)
+        return self._store.get_latest_summary(workspace_id, session_id)
 
     def update_summary(self, workspace_id: str, session_id: str) -> dict[str, object] | None:
-        return self._compression.update_summary(workspace_id, session_id)
+        return self._store.update_summary(workspace_id, session_id)
+
+    def trim_messages(self, session_id: str, workspace_id: str, keep_count: int) -> int:
+        return self._store.trim_messages(session_id, workspace_id, keep_count)
+
+    def message_count(self, session_id: str, workspace_id: str) -> int:
+        return self._store.message_count(session_id, workspace_id)
 
     def persist_interrupted_turn(
         self,
@@ -33,21 +38,15 @@ class SqliteRuntimePersistence:
         model_call_count: int,
         tool_call_count: int,
     ) -> None:
-        with self._db.connection:
-            self._db.connection.execute(
-                "INSERT INTO interrupted_turns"
-                " (event_json, turn_state, model_call_count, tool_call_count)"
-                " VALUES (?, ?, ?, ?)",
-                (event_json, turn_state, model_call_count, tool_call_count),
-            )
+        self._store.persist_interrupted_turn(
+            event_json=event_json,
+            turn_state=turn_state,
+            model_call_count=model_call_count,
+            tool_call_count=tool_call_count,
+        )
 
     def latest_assistant_message_id(self, workspace_id: str, session_id: str) -> str | None:
-        row = self._db.connection.execute(
-            "SELECT id FROM messages WHERE workspace_id=? AND session_id=?"
-            " AND role='assistant' ORDER BY rowid DESC LIMIT 1",
-            (workspace_id, session_id),
-        ).fetchone()
-        return str(row["id"]) if row else None
+        return self._store.latest_assistant_message_id(workspace_id, session_id)
 
     def persist_user_message(
         self,
@@ -58,51 +57,11 @@ class SqliteRuntimePersistence:
         content: str,
         title_if_empty: str,
     ) -> None:
-        with self._db.connection:
-            self._db.connection.execute(
-                "INSERT INTO messages"
-                " (id, workspace_id, session_id, role, content, metadata_json)"
-                " VALUES (?, ?, ?, 'user', ?, '{}')",
-                (message_id, workspace_id, session_id, content),
-            )
-            self._db.connection.execute(
-                "UPDATE sessions SET title=CASE WHEN title IS NULL OR title=''"
-                " THEN ? ELSE title END, updated_at=datetime('now')"
-                " WHERE id=? AND workspace_id=?",
-                (title_if_empty, session_id, workspace_id),
-            )
-
-    def trim_messages(
-        self, session_id: str, workspace_id: str, keep_count: int
-    ) -> int:
-        """Delete old messages, keeping only the most recent *keep_count*.
-
-        Returns the number of deleted rows.
-        """
-        row = self._db.connection.execute(
-            "SELECT rowid FROM messages"
-            " WHERE workspace_id=? AND session_id=?"
-            " ORDER BY rowid DESC LIMIT 1 OFFSET ?",
-            (workspace_id, session_id, keep_count - 1),
-        ).fetchone()
-        if row is None:
-            return 0
-        cutoff = int(row["rowid"])
-        deleted = self._db.connection.execute(
-            "DELETE FROM messages"
-            " WHERE workspace_id=? AND session_id=? AND rowid <= ?",
-            (workspace_id, session_id, cutoff),
-        ).rowcount
-        self._db.connection.commit()
-        return deleted
-
-    def message_count(self, session_id: str, workspace_id: str) -> int:
-        row = self._db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM messages"
-            " WHERE workspace_id=? AND session_id=?",
-            (workspace_id, session_id),
-        ).fetchone()
-        return int(row["cnt"]) if row else 0
+        self._store.append_user_message(
+            session_id, workspace_id, content,
+            message_id=message_id,
+            title_if_empty=title_if_empty,
+        )
 
     def persist_assistant_message(
         self,
@@ -112,16 +71,11 @@ class SqliteRuntimePersistence:
         session_id: str,
         content: str,
         trace_id: str,
+        metadata: dict[str, object] | None = None,
     ) -> None:
-        metadata = json.dumps({"trace_id": trace_id}) if trace_id else "{}"
-        with self._db.connection:
-            self._db.connection.execute(
-                "INSERT INTO messages"
-                " (id, workspace_id, session_id, role, content, metadata_json)"
-                " VALUES (?, ?, ?, 'assistant', ?, ?)",
-                (message_id, workspace_id, session_id, content, metadata),
-            )
-            self._db.connection.execute(
-                "UPDATE sessions SET updated_at=datetime('now') WHERE id=? AND workspace_id=?",
-                (session_id, workspace_id),
-            )
+        self._store.append_assistant_message(
+            session_id, workspace_id, content,
+            message_id=message_id,
+            trace_id=trace_id,
+            metadata=metadata,
+        )

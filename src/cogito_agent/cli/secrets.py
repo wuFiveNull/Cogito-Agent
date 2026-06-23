@@ -4,13 +4,13 @@ import getpass
 import sys
 from typing import Any
 
-from cogito_agent.governance.audit import AuditLogger
+from cogito_agent.application.audit import log_audit
 from cogito_agent.security import (
     LocalSecretsProvider,
     SecretProvider,
 )
 from cogito_agent.storage import Database
-from cogito_agent.trace.redaction import RedactionHelper
+from cogito_agent.shared.redaction import RedactionHelper
 
 
 def _get_provider(db_path: str) -> SecretProvider:
@@ -78,15 +78,9 @@ def _audit_log(db_path: str, action: str, key: str) -> None:
     try:
         db = Database(db_path)
         db.initialize()
-        audit = AuditLogger(db)
-        audit.log(
-            actor_id="cli",
-            action=action,
-            resource=f"secret:{key}",
-            workspace_id="*",
-            decision="allow",
-            reason="user requested",
-            redact_details=False,
+        log_audit(
+            db, "cli", action, f"secret:{key}",
+            "*", decision="allow", reason="user requested",
         )
     except Exception:
         pass

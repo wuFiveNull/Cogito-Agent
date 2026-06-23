@@ -31,16 +31,17 @@ def run_e2e_demo(db_path: str = "cogito_demo.db") -> None:
     db.initialize()
     print(f"\n[DB] Initialized: {db_path}")
 
+    from cogito_agent.storage.repositories import (
+        AuditRepository, MessageRepository, SessionRepository,
+        TraceRepository, WorkspaceRepository,
+    )
+    ws_repo = WorkspaceRepository(db)
+    sess_repo = SessionRepository(db)
+
     ws_id = str(uuid.uuid4())
     sess_id = str(uuid.uuid4())
-    db.connection.execute(
-        "INSERT INTO workspaces (id, name) VALUES (?, ?)", (ws_id, "demo-workspace")
-    )
-    db.connection.execute(
-        "INSERT INTO sessions (id, workspace_id, title, status) VALUES (?, ?, ?, ?)",
-        (sess_id, ws_id, "E2E Demo Session", "active"),
-    )
-    db.connection.commit()
+    ws_repo.create(ws_id, "demo-workspace")
+    sess_repo.create(sess_id, ws_id, "E2E Demo Session")
     print(f"[Workspace] {ws_id}")
     print(f"[Session]   {sess_id}")
 
@@ -77,26 +78,18 @@ def run_e2e_demo(db_path: str = "cogito_demo.db") -> None:
     else:
         print(f"Agent: {result.output}")
 
-    cur_t = db.connection.execute("SELECT id, status FROM traces WHERE workspace_id = ?", (ws_id,))
-    traces = cur_t.fetchall()
-    cur_a = db.connection.execute(
-        "SELECT id, action FROM audit_logs WHERE workspace_id = ?", (ws_id,)
-    )
-    logs = cur_a.fetchall()
+    trace_repo = TraceRepository(db)
+    audit_repo = AuditRepository(db)
+    msg_repo = MessageRepository(db)
+
+    traces = trace_repo.list_by_workspace(ws_id)
+    logs = audit_repo.list_by_filters(workspace_id=ws_id)
 
     print(f"\n[Trace] {len(traces)} trace(s) recorded")
     print(f"[Audit] {len(logs)} log(s) recorded")
 
-    db.connection.execute(
-        "INSERT INTO messages (id, workspace_id, session_id, role, content) VALUES (?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), ws_id, sess_id, "user", prompt),
-    )
-    db.connection.commit()
-    cur = db.connection.execute(
-        "SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at",
-        (sess_id,),
-    )
-    msgs = cur.fetchall()
+    msg_repo.create(str(uuid.uuid4()), ws_id, sess_id, "user", prompt)
+    msgs = msg_repo.list_by_session(sess_id, ws_id)
     print(f"[Messages] {len(msgs)} message(s) in session")
     for m in msgs:
         content = str(m["content"])

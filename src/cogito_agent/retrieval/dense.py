@@ -4,14 +4,25 @@ import enum
 import heapq
 import logging
 import math
+import struct
 from dataclasses import dataclass, field
+from typing import Any
 
 from cogito_agent.embedding.interface import EmbeddingProvider
+from cogito_agent.embedding.service import _unpack_embedding as _unpack_embedding  # noqa: PLC0414
 from cogito_agent.storage import Database
 
 logger = logging.getLogger(__name__)
 
 _EMBEDDING_VERSION = "2"
+
+# Try to import sqlite-vec for ANN support
+try:
+    import sqlite_vec
+
+    _SQLITE_VEC_AVAILABLE = True
+except ImportError:
+    _SQLITE_VEC_AVAILABLE = False
 
 
 class DenseHealthState(enum.StrEnum):
@@ -38,12 +49,6 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
-def _unpack_embedding(data: bytes) -> list[float]:
-    import struct
-
-    return list(struct.unpack(f"{len(data) // 4}f", data))
-
-
 class DenseMemoryRetriever:
     def __init__(self, db: Database, provider: EmbeddingProvider | None = None) -> None:
         self._db = db
@@ -63,6 +68,7 @@ class DenseMemoryRetriever:
         query: str,
         limit: int = 40,
         include_archived: bool = False,
+        use_ann: bool = True,
     ) -> DenseRetrievalResult:
         import time
 
@@ -88,6 +94,20 @@ class DenseMemoryRetriever:
             result.latency_ms = (time.time() - t0) * 1000
             return result
 
+        # ── ANN path (sqlite-vec) ──
+        if use_ann and _SQLITE_VEC_AVAILABLE:
+            try:
+                dense_results = self._ann_search(
+                    workspace_id, query_vec, limit, include_archived
+                )
+                result.health_state = DenseHealthState.HEALTHY
+                result.candidates = dense_results
+                result.latency_ms = (time.time() - t0) * 1000
+                return result
+            except Exception as e:
+                logger.debug("ANN search failed, falling back to brute-force: %s", e)
+
+        # ── Brute-force path (fallback) ──
         try:
             candidates = self._load_workspace_vectors(workspace_id, include_archived)
         except Exception as e:
@@ -232,6 +252,55 @@ class DenseMemoryRetriever:
                 continue
 
         return result
+
+    def _ann_search(
+        self,
+        workspace_id: str,
+        query_vec: list[float],
+        limit: int,
+        include_archived: bool,
+    ) -> list[dict[str, object]]:
+        """ANN vector search using sqlite-vec extension."""
+        # Load sqlite-vec into the connection
+        try:
+            sqlite_vec.load(self._db.connection)
+        except Exception:
+            raise RuntimeError("sqlite-vec load failed")
+
+        blob = struct.pack(f"{len(query_vec)}f", *query_vec)
+        archived_clause = "" if include_archived else " AND m.archived_at IS NULL"
+
+        rows = self._db.connection.execute(
+            "SELECT m.*, vec_distance_L2(me.embedding, ?) AS _ann_distance"
+            " FROM memory_embeddings_v2 me"
+            " JOIN memories m ON me.memory_id = m.id"
+            " WHERE m.workspace_id = ? AND m.deleted_at IS NULL"
+            + archived_clause
+            + " AND me.status = 'ready'"
+            " AND me.provider_name = ? AND me.model_name = ?"
+            " AND me.embedding_version = ?"
+            " ORDER BY _ann_distance ASC LIMIT ?",
+            (
+                blob,
+                workspace_id,
+                self._provider.provider_name,
+                self._provider.model_name,
+                _EMBEDDING_VERSION,
+                limit,
+            ),
+        ).fetchall()
+
+        dense_results: list[dict[str, object]] = []
+        for row in rows:
+            mem = dict(row)
+            # Convert L2 distance to similarity score: 1 / (1 + dist)
+            distance = float(row.get("_ann_distance", 0.0) or 0.0)
+            sim = 1.0 / (1.0 + distance)
+            mem["dense_score"] = sim
+            mem.pop("_ann_distance", None)
+            dense_results.append(mem)
+
+        return dense_results
 
     def has_ready_embeddings(self, workspace_id: str) -> bool:
         if not self._provider:

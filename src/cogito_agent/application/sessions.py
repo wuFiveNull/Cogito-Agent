@@ -39,12 +39,7 @@ class SessionApplicationService:
         clean_title = " ".join(title.split())[:80]
         if session is None or not clean_title:
             return None
-        with self._db.connection:
-            self._db.connection.execute(
-                "UPDATE sessions SET title=?, updated_at=datetime('now')"
-                " WHERE id=? AND workspace_id=? AND deleted_at IS NULL",
-                (clean_title, session_id, workspace_id),
-            )
+        self._sessions.update(session_id, workspace_id, title=clean_title)
         self._log(
             actor_id,
             "session_renamed",

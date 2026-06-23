@@ -93,16 +93,11 @@ class WorkspaceApplicationService:
         actor_id: str = "api",
     ) -> dict[str, int]:
         cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
-        with self._db.connection:
-            deleted_sessions = self._db.connection.execute(
-                "DELETE FROM sessions WHERE workspace_id=?"
-                " AND deleted_at IS NOT NULL AND deleted_at < ?",
-                (workspace_id, cutoff),
-            ).rowcount
-            deleted_traces = self._db.connection.execute(
-                "DELETE FROM traces WHERE workspace_id=? AND ended_at IS NOT NULL AND ended_at < ?",
-                (workspace_id, cutoff),
-            ).rowcount
+        from cogito_agent.storage.repositories import SessionRepository, TraceRepository
+        sessions_repo = SessionRepository(self._db)
+        traces_repo = TraceRepository(self._db)
+        deleted_sessions = sessions_repo.cleanup_soft_deleted_before(workspace_id, cutoff)
+        deleted_traces = traces_repo.cleanup_old_traces_before(workspace_id, cutoff)
         self._log(actor_id, "workspace.cleanup", workspace_id, workspace_id)
         return {
             "deleted_sessions": deleted_sessions,

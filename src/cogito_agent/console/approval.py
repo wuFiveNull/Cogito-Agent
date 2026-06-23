@@ -31,9 +31,9 @@ CONSOLE_ACTOR = "console"
 
 
 def _get_db() -> _Database:
-    from cogito_agent.api.app import get_db as _get_shared_db
+    from cogito_agent.storage import get_db
 
-    return _get_shared_db()
+    return get_db()
 
 
 def _ensure_workspace(workspace_id: str) -> None:
@@ -50,50 +50,20 @@ def _list_approvals(
     limit: int = 100,
 ) -> list[dict[str, object]]:
     db = _get_db()
-    sql = "SELECT * FROM approval_records WHERE workspace_id=?"
-    params: list[Any] = [workspace_id]
-
-    if status and status != "all":
-        sql += " AND status=?"
-        params.append(status)
-
-    if q:
-        sql += " AND (capability_name LIKE ? OR operation LIKE ? OR resource LIKE ?)"
-        like = f"%{q}%"
-        params.append(like)
-        params.append(like)
-        params.append(like)
-
-    sql += " ORDER BY created_at DESC LIMIT ?"
-    params.append(limit)
-    rows = db.connection.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    from cogito_agent.storage.repositories import ApprovalRepository
+    return ApprovalRepository(db).list_by_filters(workspace_id, status=status, q=q, limit=limit)
 
 
 def _approval_stats(workspace_id: str) -> dict[str, int]:
     db = _get_db()
-    cur = db.connection
-    total = cur.execute(
-        "SELECT COUNT(*) FROM approval_records WHERE workspace_id=?", (workspace_id,)
-    ).fetchone()[0]
-    pending = cur.execute(
-        "SELECT COUNT(*) FROM approval_records WHERE workspace_id=? AND status='pending'",
-        (workspace_id,),
-    ).fetchone()[0]
-    approved = cur.execute(
-        "SELECT COUNT(*) FROM approval_records WHERE workspace_id=? AND status='approved'",
-        (workspace_id,),
-    ).fetchone()[0]
-    rejected = cur.execute(
-        "SELECT COUNT(*) FROM approval_records WHERE workspace_id=? AND status='rejected'",
-        (workspace_id,),
-    ).fetchone()[0]
-    return {
-        "total": total,
-        "pending": pending,
-        "approved": approved,
-        "rejected": rejected,
-    }
+    from cogito_agent.storage.repositories import ApprovalRepository
+    repo = ApprovalRepository(db)
+    all_rows = repo.list_by_filters(workspace_id, limit=100000)
+    total = len(all_rows)
+    pending = sum(1 for r in all_rows if r.get("status") == "pending")
+    approved = sum(1 for r in all_rows if r.get("status") == "approved")
+    rejected = sum(1 for r in all_rows if r.get("status") == "rejected")
+    return {"total": total, "pending": pending, "approved": approved, "rejected": rejected}
 
 
 def _redact_item(item: dict[str, object]) -> dict[str, object]:
@@ -114,16 +84,11 @@ def _audit_log(
     details: dict[str, object] | None = None,
     request_id: str = "",
 ) -> None:
-    from cogito_agent.governance.audit import AuditLogger
+    from cogito_agent.application.audit import log_audit
 
-    db = _get_db()
-    AuditLogger(db).log(
-        actor_id=actor,
-        action=action,
-        resource=resource,
-        workspace_id=workspace_id,
+    log_audit(
+        _get_db(), actor, action, resource, workspace_id,
         details=json.dumps(details or {}, default=str),
-        redact_details=True,
     )
 
 

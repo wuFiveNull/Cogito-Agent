@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -121,13 +122,15 @@ class MemoryRetrievalService:
         result: MemoryRecallResult,
         ctx: MemoryQueryContext,
         t0: float,
+        read_only: bool = False,
     ) -> MemoryRecallResult:
         result.latencies["total"] = (time.time() - t0) * 1000
         result.excluded_count = len(result.excluded)
-        try:
-            self._persist_trace(result, ctx)
-        except Exception as e:
-            logger.warning("Failed to persist retrieval trace: %s", e)
+        if not read_only:
+            try:
+                self._persist_trace(result, ctx)
+            except Exception as e:
+                logger.warning("Failed to persist retrieval trace: %s", e)
         return result
 
     def recall(
@@ -136,6 +139,8 @@ class MemoryRetrievalService:
         limit: int = 10,
         include_archived: bool = False,
         force_mode: str = "",
+        read_only: bool = False,
+        min_score: float | None = None,
     ) -> MemoryRecallResult:
         trace_id = str(uuid.uuid4())
         result = MemoryRecallResult(trace_id=trace_id)
@@ -160,7 +165,7 @@ class MemoryRetrievalService:
 
         # ── skip: degenerate case (empty message) ──
         if gate_result.mode == "skip":
-            return self._finalize(result, query_context, time.time())
+            return self._finalize(result, query_context, time.time(), read_only=read_only)
 
         config = self._get_config()
         type_policy = config.get("type_policy", {})
@@ -168,7 +173,9 @@ class MemoryRetrievalService:
         sparse_candidate_limit = config.get("sparse_candidate_limit", 40)
         resident_budget = config.get("resident_token_budget", 500)
         dynamic_budget = config.get("dynamic_token_budget", 1000)
-        min_score = config.get("min_final_score", 0.20)
+        min_score = (
+            config.get("min_final_score", 0.20) if min_score is None else min_score
+        )
 
         query = gate_result.enriched_query or query_context.current_message
         t0 = time.time()
@@ -214,7 +221,7 @@ class MemoryRetrievalService:
         result.sparse_candidate_count = len(sparse_candidates)
         result.dense_candidate_count = len(dense_candidates)
 
-        # ── Memory v2: always search memory_items table ────────────────
+        # ── Memory v2: search memory_items table ────────────────────────
         v2_selected: list[dict[str, object]] = []
         try:
             words = [w for w in query.split() if len(w) > 1] if query else []
@@ -223,7 +230,7 @@ class MemoryRetrievalService:
             if words:
                 for w in words:
                     params.append(f"%{w}%")
-            params.append(max(1, limit))
+            params.append(max(limit * 3, 20))
             rows = self._db.connection.execute(
                 f"SELECT id, summary as text, memory_type as type,"
                 f" reinforcement, emotional_weight, created_at, updated_at"
@@ -234,17 +241,55 @@ class MemoryRetrievalService:
                 f" LIMIT ?",
                 params,
             ).fetchall()
-            for row in rows:
-                entry = dict(row)
-                entry["retrieval_source"] = "memory_v2"
-                entry["id"] = str(entry["id"])
-                entry["_score"] = float(entry.get("reinforcement", 1) or 1) * 0.1
-                v2_selected.append(entry)
+
+            # Dense re-ranking for v2 items when provider is available
+            if rows and dense_available:
+                v2_texts = [str(r["summary"]) for r in rows]
+                try:
+                    v2_query_vec = self._dense.provider.embed_text(query)  # type: ignore[union-attr]
+                    v2_scored: list[tuple[float, dict[str, object]]] = []
+                    for row, text in zip(rows, v2_texts):
+                        entry = dict(row)
+                        entry["retrieval_source"] = "memory_v2"
+                        entry["id"] = str(entry["id"])
+                        # Compute simple text overlap score as dense proxy
+                        doc_vec = self._dense.provider.embed_text(text)
+                        sim = max(
+                            0.0,
+                            sum(a * b for a, b in zip(v2_query_vec, doc_vec))
+                            / (
+                                math.sqrt(sum(a * a for a in v2_query_vec))
+                                * math.sqrt(sum(b * b for b in doc_vec))
+                                or 1.0
+                            ),
+                        )
+                        reinforcement = float(entry.get("reinforcement", 1) or 1)
+                        combined = sim * 0.6 + min(reinforcement / 10.0, 1.0) * 0.4
+                        entry["_score"] = combined
+                        entry["dense_score"] = sim
+                        v2_scored.append((-combined, entry))
+                    v2_scored.sort(key=lambda x: x[0])
+                    v2_selected = [entry for _, entry in v2_scored[:limit]]
+                except Exception:
+                    # Fallback to reinforcement-only sorting
+                    for row in rows:
+                        entry = dict(row)
+                        entry["retrieval_source"] = "memory_v2"
+                        entry["id"] = str(entry["id"])
+                        entry["_score"] = float(entry.get("reinforcement", 1) or 1) * 0.1
+                        v2_selected.append(entry)
+            elif rows:
+                for row in rows:
+                    entry = dict(row)
+                    entry["retrieval_source"] = "memory_v2"
+                    entry["id"] = str(entry["id"])
+                    entry["_score"] = float(entry.get("reinforcement", 1) or 1) * 0.1
+                    v2_selected.append(entry)
         except Exception as e:
             logger.warning("Memory v2 search failed: %s", e)
 
         if not sparse_candidates and not dense_candidates and not v2_selected:
-            return self._finalize(result, query_context, t0)
+            return self._finalize(result, query_context, t0, read_only=read_only)
 
         fused = self._fusion.fuse(sparse_candidates, dense_candidates, query)
         result.union_candidate_count = len(fused)
@@ -333,7 +378,7 @@ class MemoryRetrievalService:
         result.dynamic_memories = selected
         result.selected_count = len(selected)
 
-        return self._finalize(result, query_context, t0)
+        return self._finalize(result, query_context, t0, read_only=read_only)
 
     def _persist_trace(
         self,

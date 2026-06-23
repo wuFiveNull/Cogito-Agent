@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 from cogito_agent.application import build_runtime_kernel as RuntimeKernel  # noqa: N812
 from cogito_agent.capability import CapabilityRegistry, ToolResult
-from cogito_agent.memory import MemoryRetriever
 from cogito_agent.models import ModelAdapter, ModelResponse
+from cogito_agent.retrieval.service import create_retrieval_service
 from cogito_agent.runtime import TurnBudget
 from cogito_agent.shared import (
     CapabilityManifest,
@@ -106,8 +106,8 @@ def test_policy_denied_model_call(db: Database) -> None:
 
 def test_pipeline_success_with_memory_retrieval(db: Database) -> None:
     _setup(db)
-    mem_retriever = MemoryRetriever(db)
-    kernel = RuntimeKernel(db, memory_retriever=mem_retriever)
+    retrieval_svc = create_retrieval_service(db)
+    kernel = RuntimeKernel(db, memory_retrieval_service=retrieval_svc)
     result = kernel.process(_make_event("hello"))
     assert result.state == TurnState.completed
     assert result.output == "You said: hello"

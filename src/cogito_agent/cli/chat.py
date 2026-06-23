@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
+import sys
+import time
 import uuid
+from typing import Any
+
+import requests
 
 from cogito_agent.application import ChatApplicationService, build_runtime_kernel, default_workspace_path
 from cogito_agent.models import get_adapter, list_providers
@@ -11,7 +18,22 @@ from cogito_agent.skill import SkillRunner, WorkspaceSkill
 from cogito_agent.storage import Database, SessionRepository, WorkspaceRepository
 
 
-def run_cli(db_path: str = ":memory:") -> None:
+def run_cli(db_path: str = ":memory:", *,
+            connect_url: str | None = None, standalone: bool = False) -> None:
+    # Auto-detect: if no explicit --connect and not --standalone, check if
+    # a cogito-console is already running on the default port.
+    if connect_url is None and not standalone:
+        try:
+            r = requests.get("http://127.0.0.1:8000/api/v1/health", timeout=2)
+            if r.status_code == 200:
+                connect_url = "http://127.0.0.1:8000"
+        except requests.RequestException:
+            pass  # fall through to standalone
+
+    if connect_url:
+        _run_connect_mode(connect_url)
+        return
+
     from .config_manager import build_model_adapter_from_config, get_config
 
     db = Database(db_path)
@@ -179,15 +201,79 @@ def run_cli(db_path: str = ":memory:") -> None:
     print("Goodbye!")
 
 
+def _run_connect_mode(connect_url: str) -> None:
+    """Connect to a running cogito-console API instead of running a local kernel.
+
+    Messages are sent via HTTP POST to the console's /chat endpoint,
+    sharing its kernel rather than creating a local one.
+    """
+    base = connect_url.rstrip("/")
+    health_url = f"{base}/api/v1/health"
+
+    # Check health
+    try:
+        r = requests.get(health_url, timeout=5)
+        r.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"Cannot connect to {base}: {exc}")
+        sys.exit(1)
+
+    print(f"Cogito-Agent CLI  (connected to {base})")
+    print("  Type 'exit' to quit, '/help' for commands")
+    print("-" * 50)
+
+    # Get or create a session
+    try:
+        r = requests.get(f"{base}/sessions?workspace_id=default", timeout=5)
+        r.raise_for_status()
+        sessions = r.json()
+        if sessions:
+            session_id = sessions[0]["id"]
+        else:
+            r = requests.post(f"{base}/sessions", json={"workspace_id": "default", "title": "CLI Session"}, timeout=5)
+            r.raise_for_status()
+            session_id = r.json()["id"]
+    except requests.RequestException as exc:
+        print(f"Failed to get/create session: {exc}")
+        sys.exit(1)
+
+    while True:
+        try:
+            user_input = input("You: ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if user_input.lower() in ("exit", "quit", "/exit"):
+            break
+        if not user_input.strip():
+            continue
+
+        try:
+            r = requests.post(
+                f"{base}/chat",
+                json={
+                    "session_id": session_id,
+                    "workspace_id": "default",
+                    "text": user_input,
+                },
+                timeout=300,
+            )
+            r.raise_for_status()
+            data = r.json()
+            output = data.get("output", "")
+            if output:
+                print(f"Agent: {output}")
+        except requests.RequestException as exc:
+            print(f"Error: {exc}")
+
+
 def _show_memory_candidates(db: Database, workspace_id: str) -> None:
     """Memory v2: show recent memories (no pending buffer)."""
     try:
-        rows = db.connection.execute(
-            "SELECT id, summary, memory_type, reinforcement FROM memory_items"
-            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
-            " ORDER BY updated_at DESC LIMIT 10",
-            (workspace_id,),
-        ).fetchall()
+        from cogito_agent.storage.repositories import MemoryItemRepository
+        repo = MemoryItemRepository(db)
+        rows = repo.list_active_with_filters(workspace_id, limit=10)
         if not rows:
             print("No memories found.")
             return
@@ -275,15 +361,16 @@ def _handle_stream(db: Database, workspace_id: str, session_id: str, provider: s
         type=EventType.user_message,
         payload={"text": user_input},
     )
-    kernel = build_runtime_kernel(db, workspace_path=default_workspace_path(workspace_id))
+    kernel = build_runtime_kernel(
+        db, model_adapter=adapter, workspace_path=default_workspace_path(workspace_id),
+    )
     ChatApplicationService(kernel).process(event)
 
 
 def _list_all_memories(db: Database, workspace_id: str) -> None:
-    from cogito_agent.memory import MemoryRetriever
+    from cogito_agent.storage.repositories import MemoryRepository
 
-    retriever = MemoryRetriever(db)
-    memories = retriever.list_recent(workspace_id, limit=50)
+    memories = MemoryRepository(db).list_by_workspace(workspace_id, limit=50)
     if not memories:
         print("No memories.")
         return
@@ -421,16 +508,10 @@ def _export_workspace(db: Database, workspace_id: str) -> None:
         print(f"Workspace '{workspace_id}' not found.")
         return
 
-    cur = db.connection.execute(
-        "SELECT * FROM sessions WHERE workspace_id = ? AND deleted_at IS NULL",
-        (workspace_id,),
-    )
-    sessions = [dict(r) for r in cur.fetchall()]
-    cur = db.connection.execute(
-        "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
-        (workspace_id,),
-    )
-    memories = [dict(r) for r in cur.fetchall()]
+    from cogito_agent.storage.repositories import MemoryRepository, SessionRepository
+
+    sessions = SessionRepository(db).list_by_workspace(workspace_id)
+    memories = MemoryRepository(db).list_active_or_archived(workspace_id, limit=0)
 
     data = {"workspace": ws, "sessions": sessions, "memories": memories}
     print(json.dumps(data, indent=2, default=str)[:2000])

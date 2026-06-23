@@ -7,7 +7,6 @@ from cogito_agent.storage import Database
 from .daily_brief import DAILY_BRIEF_MANIFEST
 from .inbox_digest import INBOX_DIGEST_MANIFEST
 from .memory_consolidation import MEMORY_CONSOLIDATION_MANIFEST
-from .memory_optimizer import MEMORY_OPTIMIZER_MANIFEST
 from .project_status import PROJECT_STATUS_MANIFEST
 from .task_extraction import TASK_EXTRACTION_MANIFEST
 from .trace_review import TRACE_REVIEW_MANIFEST
@@ -16,7 +15,6 @@ BUILTIN_SKILL_MANIFESTS: list[SkillManifest] = [
     PROJECT_STATUS_MANIFEST,
     DAILY_BRIEF_MANIFEST,
     MEMORY_CONSOLIDATION_MANIFEST,
-    MEMORY_OPTIMIZER_MANIFEST,
     TASK_EXTRACTION_MANIFEST,
     TRACE_REVIEW_MANIFEST,
     INBOX_DIGEST_MANIFEST,

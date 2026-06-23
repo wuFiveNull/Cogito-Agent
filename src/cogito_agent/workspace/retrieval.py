@@ -69,10 +69,16 @@ class FileRetriever:
         self, workspace_id: str, query: str, limit: int = 10
     ) -> list[dict[str, object]]:
         try:
-            from cogito_agent.memory.vector import EmbeddingService, _unpack_embedding
+            from cogito_agent.embedding.service import (
+                _unpack_embedding,
+                create_embedding_provider_from_config,
+            )
+            from cogito_agent.config import Settings
 
-            svc = EmbeddingService()
-            query_vec = svc.encode(query)
+            provider = create_embedding_provider_from_config(Settings.get().memory.embedding)
+            if provider is None:
+                return []
+            query_vec = provider.embed_text(query)
             all_chunks = self._db.connection.execute(
                 "SELECT fc.id, fc.workspace_file_id, fc.chunk_index, fc.text,"
                 " fc.start_line, fc.end_line, fc.token_count,"

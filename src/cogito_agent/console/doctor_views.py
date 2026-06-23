@@ -25,7 +25,7 @@ CheckList = list[dict[str, object]]
 
 
 def _get_db():  # type: ignore[no-untyped-def]
-    from cogito_agent.api.app import get_db as _get_shared_db
+    from cogito_agent.storage import get_db as _get_shared_db
 
     return _get_shared_db()
 
@@ -43,13 +43,14 @@ def _count(table: str, where: str = "") -> int:
     try:
         from cogito_agent.storage import Database
 
-        db = Database()
-        db.initialize()
+        db = get_db()
+        if table == "audit_logs":
+            from cogito_agent.storage.repositories import AuditRepository
+            return AuditRepository(db).count_by_filters()
         sql = f"SELECT COUNT(*) AS cnt FROM {table}"
         if where:
             sql += f" WHERE {where}"
         row = db.connection.execute(sql).fetchone()
-        db.close()
         return row["cnt"] if row else 0
     except Exception:
         return -1
@@ -202,9 +203,9 @@ def _provider_checks() -> CheckList:
     provider = cfg.get("model.provider", "mock")
 
     try:
-        from cogito_agent.models.registry import _PROVIDERS
+        from cogito_agent.models.registry import get_provider_config, list_providers
 
-        providers = list(_PROVIDERS.keys())
+        providers = list_providers()
     except Exception:
         providers = []
 
@@ -237,7 +238,7 @@ def _provider_checks() -> CheckList:
 
     base_url = cfg.get("model.base_url", "")
     if provider != "mock" and not base_url:
-        pcfg = _PROVIDERS.get(provider) if providers else None
+        pcfg = get_provider_config(provider) if providers else None
         if pcfg and hasattr(pcfg, "base_url") and pcfg.base_url:
             checks.append(_check("provider", "base_url", "ok", f"using default: {pcfg.base_url}"))
         else:
@@ -373,85 +374,10 @@ def _secrets_checks() -> CheckList:
 
 def _governance_checks() -> CheckList:
     checks: CheckList = []
-
-    try:
-        from cogito_agent.governance import PolicyEngine
-
-        PolicyEngine()
-        checks.append(_check("governance", "policy_engine", "ok", "available"))
-    except Exception:
-        checks.append(_check("governance", "policy_engine", "warning", "not available"))
-
-    try:
-        from cogito_agent.storage import Database
-        from cogito_agent.storage.repositories import ApprovalRepository
-
-        db = Database()
-        db.initialize()
-        ApprovalRepository(db)
-        checks.append(_check("governance", "approval_repo", "ok", "available"))
-        db.close()
-    except Exception:
-        checks.append(_check("governance", "approval_repo", "warning", "not available"))
-
-    try:
-        from cogito_agent.governance import AuditLogger
-        from cogito_agent.storage import Database
-
-        db = Database()
-        db.initialize()
-        AuditLogger(db)
-        checks.append(_check("governance", "audit_store", "ok", "available"))
-        db.close()
-    except Exception:
-        checks.append(_check("governance", "audit_store", "warning", "not available"))
-
-    try:
-        from cogito_agent.storage import Database
-        from cogito_agent.trace import Tracer
-
-        db = Database()
-        db.initialize()
-        Tracer(db)
-        checks.append(_check("governance", "trace_store", "ok", "available"))
-        db.close()
-    except Exception:
-        checks.append(_check("governance", "trace_store", "warning", "not available"))
-
-    try:
-        from datetime import UTC, datetime, timedelta
-
-        cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
-        from cogito_agent.storage import Database
-
-        db = Database()
-        db.initialize()
-        cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at >= ?", (cutoff,)
-        )
-        row = cur.fetchone()
-        audit_count = row["cnt"] if row else 0
-        db.close()
-        checks.append(_check("governance", "recent_audit", "ok", f"{audit_count} events in 24h"))
-    except Exception:
-        checks.append(_check("governance", "recent_audit", "warning", "count unavailable"))
-
-    try:
-        cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
-        from cogito_agent.storage import Database
-
-        db = Database()
-        db.initialize()
-        cur = db.connection.execute(
-            "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ?", (cutoff,)
-        )
-        row = cur.fetchone()
-        trace_count = row["cnt"] if row else 0
-        db.close()
-        checks.append(_check("governance", "recent_traces", "ok", f"{trace_count} traces in 24h"))
-    except Exception:
-        checks.append(_check("governance", "recent_traces", "warning", "count unavailable"))
-
+    from cogito_agent.application.doctor import DoctorApplicationService
+    svc = DoctorApplicationService()
+    for result in svc.run_governance_checks():
+        checks.append(_check("governance", result["name"], result["status"], result["message"]))
     return checks
 
 

@@ -199,6 +199,48 @@ class SessionRepository:
         self._db.connection.commit()
         return True
 
+    def update(self, sid: str, workspace_id: str, **kwargs: str | None) -> dict[str, object] | None:
+        """Update session fields (title, etc.)."""
+        if not kwargs:
+            return self.get_by_id(sid, workspace_id)
+        set_parts = ", ".join(f"{k} = ?" for k in kwargs)
+        set_parts += ", updated_at = datetime('now')"
+        vals = list(kwargs.values()) + [sid, workspace_id]
+        self._db.connection.execute(
+            f"UPDATE sessions SET {set_parts}"
+            " WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            vals,
+        )
+        self._db.connection.commit()
+        return self.get_by_id(sid, workspace_id)
+
+    def restore(self, sid: str, workspace_id: str) -> dict[str, object] | None:
+        """Restore a soft-deleted session."""
+        self._db.connection.execute(
+            "UPDATE sessions SET deleted_at = NULL, updated_at = datetime('now')"
+            " WHERE id = ? AND workspace_id = ?",
+            (sid, workspace_id),
+        )
+        self._db.connection.commit()
+        return self.get_by_id(sid, workspace_id)
+
+    def hard_delete_by_workspace(self, workspace_id: str) -> int:
+        cur = self._db.connection.execute(
+            "DELETE FROM sessions WHERE workspace_id = ?", (workspace_id,)
+        )
+        self._db.connection.commit()
+        return cur.rowcount
+
+    def cleanup_soft_deleted_before(self, workspace_id: str, cutoff: str) -> int:
+        """Hard-delete sessions soft-deleted before the cutoff datetime."""
+        cur = self._db.connection.execute(
+            "DELETE FROM sessions WHERE workspace_id=? AND deleted_at IS NOT NULL"
+            " AND deleted_at < ?",
+            (workspace_id, cutoff),
+        )
+        self._db.connection.commit()
+        return cur.rowcount
+
 
 class MessageRepository:
     def __init__(self, db: Database) -> None:
@@ -259,6 +301,14 @@ class MessageRepository:
         self._db.connection.commit()
         return cur.rowcount
 
+    def count_by_time_range(self, since: str) -> int:
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) AS cnt FROM messages WHERE created_at >= ?",
+            (since,),
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
 
 class MemoryRepository:
     def __init__(self, db: Database) -> None:
@@ -280,46 +330,9 @@ class MemoryRepository:
                 (row["rowid"], text, ""),
             )
             self._db.connection.commit()
-        self._try_create_embedding(mid, text)
         result = self.get_by_id(mid, workspace_id)
         assert result is not None
         return result
-
-    def _try_create_embedding(self, mid: str, text: str) -> None:
-        try:
-            from cogito_agent.memory.vector import EmbeddingService, _pack_embedding
-
-            svc = EmbeddingService()
-            vec = svc.encode(text)
-            blob = _pack_embedding(vec)
-            self._db.connection.execute(
-                "INSERT OR REPLACE INTO memory_embeddings_v2"
-                " (memory_id, workspace_id, provider_name, model_name, dimension,"
-                " embedding, content_hash, embedding_version, status, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', datetime('now'), datetime('now'))",
-                (mid, "", "", svc.model_name, svc.dimension, blob, "", "2"),
-            )
-            self._db.connection.commit()
-        except Exception:
-            pass
-
-    def backfill_embeddings(self) -> int:
-        count = 0
-        try:
-            cur = self._db.connection.execute(
-                "SELECT id, text FROM memories WHERE deleted_at IS NULL"
-            )
-            for row in cur.fetchall():
-                mid, text = row["id"], row["text"]
-                existing = self._db.connection.execute(
-                    "SELECT 1 FROM memory_embeddings_v2 WHERE memory_id = ?", (mid,)
-                )
-                if existing.fetchone() is None:
-                    self._try_create_embedding(mid, text)
-                    count += 1
-        except Exception:
-            pass
-        return count
 
     def get_by_id(self, mid: str, workspace_id: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
@@ -328,12 +341,12 @@ class MemoryRepository:
         )
         return _row_to_dict(cur.fetchone())
 
-    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
+    def list_by_workspace(self, workspace_id: str, limit: int = 50) -> list[dict[str, object]]:
         sql = (
             "SELECT * FROM memories WHERE workspace_id = ?"
-            " AND deleted_at IS NULL ORDER BY created_at DESC"
+            " AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?"
         )
-        cur = self._db.connection.execute(sql, (workspace_id,))
+        cur = self._db.connection.execute(sql, (workspace_id, limit))
         return _rows_to_dicts(cur.fetchall())
 
     def pin(self, mid: str, workspace_id: str) -> bool:
@@ -539,6 +552,58 @@ class MemoryRepository:
             )
         self._db.connection.commit()
         return True
+
+    def list_active_or_archived(
+        self,
+        workspace_id: str,
+        *,
+        memory_type: str = "",
+        q: str = "",
+        archived_filter: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """List legacy memories with optional type, text, and archive filters."""
+        sql = (
+            "SELECT id, text, type, confidence, created_at, updated_at, archived_at"
+            " FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
+        )
+        params: list[object] = [workspace_id]
+        if memory_type:
+            sql += " AND type=?"
+            params.append(memory_type)
+        if archived_filter == "no":
+            sql += " AND archived_at IS NULL"
+        elif archived_filter == "yes":
+            sql += " AND archived_at IS NOT NULL"
+        if q:
+            sql += " AND (text LIKE ? OR summary LIKE ?)"
+            like = f"%{q}%"
+            params.append(like)
+            params.append(like)
+        sql += " ORDER BY created_at DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_active(self, workspace_id: str) -> int:
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) AS cnt FROM memories"
+            " WHERE workspace_id=? AND deleted_at IS NULL AND archived_at IS NULL",
+            (workspace_id,),
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def count_archived(self, workspace_id: str) -> int:
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) AS cnt FROM memories"
+            " WHERE workspace_id=? AND archived_at IS NOT NULL AND deleted_at IS NULL",
+            (workspace_id,),
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
 
     def get_by_id_including_deleted(self, mid: str, workspace_id: str) -> dict[str, object] | None:
         cur = self._db.connection.execute(
@@ -794,6 +859,38 @@ class ApprovalRepository:
             " WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
             (workspace_id, limit),
         )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_filters(
+        self,
+        workspace_id: str = "",
+        *,
+        status: str = "",
+        risk: str = "",
+        q: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """List approval_records with optional status, risk, and search filters."""
+        sql = "SELECT * FROM approval_records"
+        params: list[object] = []
+        clauses: list[str] = []
+        if workspace_id and workspace_id != "*":
+            clauses.append("workspace_id=?")
+            params.append(workspace_id)
+        if status and status != "all":
+            clauses.append("status=?")
+            params.append(status)
+        if q:
+            clauses.append("(capability_name LIKE ? OR operation LIKE ? OR resource LIKE ?)")
+            like = f"%{q}%"
+            params.append(like)
+            params.append(like)
+            params.append(like)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._db.connection.execute(sql, params)
         return _rows_to_dicts(cur.fetchall())
 
 
@@ -1227,3 +1324,981 @@ class WorkspaceSettingsRepository:
             )
         self._db.connection.commit()
         return self.get(workspace_id)
+
+
+class MemoryItemRepository:
+    """``memory_items`` table — structured memories (Memory v2)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(
+        self,
+        *,
+        mid: str,
+        workspace_id: str,
+        memory_type: str,
+        summary: str,
+        content_hash: str,
+        source_ref: str = "",
+        emotional_weight: int = 0,
+        extra_json: str = "{}",
+    ) -> dict[str, object]:
+        self._db.connection.execute(
+            "INSERT INTO memory_items"
+            " (id, workspace_id, memory_type, summary, content_hash,"
+            "  source_ref, emotional_weight, extra_json)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (mid, workspace_id, memory_type, summary, content_hash,
+             source_ref, emotional_weight, extra_json),
+        )
+        self._db.connection.commit()
+        return self.get_by_id(mid, workspace_id)
+
+    def get_by_id(self, mid: str, workspace_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memory_items WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def get_by_hash(
+        self, content_hash: str, workspace_id: str, memory_type: str
+    ) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memory_items"
+            " WHERE workspace_id = ? AND content_hash = ? AND memory_type = ?",
+            (workspace_id, content_hash, memory_type),
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def list_active_by_type(
+        self, workspace_id: str, memory_type: str, limit: int = 20
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM memory_items"
+            " WHERE workspace_id = ? AND status = 'active' AND memory_type = ?"
+            " ORDER BY updated_at DESC LIMIT ?",
+            (workspace_id, memory_type, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_active(
+        self,
+        workspace_id: str,
+        *,
+        exclude_type: str = "",
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        if exclude_type:
+            cur = self._db.connection.execute(
+                "SELECT * FROM memory_items"
+                " WHERE workspace_id = ? AND status='active' AND memory_type != ?"
+                " ORDER BY updated_at DESC LIMIT ?",
+                (workspace_id, exclude_type, limit),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT * FROM memory_items"
+                " WHERE workspace_id = ? AND status='active'"
+                " ORDER BY updated_at DESC LIMIT ?",
+                (workspace_id, limit),
+            )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_type_desc(
+        self,
+        workspace_id: str,
+        memory_type: str,
+        sort_col: str = "updated_at",
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT summary, memory_type, updated_at FROM memory_items"
+            " WHERE workspace_id=? AND status='active' AND memory_type=?"
+            " ORDER BY ? DESC LIMIT ?",
+            (workspace_id, memory_type, sort_col, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def reinforce(self, mid: str, workspace_id: str) -> None:
+        self._db.connection.execute(
+            "UPDATE memory_items SET reinforcement = reinforcement + 1,"
+            " updated_at = datetime('now') WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+
+    def supersede(self, mid: str, workspace_id: str) -> None:
+        self._db.connection.execute(
+            "UPDATE memory_items SET status = 'superseded',"
+            " updated_at = datetime('now') WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+
+    def archive(self, mid: str, workspace_id: str) -> None:
+        self._db.connection.execute(
+            "UPDATE memory_items SET status = 'archived',"
+            " updated_at = datetime('now') WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+
+    def soft_delete(self, mid: str, workspace_id: str) -> None:
+        self._db.connection.execute(
+            "UPDATE memory_items SET status = 'deleted',"
+            " updated_at = datetime('now') WHERE id = ? AND workspace_id = ?",
+            (mid, workspace_id),
+        )
+        self._db.connection.commit()
+
+    def list_recent_by_types(
+        self,
+        workspace_id: str,
+        types: tuple[str, ...],
+        limit: int = 10,
+    ) -> list[dict[str, object]]:
+        placeholders = ", ".join("?" for _ in types)
+        cur = self._db.connection.execute(
+            "SELECT summary, memory_type, updated_at FROM memory_items"
+            " WHERE workspace_id=? AND status='active'"
+            f" AND memory_type IN ({placeholders})"
+            " ORDER BY"
+            "   CASE memory_type"
+            "     WHEN 'profile' THEN 1"
+            "     WHEN 'preference' THEN 2"
+            "     WHEN 'procedure' THEN 3"
+            "     ELSE 4"
+            "   END,"
+            "   updated_at DESC LIMIT ?",
+            (workspace_id, *types, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_active(self, workspace_id: str, exclude_type: str = "") -> int:
+        if exclude_type:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM memory_items"
+                " WHERE workspace_id=? AND status='active' AND memory_type != ?",
+                (workspace_id, exclude_type),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM memory_items"
+                " WHERE workspace_id=? AND status='active'",
+                (workspace_id,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def list_active_with_filters(
+        self,
+        workspace_id: str,
+        *,
+        memory_type: str = "",
+        q: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """List active memory_items with optional type and text filters."""
+        sql = (
+            "SELECT id, summary AS text, memory_type AS type, reinforcement,"
+            " emotional_weight, created_at, updated_at FROM memory_items"
+            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
+        )
+        params: list[object] = [workspace_id]
+        if memory_type:
+            sql += " AND memory_type=?"
+            params.append(memory_type)
+        if q:
+            sql += " AND summary LIKE ?"
+            params.append(f"%{q}%")
+        sql += " ORDER BY updated_at DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_status_grouped(self, workspace_id: str) -> dict[str, int]:
+        """Return counts of active/archived/superseded memory items."""
+        cur = self._db.connection.execute(
+            "SELECT status, COUNT(*) AS cnt FROM memory_items"
+            " WHERE workspace_id=? AND memory_type != '_recent_context'"
+            " GROUP BY status",
+            (workspace_id,),
+        )
+        return {str(row["status"]): row["cnt"] for row in cur.fetchall()}
+
+
+class TraceRepository:
+    """``traces`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def list_by_workspace(
+        self, workspace_id: str = "", limit: int = 20, offset: int = 0
+    ) -> list[dict[str, object]]:
+        if workspace_id and workspace_id != "*":
+            cur = self._db.connection.execute(
+                "SELECT id, workspace_id, session_id, root_event_id,"
+                " status, started_at, ended_at"
+                " FROM traces WHERE workspace_id=? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (workspace_id, limit, offset),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT id, workspace_id, session_id, root_event_id,"
+                " status, started_at, ended_at"
+                " FROM traces ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        return _rows_to_dicts(cur.fetchall())
+
+    def get_spans_by_trace(self, trace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM spans WHERE trace_id = ? ORDER BY started_at", (trace_id,)
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def get_source_lineage_by_trace(self, trace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM source_lineage WHERE trace_id = ? ORDER BY rowid", (trace_id,)
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def get_context_items_by_trace(self, trace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT * FROM context_items WHERE trace_id = ? ORDER BY rank", (trace_id,)
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_spans_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT sp.* FROM spans sp"
+            " JOIN traces t ON sp.trace_id = t.id"
+            " WHERE t.workspace_id = ?",
+            (workspace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_time_range(self, since: str, workspace_id: str = "") -> int:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM traces"
+                " WHERE started_at >= ? AND workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM traces WHERE started_at >= ?",
+                (since,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def count_failed_by_time_range(self, since: str, workspace_id: str = "") -> int:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM traces"
+                " WHERE started_at >= ? AND status='error' AND workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM traces"
+                " WHERE started_at >= ? AND status='error'",
+                (since,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def get_by_id(self, trace_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM traces WHERE id = ?", (trace_id,)
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def get_detail_with_spans(self, trace_id: str) -> dict[str, object] | None:
+        """Return a trace with its spans, model_calls, tool_calls, and audits."""
+        trace = self.get_by_id(trace_id)
+        if trace is None:
+            return None
+        spans = self._db.connection.execute(
+            "SELECT * FROM spans WHERE trace_id = ? ORDER BY started_at", (trace_id,)
+        )
+        trace["spans"] = _rows_to_dicts(spans.fetchall())
+        model_calls = self._db.connection.execute(
+            "SELECT provider, model, input_token_count, output_token_count,"
+            " latency_ms, stop_reason, error FROM model_calls"
+            " WHERE trace_id = ? ORDER BY id", (trace_id,)
+        )
+        trace["model_calls"] = _rows_to_dicts(model_calls.fetchall())
+        tool_calls = self._db.connection.execute(
+            "SELECT capability_name, decision, status, latency_ms, error"
+            " FROM tool_calls WHERE trace_id = ? ORDER BY id", (trace_id,)
+        )
+        trace["tool_calls"] = _rows_to_dicts(tool_calls.fetchall())
+        audits = self._db.connection.execute(
+            "SELECT action, decision, reason, created_at FROM audit_logs"
+            " WHERE trace_id = ? ORDER BY created_at", (trace_id,)
+        )
+        trace["audits"] = _rows_to_dicts(audits.fetchall())
+        return trace
+
+    def list_by_filters(
+        self,
+        workspace_id: str,
+        *,
+        status: str = "",
+        q: str = "",
+        time_range: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        from datetime import UTC, datetime, timedelta
+        sql = "SELECT * FROM traces WHERE workspace_id=?"
+        params: list[object] = [workspace_id]
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        if time_range and time_range != "all":
+            days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
+            days = days_map.get(time_range, 0)
+            if days:
+                cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+                sql += " AND started_at >= ?"
+                params.append(cutoff)
+        if q:
+            sql += " AND (id LIKE ? OR session_id LIKE ?)"
+            like = f"%{q}%"
+            params.append(like)
+            params.append(like)
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_filters(
+        self,
+        workspace_id: str,
+        *,
+        status: str = "",
+        time_range: str = "",
+    ) -> int:
+        from datetime import UTC, datetime, timedelta
+        sql = "SELECT COUNT(*) AS cnt FROM traces WHERE workspace_id=?"
+        params: list[object] = [workspace_id]
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        if time_range and time_range != "all":
+            days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
+            days = days_map.get(time_range, 0)
+            if days:
+                cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+                sql += " AND started_at >= ?"
+                params.append(cutoff)
+        cur = self._db.connection.execute(sql, params)
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def hard_delete_by_workspace(self, workspace_id: str) -> int:
+        cur = self._db.connection.execute(
+            "DELETE FROM traces WHERE workspace_id = ?", (workspace_id,)
+        )
+        self._db.connection.commit()
+        return cur.rowcount
+
+    def cleanup_old_traces_before(self, workspace_id: str, cutoff: str) -> int:
+        """Hard-delete completed traces ended before the cutoff datetime."""
+        cur = self._db.connection.execute(
+            "DELETE FROM traces WHERE workspace_id=? AND ended_at IS NOT NULL"
+            " AND ended_at < ?",
+            (workspace_id, cutoff),
+        )
+        self._db.connection.commit()
+        return cur.rowcount
+
+
+class ModelCallRepository:
+    """``model_calls`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def count_by_time_range(self, since: str, workspace_id: str = "") -> int:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM model_calls mc"
+                " JOIN traces t ON mc.trace_id = t.id"
+                " WHERE t.started_at >= ? AND t.workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM model_calls mc"
+                " JOIN traces t ON mc.trace_id = t.id"
+                " WHERE t.started_at >= ?",
+                (since,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def avg_latency(self, since: str, workspace_id: str = "") -> float:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT AVG(mc.latency_ms) AS avg_lat FROM model_calls mc"
+                " JOIN traces t ON mc.trace_id = t.id"
+                " WHERE t.started_at >= ? AND mc.latency_ms > 0"
+                " AND t.workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT AVG(mc.latency_ms) AS avg_lat FROM model_calls mc"
+                " JOIN traces t ON mc.trace_id = t.id"
+                " WHERE t.started_at >= ? AND mc.latency_ms > 0",
+                (since,),
+            )
+        row = cur.fetchone()
+        return round(row["avg_lat"], 1) if row and row["avg_lat"] else 0.0
+
+    def list_by_trace(self, trace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT provider, model, input_token_count, output_token_count,"
+            " latency_ms, stop_reason, error FROM model_calls"
+            " WHERE trace_id = ? ORDER BY id",
+            (trace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT mc.* FROM model_calls mc"
+            " JOIN traces t ON mc.trace_id = t.id"
+            " WHERE t.workspace_id = ?",
+            (workspace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+
+class ToolCallRepository:
+    """``tool_calls`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def count_by_time_range(self, since: str, workspace_id: str = "") -> int:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM tool_calls tc"
+                " JOIN traces t ON tc.trace_id = t.id"
+                " WHERE t.started_at >= ? AND t.workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM tool_calls tc"
+                " JOIN traces t ON tc.trace_id = t.id"
+                " WHERE t.started_at >= ?",
+                (since,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def list_by_trace(self, trace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT capability_name, decision, status, latency_ms, error"
+            " FROM tool_calls WHERE trace_id = ? ORDER BY id",
+            (trace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_workspace(self, workspace_id: str) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT tc.* FROM tool_calls tc"
+            " JOIN traces t ON tc.trace_id = t.id"
+            " WHERE t.workspace_id = ?",
+            (workspace_id,),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+
+class OutboxRepository:
+    """``outbox_messages`` table — autonomous notification outbox."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(
+        self,
+        *,
+        mid: str,
+        event_id: str,
+        decision_id: str,
+        workspace_id: str,
+        user_id: str,
+        title: str,
+        body: str = "",
+        priority: str = "normal",
+        source: str = "system",
+        trace_id: str = "",
+        status: str = "pending",
+    ) -> dict[str, object]:
+        self._db.connection.execute(
+            "INSERT INTO outbox_messages"
+            " (id, event_id, decision_id, workspace_id, user_id,"
+            "  title, body, status, priority, source, trace_id, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (mid, event_id, decision_id, workspace_id, user_id,
+             title, body, status, priority, source, trace_id),
+        )
+        self._db.connection.commit()
+        return {
+            "id": mid,
+            "event_id": event_id,
+            "decision_id": decision_id,
+            "workspace_id": workspace_id,
+            "status": status,
+        }
+
+    def get_by_id(self, mid: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM outbox_messages WHERE id = ?", (mid,)
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def list_by_status(
+        self,
+        statuses: tuple[str, ...],
+        workspace_id: str = "",
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        placeholders = ", ".join("?" for _ in statuses)
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT * FROM outbox_messages"
+                f" WHERE status IN ({placeholders}) AND workspace_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (*statuses, workspace_id, limit),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT * FROM outbox_messages"
+                f" WHERE status IN ({placeholders})"
+                " ORDER BY created_at DESC LIMIT ?",
+                (*statuses, limit),
+            )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_failed(
+        self, workspace_id: str = "", limit: int = 5
+    ) -> list[dict[str, object]]:
+        return self.list_by_status(
+            ("failed", "dead_letter"), workspace_id=workspace_id, limit=limit
+        )
+
+    def list_pending(self, workspace_id: str = "", limit: int = 50) -> list[dict[str, object]]:
+        return self.list_by_status(
+            ("pending",), workspace_id=workspace_id, limit=limit
+        )
+
+    def count_by_status(
+        self, statuses: tuple[str, ...], workspace_id: str = ""
+    ) -> int:
+        placeholders = ", ".join("?" for _ in statuses)
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM outbox_messages"
+                f" WHERE status IN ({placeholders}) AND workspace_id = ?",
+                (*statuses, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM outbox_messages"
+                f" WHERE status IN ({placeholders})",
+                (*statuses,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def update_status(
+        self, mid: str, status: str, extra: dict[str, str] | None = None
+    ) -> None:
+        extras = extra or {}
+        set_clause = "status = ?"
+        vals: list[str | None] = [status]
+        if "sent_at" in extras:
+            set_clause += ", sent_at = ?"
+            vals.append(extras["sent_at"])
+        if "error" in extras:
+            set_clause += ", last_error = ?"
+            vals.append(extras["error"])
+        if "title" in extras:
+            set_clause += ", title = ?"
+            vals.append(extras["title"])
+        self._db.connection.execute(
+            f"UPDATE outbox_messages SET {set_clause} WHERE id = ?",
+            [*vals, mid],
+        )
+        self._db.connection.commit()
+
+    def mark_failed(self, mid: str, error: str) -> None:
+        self.update_status(mid, "failed", {"error": error})
+
+    def mark_dead_letter(self, mid: str, error: str) -> None:
+        self.update_status(mid, "dead_letter", {"error": error})
+
+    def list_by_filters(
+        self,
+        workspace_id: str,
+        *,
+        status: str = "",
+        q: str = "",
+        time_range: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """List outbox_messages with optional status, text, and time-range filters."""
+        from datetime import UTC, datetime, timedelta
+        sql = "SELECT *, 'outbox' AS source FROM outbox_messages"
+        params: list[object] = []
+        clauses: list[str] = []
+        if workspace_id:
+            clauses.append("workspace_id = ?")
+            params.append(workspace_id)
+        if status and status != "all":
+            clauses.append("status = ?")
+            params.append(status)
+        if time_range and time_range != "all":
+            days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
+            days = days_map.get(time_range, 0)
+            if days:
+                cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+                clauses.append("created_at >= ?")
+                params.append(cutoff)
+        if q:
+            clauses.append("(title LIKE ? OR body LIKE ?)")
+            like = f"%{q}%"
+            params.append(like)
+            params.append(like)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_status_grouped(self, workspace_id: str) -> dict[str, int]:
+        """Return counts per status for outbox_messages."""
+        cur = self._db.connection.execute(
+            "SELECT status, COUNT(*) AS cnt FROM outbox_messages"
+            " WHERE workspace_id=? GROUP BY status",
+            (workspace_id,),
+        )
+        return {str(row["status"]): row["cnt"] for row in cur.fetchall()}
+
+
+class DriftRunRepository:
+    """``drift_runs`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def list_by_workspace(
+        self, workspace_id: str, limit: int = 20
+    ) -> list[dict[str, object]]:
+        cur = self._db.connection.execute(
+            "SELECT id, skill_name, status, created_at FROM drift_runs"
+            " WHERE workspace_id=? ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, limit),
+        )
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_failed(
+        self, since: str, workspace_id: str = "", limit: int = 5
+    ) -> list[dict[str, object]]:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT id, skill_name, error_message FROM drift_runs"
+                " WHERE status='failed' AND created_at >= ? AND workspace_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (since, workspace_id, limit),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT id, skill_name, error_message FROM drift_runs"
+                " WHERE status='failed' AND created_at >= ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (since, limit),
+            )
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_failed(self, since: str, workspace_id: str = "") -> int:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM drift_runs"
+                " WHERE status='failed' AND created_at >= ? AND workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM drift_runs"
+                " WHERE status='failed' AND created_at >= ?",
+                (since,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+
+class DriftStateRepository:
+    """``drift_state`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def get(self) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT enabled FROM drift_state WHERE id='main'"
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._db.connection.execute(
+            "INSERT INTO drift_state (id, enabled) VALUES ('main', ?)"
+            " ON CONFLICT(id) DO UPDATE SET enabled = ?",
+            (1 if enabled else 0, 1 if enabled else 0),
+        )
+        self._db.connection.commit()
+
+
+class DecisionRepository:
+    """``notification_decisions`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def save(self, decision: dict[str, object]) -> None:
+        self._db.connection.execute(
+            "INSERT INTO notification_decisions"
+            " (id, event_id, workspace_id, user_id, action, reason_code, reason,"
+            "  cost_score, priority_score, dedup_hit, quiet_hours_hit, quota_hit,"
+            "  requires_approval, trace_id, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                decision["id"],
+                decision["event_id"],
+                decision.get("workspace_id", "*"),
+                decision.get("user_id", ""),
+                decision["action"],
+                decision.get("reason_code", ""),
+                decision.get("reason", ""),
+                decision.get("cost_score", 0.0),
+                decision.get("priority_score", 0.0),
+                1 if decision.get("dedup_hit") else 0,
+                1 if decision.get("quiet_hours_hit") else 0,
+                1 if decision.get("quota_hit") else 0,
+                1 if decision.get("requires_approval") else 0,
+                decision.get("trace_id", ""),
+                decision.get("created_at", ""),
+            ),
+        )
+
+
+    def list_by_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        if workspace_id == "*":
+            cur = self._db.connection.execute(
+                "SELECT * FROM notification_decisions"
+                " ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT * FROM notification_decisions"
+                " WHERE workspace_id=? OR workspace_id='*'"
+                " ORDER BY created_at DESC LIMIT ?",
+                (workspace_id, limit),
+            )
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_time_range(self, since: str) -> int:
+        cur = self._db.connection.execute(
+            "SELECT COUNT(*) AS cnt FROM notification_decisions WHERE created_at >= ?",
+            (since,),
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+
+class DaemonStateRepository:
+    """``daemon_state`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def get(self) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT status, crash_marker FROM daemon_state WHERE id = 'main'"
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def update(self, **kwargs: str | None) -> None:
+        now = __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat()
+        cols = ", ".join(kwargs.keys())
+        placeholders = ", ".join("?" for _ in kwargs)
+        vals = list(kwargs.values())
+        set_clause = ", ".join(f"{k} = ?" for k in kwargs)
+        self._db.connection.execute(
+            "INSERT INTO daemon_state (id, status, updated_at)"
+            " VALUES ('main', 'running', ?)"
+            " ON CONFLICT(id) DO UPDATE SET status = COALESCE(?, status), updated_at = ?",
+            (now, kwargs.get("status"), now),
+        )
+        if cols:
+            self._db.connection.execute(
+                f"INSERT INTO daemon_state (id, {cols}, updated_at)"
+                f" VALUES ('main', {placeholders}, ?)"
+                f" ON CONFLICT(id) DO UPDATE SET {set_clause}, updated_at = ?",
+                [*vals, now, *vals, now],
+            )
+        self._db.connection.commit()
+
+
+class AuditRepository:
+    """``audit_logs`` table — read-only query access.
+
+    Writes go through ``AuditLogger`` in ``cogito_agent.governance.audit``.
+    This repository fills the read-side gap so views and CLIs never write raw SQL.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def list_by_filters(
+        self,
+        workspace_id: str = "",
+        *,
+        action: str = "",
+        actor: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        sql = "SELECT al.* FROM audit_logs al"
+        params: list[object] = []
+        clauses: list[str] = []
+        if workspace_id:
+            clauses.append("al.workspace_id = ?")
+            params.append(workspace_id)
+        if action:
+            clauses.append("al.action = ?")
+            params.append(action)
+        if actor:
+            clauses.append("al.actor_id = ?")
+            params.append(actor)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY al.created_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def list_by_time_range(
+        self,
+        since: str,
+        workspace_id: str = "",
+        *,
+        action: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        sql = "SELECT al.* FROM audit_logs al"
+        params: list[object] = []
+        clauses: list[str] = ["al.created_at >= ?"]
+        params.append(since)
+        if workspace_id:
+            clauses.append("al.workspace_id = ?")
+            params.append(workspace_id)
+        if action:
+            clauses.append("al.action = ?")
+            params.append(action)
+        sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY al.created_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_time_range(self, since: str, workspace_id: str = "") -> int:
+        if workspace_id:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM audit_logs"
+                " WHERE created_at >= ? AND workspace_id = ?",
+                (since, workspace_id),
+            )
+        else:
+            cur = self._db.connection.execute(
+                "SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at >= ?",
+                (since,),
+            )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
+
+    def get_by_id(self, audit_id: str) -> dict[str, object] | None:
+        cur = self._db.connection.execute(
+            "SELECT * FROM audit_logs WHERE id = ?", (audit_id,)
+        )
+        return _row_to_dict(cur.fetchone())
+
+    def list_by_advanced_filters(
+        self,
+        *,
+        workspace_id: str = "",
+        actor: str = "",
+        operation: str = "",
+        q: str = "",
+        since: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """List audit_logs with dynamic filters — used by console/audit_views."""
+        sql = "SELECT al.* FROM audit_logs al"
+        params: list[object] = []
+        clauses: list[str] = []
+        if workspace_id and workspace_id != "*":
+            clauses.append("al.workspace_id=?")
+            params.append(workspace_id)
+        if actor:
+            clauses.append("al.actor_id=?")
+            params.append(actor)
+        if operation:
+            clauses.append("al.action LIKE ?")
+            params.append(f"%{operation}%")
+        if q:
+            clauses.append(
+                "(al.actor_id LIKE ? OR al.action LIKE ?"
+                " OR al.resource LIKE ? OR al.trace_id LIKE ?"
+                " OR al.reason LIKE ?)"
+            )
+            like = f"%{q}%"
+            for _ in range(5):
+                params.append(like)
+        if since:
+            clauses.append("al.created_at >= ?")
+            params.append(since)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY al.created_at DESC LIMIT ?"
+        params.append(limit)
+        cur = self._db.connection.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall())
+
+    def count_by_filters(
+        self,
+        workspace_id: str = "",
+    ) -> int:
+        wc = "WHERE workspace_id=?" if workspace_id and workspace_id != "*" else ""
+        params = (workspace_id,) if workspace_id and workspace_id != "*" else ()
+        row = self._db.connection.execute(
+            f"SELECT COUNT(*) AS cnt FROM audit_logs {wc}", params
+        ).fetchone()
+        return row["cnt"] if row else 0

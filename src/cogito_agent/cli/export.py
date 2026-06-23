@@ -3,8 +3,18 @@ from __future__ import annotations
 import json
 
 from cogito_agent.storage import Database
-from cogito_agent.storage.repositories import WorkspaceRepository
-from cogito_agent.trace.redaction import RedactionHelper
+from cogito_agent.storage.repositories import (
+    AuditRepository,
+    MemoryItemRepository,
+    MemoryRepository,
+    ModelCallRepository,
+    SessionRepository,
+    ToolCallRepository,
+    TraceRepository,
+    WorkspaceRepository,
+    WorkspaceSettingsRepository,
+)
+from cogito_agent.shared.redaction import RedactionHelper
 
 
 def _redact_dict(obj: object, helper: RedactionHelper) -> object:
@@ -31,81 +41,38 @@ def export_workspace(
     if ws is None:
         raise ValueError(f"Workspace '{workspace_id}' not found")
 
-    data: dict[str, object] = {
-        "workspace": dict(ws),
-        "sessions": [],
-    }
-
-    cur = db.connection.execute(
-        "SELECT * FROM sessions WHERE workspace_id = ? AND deleted_at IS NULL",
-        (workspace_id,),
-    )
-    data["sessions"] = [dict(r) for r in cur.fetchall()]
+    sess_repo = SessionRepository(db)
+    data["sessions"] = sess_repo.list_by_workspace(workspace_id)
 
     if include_memories:
         try:
-            cur = db.connection.execute(
-                "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
-                (workspace_id,),
-            )
-            data["memories"] = [dict(r) for r in cur.fetchall()]
+            mem_repo = MemoryRepository(db)
+            data["memories"] = mem_repo.list_active_or_archived(workspace_id, limit=0)
         except Exception:
             data["memories"] = []
 
         try:
-            rows = db.connection.execute(
-                "SELECT id, summary, memory_type, reinforcement FROM memory_items"
-                " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
-                " ORDER BY updated_at DESC LIMIT 50",
-                (workspace_id,),
-            ).fetchall()
-            data["memory_candidates"] = [dict(r) for r in rows]
+            mi_repo = MemoryItemRepository(db)
+            data["memory_candidates"] = mi_repo.list_active_with_filters(workspace_id, limit=50)
         except Exception:
             data["memory_candidates"] = []
 
     if include_traces:
-        cur = db.connection.execute("SELECT * FROM traces WHERE workspace_id = ?", (workspace_id,))
-        data["traces"] = [dict(r) for r in cur.fetchall()]
+        trace_repo = TraceRepository(db)
+        data["traces"] = trace_repo.list_by_workspace(workspace_id, limit=0)
 
-        cur = db.connection.execute(
-            "SELECT * FROM model_calls mc"
-            " JOIN traces t ON mc.trace_id = t.id"
-            " WHERE t.workspace_id = ?",
-            (workspace_id,),
-        )
-        data["model_calls"] = [dict(r) for r in cur.fetchall()]
-
-        cur = db.connection.execute(
-            "SELECT * FROM tool_calls tc"
-            " JOIN traces t ON tc.trace_id = t.id"
-            " WHERE t.workspace_id = ?",
-            (workspace_id,),
-        )
-        data["tool_calls"] = [dict(r) for r in cur.fetchall()]
-
-        cur = db.connection.execute(
-            "SELECT * FROM spans sp JOIN traces t ON sp.trace_id = t.id WHERE t.workspace_id = ?",
-            (workspace_id,),
-        )
-        data["spans"] = [dict(r) for r in cur.fetchall()]
+        data["model_calls"] = ModelCallRepository(db).list_by_workspace(workspace_id)
+        data["tool_calls"] = ToolCallRepository(db).list_by_workspace(workspace_id)
+        data["spans"] = trace_repo.list_spans_by_workspace(workspace_id)
 
     if include_audit:
-        cur = db.connection.execute(
-            "SELECT * FROM audit_logs WHERE workspace_id = ?", (workspace_id,)
-        )
-        data["audit_logs"] = [dict(r) for r in cur.fetchall()]
+        data["audit_logs"] = AuditRepository(db).list_by_filters(workspace_id=workspace_id, limit=0)
 
-    cur = db.connection.execute(
-        "SELECT * FROM workspace_settings WHERE workspace_id = ?",
-        (workspace_id,),
-    )
-    data["settings"] = [dict(r) for r in cur.fetchall()]
+    settings_repo = WorkspaceSettingsRepository(db)
+    data["settings"] = settings_repo.get(workspace_id)
 
-    cur = db.connection.execute(
-        "SELECT * FROM workspace_skills WHERE workspace_id = ?",
-        (workspace_id,),
-    )
-    data["workspace_skills"] = [dict(r) for r in cur.fetchall()]
+    from cogito_agent.skill.storage import WorkspaceSkill
+    data["workspace_skills"] = WorkspaceSkill(db).list_by_workspace(workspace_id)
 
     if redact:
         helper = RedactionHelper()

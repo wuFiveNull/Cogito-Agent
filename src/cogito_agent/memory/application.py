@@ -37,8 +37,8 @@ _TAG_MAP: dict[str, str] = {
 class MemoryApplicationService:
     """Unified memory service.
 
-    Files (new): create_candidate_file(), recall_search() for LLM tools.
-    SQLite (existing): accept_candidate(), reject_candidate(), edit_memory(), etc.
+    Provides write (create_candidate_file/edit/correct/delete/merge) and
+    search (recall_search) operations for both tool-call and API paths.
     """
 
     def __init__(
@@ -223,10 +223,10 @@ class MemoryApplicationService:
         return True
 
     def consolidate_memories(self, workspace_id: str, actor_id: str = "cli") -> int:
-        from cogito_agent.runtime.drift import DriftMaintenance
+        from cogito_agent.memory.maintenance import MemoryMaintenance
 
-        dm = DriftMaintenance(self._db)
-        count = dm.consolidate_memories(workspace_id)
+        dm = MemoryMaintenance(self._db)
+        count = dm.consolidate_legacy_memories(workspace_id)
         if count and self._audit:
             self._audit.log(
                 actor_id=actor_id,
@@ -239,23 +239,6 @@ class MemoryApplicationService:
         return count
 
     # ── Candidate accept/reject (file-based) ──
-
-    def accept_candidate(
-        self,
-        candidate_id: str,
-        workspace_id: str = "default",
-        actor_id: str = "api",
-    ) -> dict[str, object] | None:
-        # Memory v2: pending candidates go directly to memory_items via Memorizer
-        return {"id": candidate_id, "status": "pending_memorizer_integration"}
-
-    def reject_candidate(
-        self,
-        candidate_id: str,
-        workspace_id: str = "default",
-        actor_id: str = "api",
-    ) -> dict[str, object] | None:
-        return {"id": candidate_id, "status": "rejected"}
 
     # ── Memorizer-based write (replaces old PENDING.md) ──
 

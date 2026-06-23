@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
 import uuid
+from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
@@ -46,96 +46,13 @@ class ContextTraceSink(Protocol):
 
 
 _DEFAULT_BUDGET_SHARES: dict[str, float] = {
-    "system": 0.20,
-    "recent_messages": 0.25,
-    "retrieved_memory": 0.15,
-    "memory_file": 0.15,
-    "tool_file_context": 0.15,
+    "system": 0.15,
+    "recent_messages": 0.35,
+    "retrieved_memory": 0.10,
+    "memory_file": 0.10,
+    "tool_file_context": 0.20,
     "response_reserve": 0.10,
 }
-
-# ── Query intent detection patterns ───────────────────────────────────────
-# These are lightweight keyword-based classifiers that replace the old
-# static budget ratios with dynamic per-query allocation.
-
-_MEMORY_QUERY_PATTERNS = re.compile(
-    r"(?:我记得|我上次|之前说过|以前聊过|我记得你|"
-    r"what did i say|what was|remember when|"
-    r"我之前|之前提到|你记得|你还记得|"
-    r"回忆|想起|检索|查一下|查查)",
-    re.IGNORECASE,
-)
-
-_CODE_TASK_PATTERNS = re.compile(
-    r"(?:帮我改|写一个|实现|重构|修复bug|"
-    r"code|write a|implement|refactor|fix bug|"
-    r"添加功能|优化|写个|写一段|"
-    r"def |class |import |from |"
-    r"git |npm |pip )",
-    re.IGNORECASE,
-)
-
-_GREETING_PATTERNS = re.compile(
-    r"^(?:你好|hi|hello|hey|在吗|早上好|下午好|晚上好|"
-    r"good morning|good afternoon|good evening|"
-    r"你叫|你是谁|你是)",
-    re.IGNORECASE,
-)
-
-
-def _detect_query_intent(message: str) -> str:
-    """Classify the user's current message into an intent category.
-
-    Returns one of: ``"memory_query"``, ``"code_task"``, ``"greeting"``, ``"general"``.
-    """
-    if not message or not message.strip():
-        return "general"
-    msg = message.strip()
-    if _GREETING_PATTERNS.match(msg):
-        return "greeting"
-    if _MEMORY_QUERY_PATTERNS.search(msg):
-        return "memory_query"
-    if _CODE_TASK_PATTERNS.search(msg):
-        return "code_task"
-    return "general"
-
-
-def _compute_dynamic_budget_shares(message: str) -> dict[str, float]:
-    """Return budget shares tuned for the detected query intent.
-
-    Returns a copy so callers can mutate safely.
-    """
-    intent = _detect_query_intent(message)
-    shares = dict(_DEFAULT_BUDGET_SHARES)
-
-    if intent == "memory_query":
-        # Memory-heavy query: boost retrieval, shrink tool/file
-        shares["retrieved_memory"] = 0.30
-        shares["memory_file"] = 0.20
-        shares["tool_file_context"] = 0.05
-        shares["recent_messages"] = 0.15
-        shares["response_reserve"] = 0.10
-
-    elif intent == "code_task":
-        # Code task: boost tool/file context, shrink memory
-        shares["tool_file_context"] = 0.30
-        shares["memory_file"] = 0.05
-        shares["retrieved_memory"] = 0.05
-        shares["recent_messages"] = 0.20
-        shares["response_reserve"] = 0.10
-
-    elif intent == "greeting":
-        # Simple greeting: minimize everything
-        shares["system"] = 0.25
-        shares["recent_messages"] = 0.15
-        shares["retrieved_memory"] = 0.05
-        shares["memory_file"] = 0.05
-        shares["tool_file_context"] = 0.05
-        shares["response_reserve"] = 0.45
-
-    # else "general" → use defaults
-
-    return shares
 
 
 class ContextEngine:
@@ -158,6 +75,7 @@ class ContextEngine:
         trace_id: str = "",
         workspace_id: str = "",
         session_summary: dict[str, object] | None = None,
+        workspace_path: str = "",
     ) -> list[ContextItem]:
         items: list[ContextItem] = []
 
@@ -212,14 +130,25 @@ class ContextEngine:
                 )
             )
 
-        # ── memory file sources (priorities 30-55) ─────────────────────
+        # ── memory file sources (SELF.md, MEMORY.md, RECENT_CONTEXT.md, SESSION_SUMMARY.md) ──
 
-        # Memory v2: memory file context (SELF.md, MEMORY.md, RECENT_CONTEXT.md)
-        # is no longer injected from file store. These are now stored in
-        # memory_items table and retrieved via the hybrid retrieval pipeline.
-
-        # Memory v2: semantic retrieval is handled by MemoryRetrievalService,
-        # not by chunk_index. This block is intentionally removed.
+        if workspace_path:
+            for fname in ("SELF.md", "MEMORY.md", "RECENT_CONTEXT.md", "SESSION_SUMMARY.md"):
+                file_text = _load_memory_file(workspace_path, fname)
+                if file_text:
+                    source_id = fname.replace(".md", "").lower()
+                    items.append(
+                        ContextItem(
+                            source_type="memory_file",
+                            source_id=source_id,
+                            text=file_text,
+                            rank=0,
+                            token_estimate=self._estimate_tokens(file_text),
+                            reason="memory_file",
+                            freshness_score=1.0,
+                            trust_score=0.9,
+                        )
+                    )
 
         for i, msg in enumerate(recent_messages):
             text = str(msg.get("content", ""))
@@ -318,7 +247,7 @@ class ContextEngine:
     def _apply_budget_shares(
         self, items: list[ContextItem], current_message: str = "",
     ) -> list[ContextItem]:
-        shares = _compute_dynamic_budget_shares(current_message)
+        shares = dict(_DEFAULT_BUDGET_SHARES)
         budgets: dict[str, int] = {}
         for source_type, share in shares.items():
             budgets[source_type] = max(64, int(self._budget * share))
@@ -389,6 +318,12 @@ class ContextEngine:
         return default
 
 
-def _strip_recent_turns_section(text: str) -> str:
-    """Remove the ``## Recent Turns`` section from RECENT_CONTEXT.md."""
-    return re.sub(r"\n?## Recent Turns\n.*", "", text, flags=re.DOTALL).strip()
+def _load_memory_file(workspace_path: str, filename: str) -> str:
+    """Read a memory .md file from workspace_path/system/, returning empty string if missing."""
+    path = Path(workspace_path) / "system" / filename
+    try:
+        return path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return ""
+    except Exception:
+        return ""

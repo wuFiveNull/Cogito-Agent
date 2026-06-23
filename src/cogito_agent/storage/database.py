@@ -214,6 +214,30 @@ register_migration(
     """,
 )
 
+register_migration(26,
+    """
+    CREATE TABLE IF NOT EXISTS input_queue (
+        id           TEXT PRIMARY KEY,
+        channel      TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        session_id   TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending'
+                         CHECK (status IN ('pending', 'processing', 'done', 'failed')),
+        task_type    TEXT NOT NULL DEFAULT 'user_message',
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        started_at   TEXT,
+        done_at      TEXT,
+        error        TEXT,
+        retry_count  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_iq_status ON input_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_iq_created ON input_queue(created_at);
+    CREATE INDEX IF NOT EXISTS idx_iq_workspace ON input_queue(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_iq_task_type ON input_queue(task_type);
+    """,
+)
+
 register_migration(
     10,
     """
@@ -507,3 +531,45 @@ class Database:
         if ws_row:
             data["workspace"] = dict(ws_row)
         return data
+
+    @staticmethod
+    def quick_check(path: str) -> str | None:
+        """Run PRAGMA quick_check on a database file. Returns None if OK, error string if not."""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(path)
+            result = conn.execute("PRAGMA quick_check").fetchone()
+            conn.close()
+        except sqlite3.Error as exc:
+            return str(exc)
+        if result is None or result[0] != "ok":
+            return str(result[0] if result else "quick_check returned no result")
+        return None
+
+    @staticmethod
+    def export_table_json(path: str, table: str, order_by: str = "") -> list[dict[str, object]]:
+        """Export all rows from a table as a list of dicts. Uses a standalone connection."""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            sql = f"SELECT * FROM {table}"
+            if order_by:
+                sql += f" ORDER BY {order_by}"
+            rows = conn.execute(sql).fetchall()
+            conn.close()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    @staticmethod
+    def delete_all_secrets(path: str) -> None:
+        """Delete all rows from the secrets table (for redacted backup)."""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(path)
+            conn.execute("DELETE FROM secrets")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass

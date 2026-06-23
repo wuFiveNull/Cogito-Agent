@@ -54,6 +54,7 @@ class RuntimePersistencePort(Protocol):
         session_id: str,
         content: str,
         trace_id: str,
+        metadata: dict[str, object] | None = None,
     ) -> None: ...
 
 

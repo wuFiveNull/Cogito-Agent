@@ -43,15 +43,8 @@ def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
 
 
 def _check_database(path: Path) -> str | None:
-    try:
-        conn = sqlite3.connect(str(path))
-        result = conn.execute("PRAGMA quick_check").fetchone()
-        conn.close()
-    except sqlite3.Error as exc:
-        return str(exc)
-    if result is None or result[0] != "ok":
-        return str(result[0] if result else "quick_check returned no result")
-    return None
+    from cogito_agent.storage.database import Database
+    return Database.quick_check(str(path))
 
 
 def _get_default_data_dir() -> str:
@@ -61,16 +54,8 @@ def _get_default_data_dir() -> str:
 def _redact_db(db_path: str, out_path: str) -> None:
     """Copy a SQLite database and redact secret values."""
     _sqlite_copy(db_path, out_path)
-    try:
-        conn = sqlite3.connect(out_path)
-        try:
-            conn.execute("DELETE FROM secrets")
-        except Exception:
-            pass
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
+    from cogito_agent.storage.database import Database
+    Database.delete_all_secrets(out_path)
 
 
 def create_backup(
@@ -147,43 +132,37 @@ def create_backup(
 
         # 5. Audit log export
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM audit_logs ORDER BY created_at DESC").fetchall()
-            audit_data = [dict(r) for r in rows]
-            (tmp / "audit_logs.json").write_text(
-                json.dumps(audit_data, indent=2, default=str), encoding="utf-8"
-            )
-            conn.close()
-            manifest["files"].append("audit_logs.json")
+            from cogito_agent.storage.database import Database
+            audit_data = Database.export_table_json(db_path, "audit_logs", "created_at DESC")
+            if audit_data:
+                (tmp / "audit_logs.json").write_text(
+                    json.dumps(audit_data, indent=2, default=str), encoding="utf-8"
+                )
+                manifest["files"].append("audit_logs.json")
         except Exception:
             pass
 
         # 6. Trace log export
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM traces ORDER BY started_at DESC").fetchall()
-            trace_data = [dict(r) for r in rows]
-            (tmp / "traces.json").write_text(
-                json.dumps(trace_data, indent=2, default=str), encoding="utf-8"
-            )
-            conn.close()
-            manifest["files"].append("traces.json")
+            from cogito_agent.storage.database import Database
+            trace_data = Database.export_table_json(db_path, "traces", "started_at DESC")
+            if trace_data:
+                (tmp / "traces.json").write_text(
+                    json.dumps(trace_data, indent=2, default=str), encoding="utf-8"
+                )
+                manifest["files"].append("traces.json")
         except Exception:
             pass
 
         # 7. Workspace export
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM workspaces").fetchall()
-            ws_data = [dict(r) for r in rows]
-            (tmp / "workspaces.json").write_text(
-                json.dumps(ws_data, indent=2, default=str), encoding="utf-8"
-            )
-            conn.close()
-            manifest["files"].append("workspaces.json")
+            from cogito_agent.storage.database import Database
+            ws_data = Database.export_table_json(db_path, "workspaces")
+            if ws_data:
+                (tmp / "workspaces.json").write_text(
+                    json.dumps(ws_data, indent=2, default=str), encoding="utf-8"
+                )
+                manifest["files"].append("workspaces.json")
         except Exception:
             pass
 
@@ -349,34 +328,29 @@ def export_data(
         "sections": {},
     }
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    from cogito_agent.storage.database import Database
 
     if "memories" in sections:
         try:
-            rows = conn.execute("SELECT * FROM memories ORDER BY created_at DESC").fetchall()
-            export["sections"]["memories"] = [dict(r) for r in rows]
+            export["sections"]["memories"] = Database.export_table_json(db_path, "memories", "created_at DESC")
         except Exception:
             export["sections"]["memories"] = []
 
     if "traces" in sections:
         try:
-            rows = conn.execute("SELECT * FROM traces ORDER BY started_at DESC").fetchall()
-            export["sections"]["traces"] = [dict(r) for r in rows]
+            export["sections"]["traces"] = Database.export_table_json(db_path, "traces", "started_at DESC")
         except Exception:
             export["sections"]["traces"] = []
 
     if "audit" in sections:
         try:
-            rows = conn.execute("SELECT * FROM audit_logs ORDER BY created_at DESC").fetchall()
-            export["sections"]["audit"] = [dict(r) for r in rows]
+            export["sections"]["audit"] = Database.export_table_json(db_path, "audit_logs", "created_at DESC")
         except Exception:
             export["sections"]["audit"] = []
 
     if "messages" in sections:
         try:
-            rows = conn.execute("SELECT * FROM messages ORDER BY created_at DESC").fetchall()
-            export["sections"]["messages"] = [dict(r) for r in rows]
+            export["sections"]["messages"] = Database.export_table_json(db_path, "messages", "created_at DESC")
         except Exception:
             export["sections"]["messages"] = []
 

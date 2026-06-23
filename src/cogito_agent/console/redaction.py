@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cogito_agent.trace.redaction import RedactionHelper
+from cogito_agent.shared.redaction import RedactionHelper
 
 _redactor = RedactionHelper()
 

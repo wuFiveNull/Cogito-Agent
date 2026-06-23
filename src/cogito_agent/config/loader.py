@@ -197,7 +197,6 @@ class EmbeddingSettings(BaseModel):
     batch_size: int = 32
     normalize: bool = True
     verify_norm: bool = True
-    allow_mock_fallback: bool = False
     max_input_tokens: int = 8192
 
 

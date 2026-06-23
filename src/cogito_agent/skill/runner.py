@@ -874,3 +874,41 @@ class SkillRunner:
             error_code="skill_failed" if status == "failed" else "",
             error_message=error_message,
         )
+
+    def find_pending_approval_runs(self, limit: int = 20) -> list[dict[str, object]]:
+        """Find skill run logs pending approval with resume data."""
+        cur = self._db.connection.execute(
+            "SELECT id FROM skill_run_logs"
+            " WHERE resume_data_json IS NOT NULL AND status = 'pending_approval'"
+            " ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def get_skill_run_log(self, run_log_id: str) -> dict[str, object] | None:
+        """Get a skill run log by id with resume and step data."""
+        cur = self._db.connection.execute(
+            "SELECT resume_data_json, step_logs_json, status FROM skill_run_logs"
+            " WHERE id = ?",
+            (run_log_id,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_skill_run_logs_by_trace(self, trace_id: str) -> list[dict[str, object]]:
+        """Get all skill run logs for a given trace."""
+        cur = self._db.connection.execute(
+            "SELECT * FROM skill_run_logs WHERE trace_id = ? ORDER BY rowid",
+            (trace_id,),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            sj = r.get("step_logs_json")
+            if isinstance(sj, str):
+                try:
+                    import json
+                    r["steps"] = json.loads(sj)
+                except (json.JSONDecodeError, TypeError):
+                    r["steps"] = []
+            r.pop("step_logs_json", None)
+        return rows

@@ -26,7 +26,6 @@ LOW_RISK_MAINTENANCE_SKILLS: list[str] = [
     "memory_consolidation",
     "trace_review",
     "inbox_digest",
-    "memory_optimizer",
 ]
 
 MEDIUM_RISK_SKILLS: list[str] = [
@@ -118,8 +117,22 @@ class DriftRuntime:
         db: DriftDatabasePort,
         kernel_factory: Callable[[], RuntimeKernel] | None = None,
         max_workers: int = 2,
+        *,
+        kernel: RuntimeKernel | None = None,
     ) -> None:
+        """Background autonomy runtime for proactive skills.
+
+        Args:
+            db: Database port.
+            kernel_factory: Factory for creating new kernels per skill run.
+                Ignored when ``kernel`` is provided.
+            max_workers: Thread pool size.
+            kernel: **Shared** RuntimeKernel instance (e.g. the API singleton).
+                When set, ``DriftConsumer`` uses this kernel instead of creating
+                a new one per task, and ``kernel_factory`` is NOT used.
+        """
         self._db = db
+        self._kernel = kernel  # shared kernel (optional)
         self._kernel_factory = kernel_factory or (
             lambda: RuntimeKernel(db.create_runtime_services())
         )
@@ -139,10 +152,21 @@ class DriftRuntime:
         self._audit = runtime_services.audit
         self._runs = db.create_run_repository()
         self._worker_id = f"drift:{uuid.uuid4()}"
+        # Drift consumer for queue-based task execution
+        self._drift_queue = DriftTaskQueue(db)
+        consumer_kernel_factory: Callable[[], RuntimeKernel] = (
+            (lambda: kernel) if kernel is not None else self._kernel_factory
+        )
+        self._consumer = DriftConsumer(
+            self._drift_queue,
+            consumer_kernel_factory,
+        )
 
     def start(self) -> None:
         self._ensure_state()
         self._recover_expired_runs()
+        # Start the background DriftConsumer for queue-based task execution
+        self._consumer.start()
         if self._tick_thread is None or not self._tick_thread.is_alive():
             self._stop_event.clear()
             self._tick_thread = threading.Thread(
@@ -154,6 +178,7 @@ class DriftRuntime:
 
     def stop(self, wait: bool = True) -> None:
         self._stop_event.set()
+        self._consumer.stop()
         self._executor.shutdown(wait=wait)
         if self._tick_thread and self._tick_thread.is_alive():
             self._tick_thread.join(timeout=5)
@@ -386,7 +411,6 @@ class DriftRuntime:
             run_daily_brief,
             run_inbox_digest,
             run_memory_consolidation,
-            run_memory_optimizer,
             run_task_extraction,
             run_trace_review,
         )
@@ -394,7 +418,6 @@ class DriftRuntime:
         runners: dict[str, Any] = {
             "daily_brief": run_daily_brief,
             "memory_consolidation": run_memory_consolidation,
-            "memory_optimizer": run_memory_optimizer,
             "task_extraction": run_task_extraction,
             "trace_review": run_trace_review,
             "inbox_digest": run_inbox_digest,
@@ -610,43 +633,10 @@ class DriftMaintenance:
         self._db = db
 
     def consolidate_memories(self, workspace_id: str | None = None) -> int:
-        if workspace_id:
-            rows = self._db.connection.execute(
-                "SELECT id, text, workspace_id, rowid FROM memories"
-                " WHERE deleted_at IS NULL AND workspace_id = ?"
-                " ORDER BY text, created_at ASC",
-                (workspace_id,),
-            ).fetchall()
-        else:
-            rows = self._db.connection.execute(
-                "SELECT id, text, workspace_id, rowid FROM memories"
-                " WHERE deleted_at IS NULL"
-                " ORDER BY text, created_at ASC"
-            ).fetchall()
-        removed = 0
-        seen: dict[str, list[dict[str, object]]] = {}
-        for r in rows:
-            text = str(r["text"])
-            if text not in seen:
-                seen[text] = [dict(r)]
-            else:
-                seen[text].append(dict(r))
-        for text, group in seen.items():
-            if len(group) <= 1:
-                continue
-            for dup in group[1:]:
-                mid = dup["id"]
-                wid = str(dup["workspace_id"])
-                rowid = dup["rowid"]
-                self._db.connection.execute("DELETE FROM memories_fts WHERE rowid = ?", (rowid,))
-                self._db.connection.execute(
-                    "DELETE FROM memories WHERE id = ? AND workspace_id = ?",
-                    (mid, wid),
-                )
-                removed += 1
-        if removed:
-            self._db.connection.commit()
-        return removed
+        """Delegate to ``MemoryMaintenance`` in the memory layer."""
+        from cogito_agent.memory.maintenance import MemoryMaintenance
+
+        return MemoryMaintenance(self._db).consolidate_legacy_memories(workspace_id)
 
     def archive_stale_memories(self, days: int = 30) -> int:
         import uuid
@@ -758,3 +748,135 @@ class DriftMaintenance:
             "tool_calls": tool_count,
             "audit_logs": audit_count,
         }
+
+
+# ── DriftTaskQueue ────────────────────────────────────────────────────
+# Lightweight queue for Drift tasks, separate from user-facing MessageQueue.
+# Uses InputQueueRepository with task_type='drift_task' for persistence.
+
+
+class DriftTaskQueue:
+    """Thread-safe queue for Drift background tasks.
+
+    Unlike the user-facing ``MessageQueue``, this does NOT use an in-memory
+    ``asyncio.Queue`` — Drift runs on threads, not asyncio.  It relies on
+    the SQLite ``input_queue`` table for persistence and status tracking.
+    """
+
+    DRIFT_TASK_TYPE = "drift_task"
+
+    def __init__(self, db: Any) -> None:
+        from cogito_agent.storage.input_queue_repository import InputQueueRepository
+
+        self._repo = InputQueueRepository(db)
+
+    def enqueue(self, msg: "InboundMessage") -> str:
+        """Persist a drift task to the input_queue table."""
+        return self._repo.insert(msg, task_type=self.DRIFT_TASK_TYPE)
+
+    def claim_pending(self, limit: int = 5) -> list["InboundMessage"]:
+        """Claim the next batch of pending drift tasks.
+
+        Returns pending messages and resets stale ``processing`` entries.
+        """
+        from cogito_agent.storage.input_queue_repository import InputQueueRepository as _IR
+
+        rows = self._repo.list_by_task_type(self.DRIFT_TASK_TYPE, "pending", limit=limit)
+        if not rows:
+            # Also recover stale processing entries
+            rows = self._repo.list_by_task_type(
+                self.DRIFT_TASK_TYPE, "processing", limit=limit
+            )
+            # Reset them to pending (same logic as InputQueueRepository.recover_pending)
+            from datetime import timedelta
+
+            timeout = datetime.now(UTC) - timedelta(seconds=300)
+            timeout_str = timeout.strftime("%Y-%m-%d %H:%M:%S")
+            stale = [
+                r for r in rows
+                if r.get("started_at") and str(r["started_at"]) < timeout_str
+            ]
+            rows = stale
+            for r in rows:
+                self._repo.update_status(str(r["id"]), "pending")
+            if not rows:
+                return []
+        return [_IR.row_to_inbound(r) for r in rows]
+
+    def mark_processing(self, qid: str) -> None:
+        self._repo.update_status(qid, "processing")
+
+    def mark_done(self, qid: str) -> None:
+        self._repo.update_status(qid, "done")
+
+    def mark_failed(self, qid: str, error: str = "") -> None:
+        self._repo.update_status(qid, "failed", error=error)
+
+
+# ── DriftConsumer ─────────────────────────────────────────────────────
+
+
+class DriftConsumer:
+    """Background thread consumer for Drift tasks.
+
+    Polls ``DriftTaskQueue`` periodically and processes each task through
+    a shared ``RuntimeKernel`` (when available) or a freshly created one.
+    """
+
+    def __init__(
+        self,
+        queue: DriftTaskQueue,
+        kernel_factory: Callable[[], RuntimeKernel],
+        *,
+        poll_interval: float = 1.0,
+        max_tasks_per_cycle: int = 5,
+    ) -> None:
+        self._queue = queue
+        self._kernel_factory = kernel_factory
+        self._poll_interval = poll_interval
+        self._max_tasks = max_tasks_per_cycle
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name="drift-consumer",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._running = False
+        self._stop_event.set()
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    def _run_loop(self) -> None:
+        while self._running and not self._stop_event.is_set():
+            try:
+                tasks = self._queue.claim_pending(limit=self._max_tasks)
+                for inbound in tasks:
+                    qid = str(inbound.metadata.get("queue_id", ""))
+                    if not qid:
+                        continue
+                    self._queue.mark_processing(qid)
+                    try:
+                        kernel = self._kernel_factory()
+                        from cogito_agent.runtime.kernel import RuntimeKernel as _RK
+
+                        event = _RK._inbound_to_event(inbound)
+                        kernel.process(event)
+                        self._queue.mark_done(qid)
+                    except Exception as exc:
+                        self._queue.mark_failed(qid, str(exc))
+            except Exception:
+                pass  # Don't let one bad cycle kill the consumer
+            self._stop_event.wait(self._poll_interval)

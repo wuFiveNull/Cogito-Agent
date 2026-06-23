@@ -23,16 +23,17 @@ except Exception:
     _CONFIG_LOADER = _empty_config
 
 
-def _count(table: str, column: str = "id", where: str = "") -> int:
+def _count(table: str, column: str = "id", where: str = "", params: tuple[object, ...] = ()) -> int:
     try:
-        db = Database()
-        db.initialize()
+        from cogito_agent.storage import AuditRepository, get_db
+        db = get_db()
+        if table == "audit_logs":
+            return AuditRepository(db).count_by_filters()
         sql = f"SELECT COUNT({column}) AS cnt FROM {table}"
         if where:
             sql += f" WHERE {where}"
-        cur = db.connection.execute(sql)
+        cur = db.connection.execute(sql, params) if params else db.connection.execute(sql)
         row = cur.fetchone()
-        db.close()
         return row["cnt"] if row else 0
     except Exception:
         return 0
@@ -40,27 +41,23 @@ def _count(table: str, column: str = "id", where: str = "") -> int:
 
 def _count_since(table: str, column: str = "id", hours: int = 24) -> int:
     cutoff = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
-    return _count(table, where=f"created_at >= '{cutoff}'")
+    return _count(table, where="created_at >= ?", params=(cutoff,))
 
 
 def _pending_candidates_count() -> int:
     try:
-        db = Database()
-        row = db.connection.execute(
-            "SELECT COUNT(*) as c FROM memory_items WHERE status='active'"
-        ).fetchone()
-        return row["c"] if row else 0
+        from cogito_agent.storage import MemoryItemRepository, get_db
+        return MemoryItemRepository(get_db()).count_active("default")
     except Exception:
         return 0
 
 
 def _db_info() -> dict[str, object]:
     try:
-        db = Database()
-        db.initialize()
+        from cogito_agent.storage import get_db
+        db = get_db()
         ver = db.current_version()
         path = os.environ.get("COGITO_DB_PATH", ":memory:")
-        db.close()
         return {"ok": True, "path": path, "migration_version": ver}
     except Exception as exc:
         return {"ok": False, "path": "", "error": str(exc)}

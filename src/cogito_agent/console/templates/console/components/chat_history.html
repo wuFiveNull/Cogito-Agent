@@ -17,8 +17,42 @@
 <div class="message message-assistant" id="msg-{{ m.id | e }}">
   <div class="msg-bubble">
     <div class="msg-meta">Assistant</div>
+    {% if m.thinking_html %}
+    <details class="thinking-panel">
+      <summary>Thinking <span class="thinking-toggle">show</span></summary>
+      <div class="thinking-content">{{ m.thinking_html | safe }}</div>
+    </details>
+    {% endif %}
     <div class="msg-text markdown-body">{{ m.content_html | safe }}</div>
     <div class="msg-timestamp">{{ m.created_at[:19] | e }}</div>
+    {% if m.input_tokens or m.output_tokens %}
+    <div class="turn-usage-stats">
+      {% if m.model %}
+      <span class="usage-stat">
+        <span class="usage-label">Model</span>
+        <span class="usage-value">{{ m.model | e }}</span>
+      </span>
+      {% endif %}
+      {% if m.input_tokens %}
+      <span class="usage-stat">
+        <span class="usage-label">Input</span>
+        <span class="usage-value">{{ m.input_tokens }} tokens</span>
+      </span>
+      {% endif %}
+      {% if m.output_tokens %}
+      <span class="usage-stat">
+        <span class="usage-label">Output</span>
+        <span class="usage-value">{{ m.output_tokens }} tokens</span>
+      </span>
+      {% endif %}
+      {% if m.latency_ms %}
+      <span class="usage-stat">
+        <span class="usage-label">Latency</span>
+        <span class="usage-value">{{ (m.latency_ms / 1000) | round(1) }}s</span>
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if m.trace_id %}
     <button class="turn-inspect-button"
             hx-get="/console/chat/turns/{{ m.trace_id | e }}"

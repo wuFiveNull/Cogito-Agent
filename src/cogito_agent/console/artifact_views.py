@@ -24,7 +24,7 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _get_db() -> _Database:
-    from cogito_agent.api.app import get_db as _get_shared_db
+    from cogito_agent.storage import get_db as _get_shared_db
 
     return _get_shared_db()
 

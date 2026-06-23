@@ -27,7 +27,7 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _get_db() -> _Database:
-    from cogito_agent.api.app import get_db as _get_shared_db
+    from cogito_agent.storage import get_db as _get_shared_db
 
     return _get_shared_db()
 
@@ -106,34 +106,12 @@ async def inbox_list(
 
     # Get from outbox_messages (with real status tracking) AND inbox_items (legacy)
     # We prioritize outbox_messages as the primary source
-    outbox_where = "WHERE workspace_id=?" if CONSOLE_WORKSPACE_ID != "*" else ""
-    outbox_params: list[Any] = [CONSOLE_WORKSPACE_ID] if CONSOLE_WORKSPACE_ID != "*" else []
+    from cogito_agent.storage.repositories import OutboxRepository
 
-    if status and status != "all":
-        outbox_where += " AND status=?" if outbox_where else "WHERE status=?"
-        outbox_params.append(status)
-
-    if q:
-        like = f"%{q}%"
-        outbox_where += " AND (title LIKE ? OR body LIKE ? OR id LIKE ?)"
-        outbox_params.extend([like, like, like])
-
-    if time_range and time_range != "all":
-        from datetime import UTC, datetime, timedelta
-
-        days_map = {"1h": 1 / 24, "24h": 1, "7d": 7}
-        days = days_map.get(time_range, 0)
-        if days:
-            cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-            outbox_where += " AND created_at >= ?"
-            outbox_params.append(cutoff)
-
-    cur = db.connection.execute(
-        "SELECT *, 'outbox' AS source FROM outbox_messages"
-        f" {outbox_where} ORDER BY created_at DESC LIMIT 100",
-        outbox_params,
+    outbox_repo = OutboxRepository(db)
+    outbox_items = outbox_repo.list_by_filters(
+        CONSOLE_WORKSPACE_ID, status=status or "", q=q, time_range=time_range or "",
     )
-    outbox_items = [dict(r) for r in cur.fetchall()]
 
     # Also get inbox_items for legacy
     if not status or status == "all":
@@ -177,13 +155,9 @@ def _build_inbox_stats(db: _Database) -> dict[str, int]:
         "skipped": 0,
     }
     try:
-        cur = db.connection.execute(
-            "SELECT status, COUNT(*) AS cnt FROM outbox_messages"
-            " WHERE workspace_id=? GROUP BY status",
-            (CONSOLE_WORKSPACE_ID,),
-        )
-        for r in cur.fetchall():
-            stats[str(r["status"])] = r["cnt"]
+        from cogito_agent.storage.repositories import OutboxRepository
+        grouped = OutboxRepository(db).count_by_status_grouped(CONSOLE_WORKSPACE_ID)
+        stats.update(grouped)
     except Exception:
         pass
     return stats
@@ -199,11 +173,10 @@ async def inbox_detail(request: Request, item_id: str) -> HTMLResponse:
 
     item = None
     source = "outbox"
-    cur = db.connection.execute("SELECT * FROM outbox_messages WHERE id = ?", (item_id,))
-    row = cur.fetchone()
-    if row:
-        item = dict(row)
-    else:
+    from cogito_agent.storage.repositories import OutboxRepository
+    item = OutboxRepository(db).get_by_id(item_id)
+    if item is None:
+        source = "inbox"
         cur = db.connection.execute("SELECT * FROM inbox_items WHERE id = ?", (item_id,))
         row = cur.fetchone()
         if row:

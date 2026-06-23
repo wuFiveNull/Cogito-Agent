@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from cogito_agent.storage import Database
+from cogito_agent.storage.repositories import DaemonStateRepository as _DaemonStateRepository
 
 from .gate import NotificationGate
 from .scheduler import SchedulerEngine
@@ -21,24 +22,14 @@ class ProactiveEngine:
         self._scheduler = scheduler
         self._gate = notification_gate
         self._db = db
+        self._daemon_repo = _DaemonStateRepository(db) if db is not None else None
         self._tick_interval = tick_interval
         self._running = False
 
     def _update_state(self, **kwargs: str | None) -> None:
-        if not kwargs or self._db is None:
+        if not kwargs or self._daemon_repo is None:
             return
-        now = datetime.now(UTC).isoformat()
-        cols = ", ".join(kwargs.keys())
-        placeholders = ", ".join("?" for _ in kwargs)
-        vals = list(kwargs.values())
-        set_clause = ", ".join(f"{k} = ?" for k in kwargs)
-        self._db.connection.execute(
-            f"INSERT INTO daemon_state (id, {cols}, updated_at)"
-            f" VALUES ('main', {placeholders}, ?)"
-            f" ON CONFLICT(id) DO UPDATE SET {set_clause}, updated_at = ?",
-            [*vals, now, *vals, now],
-        )
-        self._db.connection.commit()
+        self._daemon_repo.update(**kwargs)
 
     def run(self) -> None:
         self._running = True
@@ -47,12 +38,9 @@ class ProactiveEngine:
         print(f"[daemon] Proactive engine started at {started_iso}")
         print(f"[daemon] Tick interval: {self._tick_interval}s")
 
-        if self._db is not None:
-            cur = self._db.connection.execute(
-                "SELECT status, crash_marker FROM daemon_state WHERE id = 'main'"
-            )
-            row = cur.fetchone()
-            if row and row["status"] == "running":
+        if self._daemon_repo is not None:
+            row = self._daemon_repo.get()
+            if row and row.get("status") == "running":
                 print("[daemon] WARNING: Previous instance may have crashed")
                 self._update_state(
                     status="running",
@@ -114,8 +102,10 @@ class ProactiveEngine:
 
     @staticmethod
     def load_status(db: Database) -> dict[str, Any]:
-        cur = db.connection.execute("SELECT * FROM daemon_state WHERE id = 'main'")
-        row = cur.fetchone()
+        repo = _DaemonStateRepository(db)
+        row = repo.get()
         if row is None:
             return {"status": "stopped", "started_at": None, "last_heartbeat": None}
-        return dict(row)
+        cur = db.connection.execute("SELECT * FROM daemon_state WHERE id = 'main'")
+        row = cur.fetchone()
+        return dict(row) if row else {"status": "stopped", "started_at": None, "last_heartbeat": None}

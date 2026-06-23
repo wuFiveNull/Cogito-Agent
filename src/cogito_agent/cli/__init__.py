@@ -27,38 +27,13 @@ def _run_migrate(args: argparse.Namespace) -> None:
 def _run_chat(args: argparse.Namespace) -> None:
     from .chat import run_cli
 
-    run_cli(db_path=args.db_path)
+    run_cli(db_path=args.db_path, connect_url=args.connect_url, standalone=args.standalone)
 
 
 def _run_replay(args: argparse.Namespace) -> None:
-    from cogito_agent.storage import Database
+    from .replay import run_trace_replay
 
-    from .replay import TraceInspector
-
-    db = Database(args.db_path)
-    db.initialize()
-    inspector = TraceInspector(db)
-
-    if args.action == "list":
-        traces = inspector.list_traces(workspace_id="*", limit=100)
-        if not traces:
-            print("No traces found.")
-            return
-        print(f"\nTraces ({len(traces)}):")
-        for t in traces:
-            tid = str(t.get("id", ""))[:16]
-            status = str(t.get("status", ""))
-            started = str(t.get("started_at", ""))[:19]
-            print(f"  {tid}  [{status}]  {started}")
-
-    elif args.action == "show":
-        trace = inspector.get_trace_full(args.trace_id)
-        if trace is None:
-            print(f"Trace '{args.trace_id}' not found.")
-            return
-        print(inspector.format_trace_detail(trace))
-
-    db.close()
+    run_trace_replay(args.action, args.trace_id or "", args.db_path)
 
 
 def _run_skill(args: argparse.Namespace) -> None:
@@ -263,6 +238,19 @@ def run_cli() -> None:
         "--db",
         dest="db_path",
         help="SQLite database path (default: ~/.cogito/cogito.db)",
+    )
+    chat_parser.add_argument(
+        "--connect",
+        dest="connect_url",
+        default=None,
+        help="Connect to a running cogito-console API (e.g. http://localhost:8765)",
+    )
+    chat_parser.add_argument(
+        "--standalone",
+        dest="standalone",
+        action="store_true",
+        default=False,
+        help="Force standalone mode (do not auto-connect to running console)",
     )
 
     replay_parser = sub.add_parser("replay", help="Inspect past traces")
@@ -604,10 +592,6 @@ def run_cli() -> None:
     mem_search.add_argument("query", help="Search query")
     mem_search.add_argument("--explain", action="store_true", help="Show detailed score breakdown")
     mem_sub.add_parser("review", help="Review pending candidates")
-    mem_accept = mem_sub.add_parser("accept", help="Accept a candidate")
-    mem_accept.add_argument("candidate_id", help="Candidate ID")
-    mem_reject = mem_sub.add_parser("reject", help="Reject a candidate")
-    mem_reject.add_argument("candidate_id", help="Candidate ID")
     mem_delete = mem_sub.add_parser("delete", help="Delete a memory")
     mem_delete.add_argument("memory_id", help="Memory ID")
     mem_pin = mem_sub.add_parser("pin", help="Pin a memory")
@@ -628,13 +612,6 @@ def run_cli() -> None:
     mem_merge.add_argument("source_memory_id", help="Source memory ID (will be archived)")
     mem_merge.add_argument("target_memory_id", help="Target memory ID (receives merged text)")
     mem_sub.add_parser("consolidate", help="Deduplicate memories")
-    mem_optimize = mem_sub.add_parser("optimize", help="Merge PENDING.md into MEMORY.md via LLM")
-    mem_optimize.add_argument(
-        "--workspace-path",
-        dest="workspace_path",
-        default=None,
-        help="Workspace filesystem path (default: ~/.cogito/workspace/<workspace-id>)",
-    )
 
     # Embeddings subcommands
     mem_emb = mem_sub.add_parser("embeddings", help="Manage memory embeddings")
@@ -796,11 +773,10 @@ def run_cli() -> None:
         )
     elif args.command == "backup":
         from cogito_agent.cli.backup import create_backup, restore_backup
-        from cogito_agent.governance import AuditLogger
+        from cogito_agent.application.audit import log_audit
 
         _adb = Database(args.db_path or db_path)
         _adb.initialize()
-        _aaudit = AuditLogger(_adb)
 
         if args.backup_action == "create":
             manifest = create_backup(
@@ -808,15 +784,10 @@ def run_cli() -> None:
                 db_path=args.db_path or db_path,
                 include_secrets=args.include_secrets,
             )
-            _aaudit.log(
-                actor_id="cli",
-                action="backup.create",
-                resource=f"backup:{manifest.get('path', '')}",
-                workspace_id="*",
-                decision="allow",
-                reason=f"size={manifest.get('size_bytes', 0)}",
+            log_audit(
+                _adb, "cli", "backup.create", f"backup:{manifest.get('path', '')}",
+                "*", decision="allow", reason=f"size={manifest.get('size_bytes', 0)}",
                 details=f'{{"include_secrets":{args.include_secrets}}}',
-                redact_details=True,
             )
             print(f"Backup created: {manifest['path']}")
             print(f"  Size: {manifest.get('size_bytes', 0)} bytes")
@@ -830,14 +801,10 @@ def run_cli() -> None:
                 db_path=args.db_path or db_path,
                 dry_run=args.dry_run,
             )
-            _aaudit.log(
-                actor_id="cli",
-                action="backup.restore",
-                resource=f"backup:{args.backup_path}",
-                workspace_id="*",
-                decision="allow" if not result.get("errors") else "error",
-                reason=f"dry_run={args.dry_run}, files={len(result.get('files_found', []))}",
-                redact_details=True,
+            log_audit(
+                _adb, "cli", "backup.restore", f"backup:{args.backup_path}",
+                "*", decision="allow" if not result.get("errors") else "deny",
+                reason=f"errors={len(result.get('errors', []))}",
             )
             if result.get("errors"):
                 for e in result["errors"]:
@@ -876,15 +843,13 @@ def run_cli() -> None:
         _eaudit = AuditLogger(Database(args.db_path or db_path))
         if export_action == "memories":
             from cogito_agent.cli.backup import export_data
+            from cogito_agent.application.audit import log_audit
 
             out = args.memories_out or "memories_export.json"
             result = export_data(out, db_path=args.db_path or db_path, sections=["memories"])
-            _eaudit.log(
-                actor_id="cli",
-                action="export.memories",
-                resource=f"file:{out}",
-                workspace_id="*",
-                decision="allow",
+            log_audit(
+                _udb, "cli", "export.memories", f"file:{out}",
+                "*", decision="allow",
                 reason=f"count={len(result.get('sections', {}).get('memories', []))}",
             )
             mem_cnt = len(result.get("sections", {}).get("memories", []))
@@ -1065,7 +1030,7 @@ def run_cli() -> None:
     elif args.command == "inbox":
         from cogito_agent.autonomy import NotificationGate as _NGate
         from cogito_agent.storage import Database as _InboxDb  # noqa: N814
-        from cogito_agent.trace.redaction import RedactionHelper
+        from cogito_agent.shared.redaction import RedactionHelper
 
         _idb = _InboxDb(db_path)
         _idb.initialize()
@@ -1208,26 +1173,16 @@ def run_cli() -> None:
                 print(_inspector.format_trace_detail(trace))
         _tdb.close()
     elif args.command == "audit":
-        from cogito_agent.storage import Database as _ADB  # noqa: N814
+        from cogito_agent.storage import Database as _ADB, AuditRepository
 
         _adb = _ADB(db_path)
         _adb.initialize()
+        _audit_repo = AuditRepository(_adb)
         ws_filter = args.ws_id
 
         if args.audit_action == "list":
-            if ws_filter == "*":
-                cur = _adb.connection.execute(
-                    "SELECT id, actor_id, action, resource, decision, created_at"
-                    " FROM audit_logs ORDER BY created_at DESC LIMIT 50"
-                )
-            else:
-                cur = _adb.connection.execute(
-                    "SELECT id, actor_id, action, resource, decision, created_at"
-                    " FROM audit_logs WHERE workspace_id = ?"
-                    " ORDER BY created_at DESC LIMIT 50",
-                    (ws_filter,),
-                )
-            rows = cur.fetchall()
+            rows = _audit_repo.list_by_filters(ws_filter) if ws_filter != "*" \
+                else _audit_repo.list_by_filters()
             if not rows:
                 print("  No audit logs found.")
             else:
@@ -1240,16 +1195,21 @@ def run_cli() -> None:
                     created = str(r["created_at"])[:19]
                     print(f"    {rid}  {actor}/{action}  [{decision}]  {created}")
         elif args.audit_action == "show":
-            cur = _adb.connection.execute("SELECT * FROM audit_logs WHERE id = ?", (args.audit_id,))
-            row = cur.fetchone()
+            row = _audit_repo.get_by_id(args.audit_id)
             if row is None:
                 print(f"  Audit log '{args.audit_id}' not found.")
             else:
-                for k, v in dict(row).items():
+                for k, v in row.items():
                     print(f"    {k}: {v}")
         _adb.close()
     elif args.command == "usage":
-        from cogito_agent.storage import Database as _UDB  # noqa: N814
+        from cogito_agent.storage import (
+            Database as _UDB,
+            AuditRepository,
+            ModelCallRepository,
+            ToolCallRepository,
+            TraceRepository,
+        )
 
         _udb = _UDB(db_path)
         _udb.initialize()
@@ -1261,41 +1221,15 @@ def run_cli() -> None:
             days = 0
         from datetime import UTC, datetime, timedelta
 
+        from cogito_agent.storage.repositories import MessageRepository
+
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
-        cur = _udb.connection.execute(
-            "SELECT COUNT(*) as cnt FROM traces WHERE started_at >= ?",
-            (cutoff,),
-        )
-        traces_cnt = cur.fetchone()["cnt"]
-
-        cur = _udb.connection.execute(
-            "SELECT COUNT(*) as cnt FROM model_calls mc"
-            " JOIN traces t ON mc.trace_id = t.id"
-            " WHERE t.started_at >= ?",
-            (cutoff,),
-        )
-        model_calls = cur.fetchone()["cnt"]
-
-        cur = _udb.connection.execute(
-            "SELECT COUNT(*) as cnt FROM tool_calls tc"
-            " JOIN traces t ON tc.trace_id = t.id"
-            " WHERE t.started_at >= ?",
-            (cutoff,),
-        )
-        tool_calls = cur.fetchone()["cnt"]
-
-        cur = _udb.connection.execute(
-            "SELECT COUNT(*) as cnt FROM messages WHERE created_at >= ?",
-            (cutoff,),
-        )
-        messages = cur.fetchone()["cnt"]
-
-        cur = _udb.connection.execute(
-            "SELECT COUNT(*) as cnt FROM audit_logs WHERE created_at >= ?",
-            (cutoff,),
-        )
-        audit_logs = cur.fetchone()["cnt"]
+        traces_cnt = TraceRepository(_udb).count_by_time_range(cutoff)
+        model_calls = ModelCallRepository(_udb).count_by_time_range(cutoff)
+        tool_calls = ToolCallRepository(_udb).count_by_time_range(cutoff)
+        messages = MessageRepository(_udb).count_by_time_range(cutoff)
+        audit_logs = AuditRepository(_udb).count_by_time_range(cutoff)
 
         print(f"  Usage summary (last {args.last_period}):")
         print(f"    traces:     {traces_cnt}")
@@ -1324,7 +1258,6 @@ def run_cli() -> None:
             _run_embeddings_rebuild,
             _run_embeddings_retry_failed,
             _run_embeddings_status,
-            _run_memory_accept,
             _run_memory_archive,
             _run_memory_consolidate,
             _run_memory_correct,
@@ -1332,9 +1265,7 @@ def run_cli() -> None:
             _run_memory_edit,
             _run_memory_list,
             _run_memory_merge,
-            _run_memory_optimize,
             _run_memory_pin,
-            _run_memory_reject,
             _run_memory_review,
             _run_memory_search,
             _run_memory_unarchive,
@@ -1345,8 +1276,6 @@ def run_cli() -> None:
             "list": _run_memory_list,
             "search": _run_memory_search,
             "review": _run_memory_review,
-            "accept": _run_memory_accept,
-            "reject": _run_memory_reject,
             "delete": _run_memory_delete,
             "pin": _run_memory_pin,
             "edit": _run_memory_edit,
@@ -1356,7 +1285,6 @@ def run_cli() -> None:
             "unpin": _run_memory_unpin,
             "merge": _run_memory_merge,
             "consolidate": _run_memory_consolidate,
-            "optimize": _run_memory_optimize,
         }
         if args.memory_action == "embeddings":
             emb_ns = argparse.Namespace(
@@ -1386,8 +1314,8 @@ def run_cli() -> None:
             else:
                 print(
                     "Usage: cogito memory"
-                    " list|search|review|accept|reject|delete|pin|edit|correct"
-                    "|archive|unarchive|unpin|merge|consolidate|optimize"
+                    " list|search|review|delete|pin|edit|correct"
+                    "|archive|unarchive|unpin|merge|consolidate"
                 )
     elif args.command == "secrets":
         from .secrets import (

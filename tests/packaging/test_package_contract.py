@@ -40,7 +40,6 @@ def test_builtin_skills_are_available() -> None:
         "daily_brief",
         "inbox_digest",
         "memory_consolidation",
-        "memory_optimizer",
         "project_status",
         "task_extraction",
         "trace_review",

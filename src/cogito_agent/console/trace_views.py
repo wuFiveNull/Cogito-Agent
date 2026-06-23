@@ -30,7 +30,7 @@ CONSOLE_WORKSPACE_ID = "default"
 
 
 def _get_db() -> _Database:
-    from cogito_agent.api.app import get_db as _get_shared_db
+    from cogito_agent.storage import get_db as _get_shared_db
 
     return _get_shared_db()
 
@@ -92,36 +92,23 @@ def _list_traces(
     if where_clauses:
         where = "WHERE " + " AND ".join(where_clauses)
 
-    sql = (
-        "SELECT t.*,"
-        " (SELECT COUNT(*) FROM spans s WHERE s.trace_id = t.id) AS span_count"
-        " FROM traces t"
-        f" {where}"
-        " ORDER BY t.started_at DESC LIMIT ?"
-    )
-    params.append(limit)
-    rows = db.connection.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    from cogito_agent.storage.repositories import TraceRepository
+
+    repo = TraceRepository(db)
+    rows = repo.list_by_filters(workspace_id, status=status, q=q, time_range=time_range, limit=limit)
+    # Add span_count for each trace
+    for r in rows:
+        r["span_count"] = len(repo.get_spans_by_trace(str(r["id"]))) if r.get("id") else 0
+    return rows
 
 
 def _trace_stats(workspace_id: str) -> dict[str, int]:
     db = _get_db()
-    cur = db.connection
-    wc = "WHERE workspace_id=?" if workspace_id != "*" else ""
-    params = (workspace_id,) if workspace_id != "*" else ()
-    total = cur.execute(f"SELECT COUNT(*) FROM traces {wc}", params).fetchone()[0]
-    ok = cur.execute(
-        f"SELECT COUNT(*) FROM traces {wc} AND status='completed'"
-        if wc
-        else "SELECT COUNT(*) FROM traces WHERE status='completed'",
-        params if wc else (),
-    ).fetchone()[0]
-    err = cur.execute(
-        f"SELECT COUNT(*) FROM traces {wc} AND status='error'"
-        if wc
-        else "SELECT COUNT(*) FROM traces WHERE status='error'",
-        params if wc else (),
-    ).fetchone()[0]
+    from cogito_agent.storage.repositories import TraceRepository
+    repo = TraceRepository(db)
+    total = repo.count_by_filters(workspace_id)
+    ok = repo.count_by_filters(workspace_id, status="completed")
+    err = repo.count_by_filters(workspace_id, status="error")
     return {"total": total, "completed": ok, "error": err}
 
 

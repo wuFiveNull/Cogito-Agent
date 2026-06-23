@@ -24,7 +24,7 @@ WORKSPACE_ID = "default"
 
 
 def _service() -> RunApplicationService:
-    from cogito_agent.api.app import get_db
+    from cogito_agent.storage import get_db
 
     db = get_db()
 

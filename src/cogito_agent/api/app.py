@@ -25,6 +25,7 @@ from cogito_agent.application import (
     ChatApplicationService,
     MCPApplicationService,
     WorkspaceApplicationService,
+    build_agent_loop,
     build_runtime_kernel,
     default_workspace_path,
 )
@@ -59,6 +60,9 @@ from cogito_agent.storage.repositories import (
 )
 from cogito_agent.trace.redaction import RedactionHelper
 from cogito_agent.version import APP_VERSION
+
+# ── Message queue / AgentLoop ─────────────────────────────────────────
+from cogito_agent.queue import AgentLoop, InboundMessage, MessageQueue
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +128,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(cfg.logging)
     get_db()
     get_kernel()
+    # Start the shared AgentLoop (MessageQueue consumer)
+    _start_agent_loop()
     yield
+    # Graceful shutdown
+    _stop_agent_loop()
 
 
 app = FastAPI(title="Cogito-Agent API", version=APP_VERSION, lifespan=lifespan)
@@ -390,10 +398,18 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 
-_db: Database | None = None
 _kernel: RuntimeKernel | None = None
+_agent_loop: AgentLoop | None = None
+_agent_loop_task: asyncio.Task[None] | None = None
 _mcp_manager: MCPServerManager | None = None
 _capability_registry: CapabilityRegistry | None = None
+
+
+def get_db() -> Database:
+    """Delegate to the shared database singleton in ``cogito_agent.storage``."""
+    from cogito_agent.storage import get_db as _storage_get_db
+
+    return _storage_get_db()
 
 
 def get_capability_registry() -> CapabilityRegistry:
@@ -419,16 +435,16 @@ def get_mcp_service() -> MCPApplicationService:
 
 def reset_application_state_for_restore() -> None:
     """Close live adapters before replacing the local SQLite database."""
-    global _db, _kernel, _mcp_manager, _capability_registry
+    global _kernel, _mcp_manager, _capability_registry
     if _mcp_manager is not None:
         for server in _mcp_manager.list_servers():
             _mcp_manager.remove_server(str(server.get("name", "")))
-    if _db is not None:
-        _db.close()
+    from cogito_agent.storage import reset_db as _storage_reset_db
+
+    _storage_reset_db()
     _kernel = None
     _mcp_manager = None
     _capability_registry = None
-    _db = None
 
 
 class ContentItem(BaseModel):
@@ -543,19 +559,6 @@ class SearchExplainRequest(BaseModel):
     force_mode: str | None = None
 
 
-def get_db() -> Database:
-    global _db
-    if _db is None:
-        db_path = os.environ.get("COGITO_DB_PATH", ":memory:")
-        if db_path != ":memory:":
-            db_path = str(Path(db_path).expanduser())
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        _db = Database(db_path)
-        _db.initialize()
-        _db.migrate()
-    return _db
-
-
 def get_kernel() -> RuntimeKernel:
     global _kernel
     if _kernel is None:
@@ -615,6 +618,45 @@ def get_chat_service() -> ChatApplicationService:
     return ChatApplicationService(get_kernel())
 
 
+# ── AgentLoop (message queue consumer) ────────────────────────────────
+
+
+def get_agent_loop() -> AgentLoop | None:
+    global _agent_loop
+    return _agent_loop
+
+
+def get_message_queue() -> MessageQueue | None:
+    loop = get_agent_loop()
+    return loop._queue if loop else None
+
+
+def _start_agent_loop() -> None:
+    """Create and start the background AgentLoop (non-blocking)."""
+    global _agent_loop, _agent_loop_task
+    if _agent_loop is not None:
+        return  # already started
+
+    db = get_db()
+    # Use the already-created kernel singleton
+    kernel = get_kernel()
+    loop = build_agent_loop(db, kernel=kernel)
+    _agent_loop = loop
+    _agent_loop_task = asyncio.create_task(loop.start())
+    logger.info("AgentLoop started (shared kernel)")
+
+
+def _stop_agent_loop() -> None:
+    """Gracefully stop the background AgentLoop."""
+    global _agent_loop_task
+    if _agent_loop is not None:
+        _agent_loop.stop()
+    if _agent_loop_task is not None:
+        _agent_loop_task.cancel()
+        _agent_loop_task = None
+    logger.info("AgentLoop stopped")
+
+
 def get_approval_service() -> ApprovalApplicationService:
     db = get_db()
     return ApprovalApplicationService(ApprovalRepository(db), AuditLogger(db))
@@ -631,9 +673,8 @@ def get_workspace_service() -> WorkspaceApplicationService:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, request: Request) -> ChatResponse:
+async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     db = get_db()
-    chat_service = get_chat_service()
     sess_repo = SessionRepository(db)
     sess = sess_repo.get_by_id(req.session_id, req.workspace_id)
     if sess is None:
@@ -654,6 +695,41 @@ def chat(req: ChatRequest, request: Request) -> ChatResponse:
     if req.preferred_role:
         payload["_preferred_role"] = req.preferred_role
 
+    # ── Queue path (AgentLoop active) ─────────────────────────────
+    loop = get_agent_loop()
+    if loop is not None and loop.is_running:
+        inbound = InboundMessage(
+            channel="web",
+            session_id=req.session_id,
+            workspace_id=req.workspace_id,
+            content=text_projection or "",
+            media=(
+                [p.model_dump(exclude_none=True) for p in content_parts]
+                if content_parts else None
+            ),
+            metadata={
+                "actor_id": "user",
+                "request_id": request.state.request_id,
+            },
+        )
+        try:
+            outbound = await loop._queue.publish_and_wait(inbound)
+        except Exception as exc:
+            return _error_response(
+                "PROCESSING_ERROR",
+                str(exc),
+                request.state.request_id,
+                status_code=500,
+            )
+        return ChatResponse(
+            output=outbound.content,
+            error="",
+            session_id=req.session_id,
+            state="completed",
+        )
+
+    # ── Direct path (fallback when AgentLoop not running) ────────
+    chat_service = get_chat_service()
     event = RuntimeEvent(
         workspace_id=req.workspace_id,
         session_id=req.session_id,
@@ -743,18 +819,16 @@ def get_trace_full(trace_id: str, request: Request) -> dict[str, object]:
 @app.get("/traces/{trace_id}")
 def get_trace(trace_id: str, request: Request) -> dict[str, object]:
     db = get_db()
-    cur = db.connection.execute("SELECT * FROM traces WHERE id = ?", (trace_id,))
-    row = cur.fetchone()
-    if row is None:
+    from cogito_agent.storage.repositories import TraceRepository
+    trace = TraceRepository(db).get_by_id(trace_id)
+    if trace is None:
         return _error_response(
             "NOT_FOUND",
             "Trace not found",
             request.state.request_id,
             status_code=404,
         )
-    trace = dict(row)
-    cur = db.connection.execute("SELECT * FROM spans WHERE trace_id = ?", (trace_id,))
-    trace["spans"] = [dict(r) for r in cur.fetchall()]
+    trace["spans"] = TraceRepository(db).get_spans_by_trace(trace_id)
     return trace
 
 
@@ -1155,10 +1229,10 @@ def list_memories(
     if memory_type:
         repo = MemoryEditRepository(db)
         return repo.list_by_type(workspace_id, memory_type, limit)
-    from cogito_agent.memory import MemoryRetriever
+    from cogito_agent.storage.repositories import MemoryRepository
 
-    retriever = MemoryRetriever(db)
-    return retriever.list_recent(workspace_id, limit)
+    retriever = MemoryRepository(db)
+    return retriever.list_by_workspace(workspace_id, limit)
 
 
 @app.put("/memories/{mid}")
@@ -1325,8 +1399,10 @@ def update_workspace_settings(wid: str, req: WorkspaceUpdateRequest) -> dict[str
 @app.get("/export")
 def export_workspace(workspace_id: str, request: Request) -> dict[str, object]:
     db = get_db()
-    cur = db.connection.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
-    ws = cur.fetchone()
+    from cogito_agent.storage.repositories import (
+        MemoryRepository, SessionRepository, TraceRepository, WorkspaceRepository,
+    )
+    ws = WorkspaceRepository(db).get_by_id(workspace_id)
     if ws is None:
         return _error_response(
             "NOT_FOUND",
@@ -1336,25 +1412,11 @@ def export_workspace(workspace_id: str, request: Request) -> dict[str, object]:
         )
 
     data: dict[str, object] = {
-        "workspace": dict(ws),
-        "sessions": [],
-        "memories": [],
-        "traces": [],
+        "workspace": ws,
+        "sessions": SessionRepository(db).list_by_workspace(workspace_id),
+        "memories": MemoryRepository(db).list_active_or_archived(workspace_id, limit=0),
+        "traces": TraceRepository(db).list_by_workspace(workspace_id, limit=0),
     }
-    cur = db.connection.execute(
-        "SELECT * FROM sessions WHERE workspace_id = ? AND deleted_at IS NULL",
-        (workspace_id,),
-    )
-    data["sessions"] = [dict(r) for r in cur.fetchall()]
-
-    cur = db.connection.execute(
-        "SELECT * FROM memories WHERE workspace_id = ? AND deleted_at IS NULL",
-        (workspace_id,),
-    )
-    data["memories"] = [dict(r) for r in cur.fetchall()]
-
-    cur = db.connection.execute("SELECT * FROM traces WHERE workspace_id = ?", (workspace_id,))
-    data["traces"] = [dict(r) for r in cur.fetchall()]
 
     return _redact_dict(data, RedactionHelper())
 
@@ -1647,13 +1709,12 @@ def send_meme_api(
 
 
 def run_api(host: str = "127.0.0.1", port: int = 8000) -> None:
-    global _db
-
     import uvicorn
 
-    if _db is None:
-        config = load_config()
-        db_path = str(Path(config.storage.db_path).expanduser())
-        os.environ["COGITO_DB_PATH"] = db_path
-        get_db()
+    from cogito_agent.config.loader import load_config
+
+    config = load_config()
+    db_path = str(Path(config.storage.db_path).expanduser())
+    os.environ["COGITO_DB_PATH"] = db_path
+    get_db()
     uvicorn.run(app, host=host, port=port)

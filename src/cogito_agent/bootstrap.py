@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from cogito_agent.application.runtime_factory import default_workspace_path
 from cogito_agent.context import ContextEngine
 from cogito_agent.embedding.interface import EmbeddingProvider
 from cogito_agent.embedding.service import MemoryEmbeddingIndexService
-from cogito_agent.memory import MemoryApplicationService, MemoryRetriever
+from cogito_agent.memory import MemoryApplicationService
 from cogito_agent.retrieval import MemoryRetrievalService
 from cogito_agent.retrieval.dense import DenseMemoryRetriever
 from cogito_agent.retrieval.fusion import CandidateFusion
@@ -23,7 +22,6 @@ class ApplicationServices:
     embedding_index: MemoryEmbeddingIndexService | None
     memory_retrieval: MemoryRetrievalService
     memory_application: MemoryApplicationService
-    memory_retriever_compat: MemoryRetriever
     context_engine: ContextEngine
 
 
@@ -43,7 +41,6 @@ def build_application_services(
         create_embedding_provider_from_config as _make_provider,
     )
     from cogito_agent.governance import AuditLogger
-    from cogito_agent.retrieval import MemoryRetrievalService
 
     # 1. Embedding provider
     if embedding_provider is None and config is not None:
@@ -81,10 +78,7 @@ def build_application_services(
         retrieval_config=retrieval_cfg,
     )
 
-    # 4. Compat layer (for legacy callers)
-    memory_retriever_compat = MemoryRetriever(db, service=memory_retrieval)
-
-    # 5. Memory application service (write operations)
+    # 4. Memory application service (write operations)
     audit = AuditLogger(db)
     memory_application = MemoryApplicationService(
         db=db,
@@ -92,10 +86,10 @@ def build_application_services(
         audit=audit,
     )
 
-    # 6. Context engine
+    # 5. Context engine
     max_tokens = 4096
-    if config is not None and hasattr(config, "dynamic_token_budget"):
-        max_tokens = getattr(config, "dynamic_token_budget", 4096)
+    if retrieval_cfg is not None:
+        max_tokens = getattr(retrieval_cfg, "dynamic_token_budget", 4096)
     context_engine = ContextEngine(
         total_token_budget=max_tokens,
         trace_sink=SqliteContextTraceSink(db),
@@ -107,6 +101,5 @@ def build_application_services(
         embedding_index=embedding_index,
         memory_retrieval=memory_retrieval,
         memory_application=memory_application,
-        memory_retriever_compat=memory_retriever_compat,
         context_engine=context_engine,
     )

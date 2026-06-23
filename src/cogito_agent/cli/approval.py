@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cogito_agent.governance import AuditLogger
 from cogito_agent.skill import SkillRunner
 from cogito_agent.storage import Database
 from cogito_agent.storage.repositories import ApprovalRepository
-from cogito_agent.trace import RedactionHelper
+from cogito_agent.shared.redaction import RedactionHelper
 
 
 def _run_approval_list(args: Any) -> None:
@@ -20,30 +19,8 @@ def _run_approval_list(args: Any) -> None:
     status = getattr(args, "status", "pending")
     workspace_id = getattr(args, "workspace_id", "*")
 
-    if status == "all":
-        if workspace_id == "*":
-            approvals = repo.list_by_workspace("*")
-        else:
-            approvals = repo.list_by_workspace(workspace_id)
-    elif status == "pending":
-        if workspace_id == "*":
-            approvals = repo.list_pending("*")
-        else:
-            approvals = repo.list_pending(workspace_id)
-    else:
-        if workspace_id == "*":
-            cur = db.connection.execute(
-                "SELECT * FROM approval_records WHERE status = ? ORDER BY created_at DESC",
-                (status,),
-            )
-        else:
-            sql = (
-                "SELECT * FROM approval_records"
-                " WHERE workspace_id = ? AND status = ?"
-                " ORDER BY created_at DESC"
-            )
-            cur = db.connection.execute(sql, (workspace_id, status))
-        approvals = [dict(r) for r in cur.fetchall()]
+    ws = workspace_id if workspace_id != "*" else ""
+    approvals = repo.list_by_filters(ws, status=status)
 
     if not approvals:
         print(f"  No {status} approvals found.")
@@ -107,53 +84,46 @@ def _run_approval_approve(args: Any) -> None:
         db.close()
         return
 
-    audit = AuditLogger(db)
+    from cogito_agent.application.audit import log_audit
     result = repo.resolve(args.approval_id, "approved", "cli")
     if result:
         print(f"  Approved: {args.approval_id}")
-        audit.log(
-            actor_id="cli",
-            action="approval.approve",
-            resource=f"approval:{args.approval_id}",
-            workspace_id=str(approval.get("workspace_id", "")),
-            decision="allow",
-            reason="user approved via CLI",
+        log_audit(
+            db, "cli", "approval.approve", f"approval:{args.approval_id}",
+            str(approval.get("workspace_id", "")),
+            decision="allow", reason="user approved via CLI",
         )
-        cur = db.connection.execute(
-            "SELECT id FROM skill_run_logs"
-            " WHERE resume_data_json IS NOT NULL AND status = 'pending_approval'"
-            " ORDER BY created_at DESC LIMIT 20"
-        )
-        found = False
-        for row in cur.fetchall():
-            run_id = str(row["id"])
-            run_cur = db.connection.execute(
-                "SELECT resume_data_json FROM skill_run_logs WHERE id = ?", (run_id,)
-            )
-            run_row = run_cur.fetchone()
-            if run_row and run_row["resume_data_json"]:
-                try:
-                    step_logs_cur = db.connection.execute(
-                        "SELECT step_logs_json FROM skill_run_logs WHERE id = ?", (run_id,)
-                    )
-                    sl_row = step_logs_cur.fetchone()
-                    if sl_row:
-                        sl_data = json.loads(str(sl_row["step_logs_json"]))
-                        for step_log in sl_data.get("step_logs", []):
-                            if step_log.get("output") == args.approval_id:
-                                print(f"  Next: Run `cogito approval resume {run_id}` to continue.")
-                                found = True
-                                break
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    pass
-            if found:
-                break
-
+        found = _notify_matching_runs(db, args.approval_id, "approved")
         if not found:
             print("  Approved. Run `cogito approval resume <skill_run_id>` to continue.")
     else:
         print(f"  Failed to approve '{args.approval_id}'.")
     db.close()
+
+
+def _notify_matching_runs(db: Database, approval_id: str, verb: str) -> bool:
+    """Notify user about skill runs matching the given approval_id. Returns True if a match was found."""
+    from cogito_agent.skill import SkillRunner
+
+    runner = SkillRunner(db)
+    pending = runner.find_pending_approval_runs()
+    found = False
+    for row in pending:
+        run_id = str(row["id"])
+        log = runner.get_skill_run_log(run_id)
+        if log and log.get("resume_data_json"):
+            try:
+                sl_data = json.loads(str(log.get("step_logs_json", "{}")))
+                for step_log in sl_data.get("step_logs", []):
+                    if step_log.get("output") == approval_id:
+                        print(f"  Next: Run `cogito approval resume {run_id}` to {verb}.")
+                        found = True
+                        break
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+        if found:
+            break
+    return found
 
 
 def _run_approval_reject(args: Any) -> None:
@@ -173,47 +143,17 @@ def _run_approval_reject(args: Any) -> None:
         db.close()
         return
 
-    audit = AuditLogger(db)
+    from cogito_agent.application.audit import log_audit
     result = repo.resolve(args.approval_id, "rejected", "cli")
     if result:
         print(f"  Rejected: {args.approval_id}")
-        audit.log(
-            actor_id="cli",
-            action="approval.reject",
-            resource=f"approval:{args.approval_id}",
-            workspace_id=str(approval.get("workspace_id", "")),
-            decision="deny",
-            reason="user rejected via CLI",
+        log_audit(
+            db, "cli", "approval.reject", f"approval:{args.approval_id}",
+            str(approval.get("workspace_id", "")),
+            decision="deny", reason="user rejected via CLI",
         )
-        cur = db.connection.execute(
-            "SELECT id FROM skill_run_logs"
-            " WHERE resume_data_json IS NOT NULL AND status = 'pending_approval'"
-            " ORDER BY created_at DESC LIMIT 20"
-        )
-        found = False
-        for row in cur.fetchall():
-            run_id = str(row["id"])
-            step_logs_cur = db.connection.execute(
-                "SELECT step_logs_json FROM skill_run_logs WHERE id = ?", (run_id,)
-            )
-            sl_row = step_logs_cur.fetchone()
-            if sl_row:
-                try:
-                    sl_data = json.loads(str(sl_row["step_logs_json"]))
-                    for step_log in sl_data.get("step_logs", []):
-                        if step_log.get("output") == args.approval_id:
-                            print(
-                                f"  Next: Run `cogito approval resume {run_id}`"
-                                " to finalize rejection."
-                            )
-                            found = True
-                            break
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    pass
-            if found:
-                break
-
-        if not found:
+        found2 = _notify_matching_runs(db, args.approval_id, "finalize rejection")
+        if not found2:
             print("  Rejected. Run `cogito approval resume <skill_run_id>` to finalize.")
     else:
         print(f"  Failed to reject '{args.approval_id}'.")
@@ -226,28 +166,26 @@ def _run_approval_resume(args: Any) -> None:
     db.initialize()
     db.migrate()
 
-    cur = db.connection.execute(
-        "SELECT resume_data_json, step_logs_json, status FROM skill_run_logs WHERE id = ?",
-        (args.skill_run_id,),
-    )
-    row = cur.fetchone()
-    if row is None:
+    from cogito_agent.skill import SkillRunner
+    runner = SkillRunner(db)
+    log = runner.get_skill_run_log(args.skill_run_id)
+    if log is None:
         print(f"  Skill run '{args.skill_run_id}' not found.")
         db.close()
         return
 
-    if row["status"] != "pending_approval":
-        print(f"  Skill run is '{row['status']}', not pending_approval. Cannot resume.")
+    if log["status"] != "pending_approval":
+        print(f"  Skill run is '{log['status']}', not pending_approval. Cannot resume.")
         db.close()
         return
 
-    if not row["resume_data_json"]:
+    if not log.get("resume_data_json"):
         print(f"  Skill run '{args.skill_run_id}' has no resume data.")
         db.close()
         return
 
     try:
-        step_logs = json.loads(str(row["step_logs_json"]))
+        step_logs = json.loads(str(log.get("step_logs_json", "{}")))
         approval_id = ""
         for step_log in step_logs.get("step_logs", []):
             if step_log.get("status") == "pending_approval":
@@ -282,12 +220,10 @@ def _run_approval_resume(args: Any) -> None:
             st = sl.get("status", "")
             print(f"    - {sid}: {st}")
 
-        audit = AuditLogger(db)
-        audit.log(
-            actor_id="cli",
-            action="approval.resume",
-            resource=f"skill_run:{args.skill_run_id}",
-            workspace_id=str(approval.get("workspace_id", "")),
+        from cogito_agent.application.audit import log_audit
+        log_audit(
+            db, "cli", "approval.resume", f"skill_run:{args.skill_run_id}",
+            str(approval.get("workspace_id", "")),
             decision="allow" if result.status == "completed" else "deny",
             reason=f"skill run resumed with status {result.status}",
         )

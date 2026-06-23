@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import uuid
@@ -30,12 +29,9 @@ CONSOLE_ACTOR = "console"
 
 
 def _get_db():
-    from cogito_agent.api.app import get_db
+    from cogito_agent.storage import get_db
     return get_db()
 
-
-def _content_id(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 
 # ─── Stats ────────────────────────────────────────────────────────────
@@ -44,21 +40,12 @@ def _content_id(content: str) -> str:
 def _mem_stats(workspace_id: str) -> dict[str, int]:
     try:
         db = _get_db()
-        v2_count = db.connection.execute(
-            "SELECT COUNT(*) as c FROM memory_items WHERE workspace_id=? AND status='active'"
-            " AND memory_type != '_recent_context'",
-            (workspace_id,),
-        ).fetchone()["c"]
-        old_count = db.connection.execute(
-            "SELECT COUNT(*) as c FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
-            " AND archived_at IS NULL",
-            (workspace_id,),
-        ).fetchone()["c"]
-        archived = db.connection.execute(
-            "SELECT COUNT(*) as c FROM memories WHERE workspace_id=? AND archived_at IS NOT NULL"
-            " AND deleted_at IS NULL",
-            (workspace_id,),
-        ).fetchone()["c"]
+        from cogito_agent.storage.repositories import MemoryItemRepository, MemoryRepository
+        v2_repo = MemoryItemRepository(db)
+        old_repo = MemoryRepository(db)
+        v2_count = v2_repo.count_active(workspace_id, exclude_type="_recent_context")
+        old_count = old_repo.count_active(workspace_id)
+        archived = old_repo.count_archived(workspace_id)
         return {
             "total": v2_count + old_count + archived,
             "pending": 0,
@@ -83,22 +70,12 @@ def _list_all(
     items: list[dict[str, object]] = []
     try:
         db = _get_db()
+        from cogito_agent.storage.repositories import MemoryItemRepository, MemoryRepository
+        v2_repo = MemoryItemRepository(db)
+        old_repo = MemoryRepository(db)
 
         # Memory v2 items
-        sql = (
-            "SELECT id, summary as text, memory_type as type, reinforcement,"
-            " emotional_weight, created_at, updated_at FROM memory_items"
-            " WHERE workspace_id=? AND status='active' AND memory_type != '_recent_context'"
-        )
-        params: list[Any] = [workspace_id]
-        if type_:
-            sql += " AND memory_type=?"
-            params.append(type_)
-        if q:
-            sql += " AND summary LIKE ?"
-            params.append(f"%{q}%")
-        sql += " ORDER BY updated_at DESC"
-        for row in db.connection.execute(sql, params).fetchall():
+        for row in v2_repo.list_active_with_filters(workspace_id, memory_type=type_, q=q):
             d = dict(row)
             d["id"] = str(d["id"])
             d["section"] = d.get("type", "general")
@@ -108,25 +85,9 @@ def _list_all(
             items.append(d)
 
         # Legacy memories table
-        sql2 = (
-            "SELECT id, text, type, confidence, created_at, updated_at, archived_at"
-            " FROM memories WHERE workspace_id=? AND deleted_at IS NULL"
-        )
-        params2: list[Any] = [workspace_id]
-        if type_:
-            sql2 += " AND type=?"
-            params2.append(type_)
-        if archived_filter == "no":
-            sql2 += " AND archived_at IS NULL"
-        elif archived_filter == "yes":
-            sql2 += " AND archived_at IS NOT NULL"
-        if q:
-            sql2 += " AND (text LIKE ? OR summary LIKE ?)"
-            like = f"%{q}%"
-            params2.append(like)
-            params2.append(like)
-        sql2 += " ORDER BY created_at DESC"
-        for row in db.connection.execute(sql2, params2).fetchall():
+        for row in old_repo.list_active_or_archived(
+            workspace_id, memory_type=type_, q=q, archived_filter=archived_filter,
+        ):
             d = dict(row)
             d["id"] = str(d["id"])
             d["section"] = d.get("type", "general")
@@ -142,24 +103,16 @@ def _get_one(id: str, workspace_id: str) -> dict[str, object] | None:
     """Look up a memory by id from memory_items or memories table."""
     try:
         db = _get_db()
-        row = db.connection.execute(
-            "SELECT id, summary as text, memory_type as type,"
-            " reinforcement, emotional_weight, created_at FROM memory_items"
-            " WHERE id=? AND workspace_id=? AND status='active'",
-            (id, workspace_id),
-        ).fetchone()
-        if row:
-            d = dict(row)
-            d["section"] = d.get("type", "general")
+        from cogito_agent.storage.repositories import MemoryItemRepository, MemoryRepository
+        item = MemoryItemRepository(db).get_by_id(id, workspace_id)
+        if item:
+            d = dict(item)
+            d["section"] = d.get("memory_type", "general")
             d["status"] = "active"
             return d
-        row = db.connection.execute(
-            "SELECT id, text, type, confidence, created_at, archived_at"
-            " FROM memories WHERE id=? AND workspace_id=? AND deleted_at IS NULL",
-            (id, workspace_id),
-        ).fetchone()
-        if row:
-            d = dict(row)
+        item = MemoryRepository(db).get_by_id(id, workspace_id)
+        if item:
+            d = dict(item)
             d["section"] = d.get("type", "general")
             d["status"] = "archived" if d.get("archived_at") else "active"
             return d
@@ -177,12 +130,10 @@ def _redact_item(item: dict[str, object]) -> dict[str, object]:
 
 def _audit_log(actor: str, action: str, resource: str, workspace_id: str,
                details: dict[str, object] | None = None) -> None:
-    from cogito_agent.governance.audit import AuditLogger
-    AuditLogger(_get_db()).log(
-        actor_id=actor, action=action, resource=resource,
-        workspace_id=workspace_id,
+    from cogito_agent.application.audit import log_audit
+    log_audit(
+        _get_db(), actor, action, resource, workspace_id,
         details=json.dumps(details or {}, default=str),
-        redact_details=True,
     )
 
 
@@ -232,9 +183,9 @@ async def memory_detail(request: Request, id: str) -> HTMLResponse:
 async def memory_edit(request: Request, memory_id: str, text: str = Form(...)) -> HTMLResponse:
     rid = str(uuid.uuid4())
     try:
-        from cogito_agent.memory.application import MemoryApplicationService
         from cogito_agent.governance import AuditLogger
-        svc = MemoryApplicationService(_get_db(), audit=AuditLogger(_get_db()))
+        from cogito_agent.memory.application import MemoryApplicationService
+        svc = MemoryApplicationService(_get_db())
         ok = svc.edit_memory(memory_id, CONSOLE_WORKSPACE_ID, text, actor_id=CONSOLE_ACTOR)
         if not ok:
             return _error_partial(request, "Memory not found", rid)
@@ -251,9 +202,9 @@ async def memory_edit(request: Request, memory_id: str, text: str = Form(...)) -
 async def memory_archive(request: Request, memory_id: str) -> HTMLResponse:
     rid = str(uuid.uuid4())
     try:
-        from cogito_agent.memory.application import MemoryApplicationService
         from cogito_agent.governance import AuditLogger
-        svc = MemoryApplicationService(_get_db(), audit=AuditLogger(_get_db()))
+        from cogito_agent.memory.application import MemoryApplicationService
+        svc = MemoryApplicationService(_get_db())
         ok = svc.archive_memory(memory_id, CONSOLE_WORKSPACE_ID, actor_id=CONSOLE_ACTOR)
         if not ok:
             return _error_partial(request, "Memory not found", rid)
@@ -270,9 +221,9 @@ async def memory_archive(request: Request, memory_id: str) -> HTMLResponse:
 async def memory_delete(request: Request, memory_id: str) -> HTMLResponse:
     rid = str(uuid.uuid4())
     try:
-        from cogito_agent.memory.application import MemoryApplicationService
         from cogito_agent.governance import AuditLogger
-        svc = MemoryApplicationService(_get_db(), audit=AuditLogger(_get_db()))
+        from cogito_agent.memory.application import MemoryApplicationService
+        svc = MemoryApplicationService(_get_db())
         ok = svc.soft_delete_memory(memory_id, CONSOLE_WORKSPACE_ID, actor_id=CONSOLE_ACTOR)
         if not ok:
             return _error_partial(request, "Memory not found", rid)

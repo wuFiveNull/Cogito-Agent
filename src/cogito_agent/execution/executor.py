@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Callable
@@ -88,6 +89,8 @@ class ArtifactWriter(Protocol):
 class GovernedCapabilityExecutor:
     """The single governed entry point for capability side effects."""
 
+    _MAX_REPEAT = 3  # consecutive identical calls before blocking
+
     def __init__(
         self,
         registry: CapabilityRegistry,
@@ -110,6 +113,8 @@ class GovernedCapabilityExecutor:
         self._artifact_writer = artifact_writer
         self._offload_threshold = max(1000, offload_threshold_chars)
         self._sleep = sleep
+        self._last_call: tuple[str, str] | None = None  # (capability_name, arg_hash)
+        self._repeat_count = 0
 
     def execute(self, request: CapabilityExecutionRequest) -> CapabilityExecutionResult:
         manifest = self._registry.get_manifest(request.capability_name)
@@ -133,6 +138,26 @@ class GovernedCapabilityExecutor:
                 decision=DecisionType.deny.value,
                 reason="; ".join(findings),
                 guardian_findings=findings,
+            )
+            self._record(request, result)
+            return result
+
+        # Tool-loop guard: detect consecutive identical calls
+        arg_hash = _arg_hash(request.arguments)
+        current_call = (request.capability_name, arg_hash)
+        if current_call == self._last_call:
+            self._repeat_count += 1
+        else:
+            self._repeat_count = 0
+        self._last_call = current_call
+        if self._repeat_count >= self._MAX_REPEAT:
+            result = CapabilityExecutionResult(
+                status="denied",
+                decision=DecisionType.deny.value,
+                reason=(
+                    f"Tool loop guard: {request.capability_name} "
+                    f"called with identical arguments {self._MAX_REPEAT} times consecutively"
+                ),
             )
             self._record(request, result)
             return result
@@ -321,3 +346,9 @@ class GovernedCapabilityExecutor:
                     }
                 ),
             )
+
+
+def _arg_hash(arguments: dict[str, object]) -> str:
+    """Return a deterministic hash of tool arguments for loop detection."""
+    raw = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
